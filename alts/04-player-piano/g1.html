@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Hoffmann Upright — A Parlour at Dusk</title>
+<style>
+  :root{ --gold:#c9a961; --gold-hi:#f4d67c; --ink:#0d0a08; }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ width:100%; height:100%; overflow:hidden; background:#060504; }
+  #app{ position:fixed; inset:0; }
+  canvas{ display:block; }
+
+  .vignette{
+    position:fixed; inset:0; pointer-events:none; z-index:5;
+    background:radial-gradient(ellipse at 50% 42%, rgba(0,0,0,0) 46%, rgba(0,0,0,.42) 82%, rgba(0,0,0,.78) 100%);
+  }
+  .ui{ position:fixed; z-index:10; font-family:Georgia,'Times New Roman',serif; color:var(--gold); }
+  #title{
+    top:18px; left:24px; pointer-events:none;
+    text-shadow:0 2px 12px #000, 0 0 40px rgba(201,169,97,.25);
+  }
+  #title h1{
+    font-size:19px; letter-spacing:.32em; font-variant:small-caps; font-weight:400;
+    color:var(--gold-hi); border-bottom:1px solid rgba(201,169,97,.45); padding-bottom:6px;
+  }
+  #title p{ font-size:11px; letter-spacing:.18em; opacity:.75; margin-top:6px; font-style:italic; }
+
+  #help{
+    bottom:16px; left:50%; transform:translateX(-50%);
+    font-size:11.5px; letter-spacing:.08em; white-space:nowrap;
+    background:rgba(10,8,6,.62); border:1px solid rgba(201,169,97,.35);
+    border-radius:4px; padding:8px 18px; backdrop-filter:blur(6px);
+    color:#d8c690; text-shadow:0 1px 2px #000;
+  }
+  #help b{ color:var(--gold-hi); font-weight:600; }
+
+  #stats{
+    bottom:16px; left:24px; font-size:11px; letter-spacing:.12em;
+    background:rgba(10,8,6,.62); border:1px solid rgba(201,169,97,.3);
+    border-radius:4px; padding:8px 14px; line-height:1.7; color:#cbb87e;
+  }
+  #stats span{ color:var(--gold-hi); }
+
+  #recordBtn{
+    top:20px; right:24px; cursor:pointer; user-select:none;
+    font-family:Georgia,serif; font-size:12px; letter-spacing:.22em; font-variant:small-caps;
+    color:#f6e3b0; background:linear-gradient(180deg,#3a2b14,#241809);
+    border:1px solid var(--gold); border-radius:4px; padding:11px 20px 11px 34px;
+    position:fixed; transition:all .25s ease; box-shadow:0 4px 18px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,220,150,.25);
+  }
+  #recordBtn::before{
+    content:''; position:absolute; left:14px; top:50%; transform:translateY(-50%);
+    width:11px; height:11px; border-radius:50%; background:#c0392b;
+    box-shadow:0 0 8px #e74c3c; animation:pulse 1.6s infinite;
+  }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  #recordBtn:hover{ background:linear-gradient(180deg,#4d3a1c,#2e1f0e); box-shadow:0 4px 26px rgba(201,169,97,.35), inset 0 1px 0 rgba(255,220,150,.35); }
+  #recordBtn.busy{ pointer-events:none; opacity:.6; border-color:#8a6a2a; }
+  #recordBtn.busy::before{ background:#e67e22; box-shadow:0 0 12px #f39c12; animation:pulse .5s infinite; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div class="vignette"></div>
+
+<div class="ui" id="title">
+  <h1>The Hoffmann Upright</h1>
+  <p>No. 2417 &nbsp;·&nbsp; a pianola plays &nbsp;·&nbsp; parlour at dusk</p>
+</div>
+
+<div class="ui" id="stats">
+  TEMPO &nbsp;<span id="tempoVal">116</span> ♩&nbsp;&nbsp;|&nbsp;&nbsp;<span id="playState">PLAYING</span><br>
+  NOTES PLAYED &nbsp;<span id="notesVal">0</span>
+</div>
+
+<div class="ui" id="help">
+  <b>Space</b> play / pause &nbsp;·&nbsp; <b>↑ ↓</b> tempo &nbsp;·&nbsp; <b>A–K</b> play notes &nbsp;·&nbsp; <b>Click</b> the keys &nbsp;·&nbsp; <b>Drag</b> to orbit
+</div>
+
+<button id="recordBtn">Record Video</button>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
+
+/* ============================================================
+   0. UTILITIES — seeded RNG (everything deterministic)
+   ============================================================ */
+function mulberry32(seed){
+  return function(){
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const smooth= t => t*t*(3-2*t);
+
+/* ============================================================
+   1. RENDERER / SCENE / CAMERA / CONTROLS
+   ============================================================ */
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070604);
+scene.fog = new THREE.Fog(0x0a0806, 10.5, 19);
+
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth/window.innerHeight, 0.05, 60);
+const CAM_HOME = new THREE.Vector3(2.55, 1.74, 2.95);
+const TGT_HOME = new THREE.Vector3(0, 1.00, -1.52);
+camera.position.copy(CAM_HOME);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.copy(TGT_HOME);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 0.9;
+controls.maxDistance = 8.5;
+controls.maxPolarAngle = Math.PI * 0.52;
+controls.update();
+
+/* bloom — the lamp, candles, fire and roll holes all glow */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.72, 0.78);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* ============================================================
+   2. LIGHTS — warm Victorian evening
+   ============================================================ */
+scene.add(new THREE.AmbientLight(0x55483c, 0.62));
+const hemi = new THREE.HemisphereLight(0x2c3242, 0x1c130c, 0.5);
+scene.add(hemi);
+
+const keySpot = new THREE.SpotLight(0xffd9a6, 300, 12, 0.62, 1.0, 2.0);
+keySpot.position.set(1.6, 3.35, 1.7);
+keySpot.target.position.set(0, 0.85, -1.6);
+keySpot.castShadow = true;
+keySpot.shadow.mapSize.set(4096, 4096);
+keySpot.shadow.bias = -0.0004;
+keySpot.shadow.normalBias = 0.02;
+keySpot.shadow.camera.near = 1; keySpot.shadow.camera.far = 10;
+scene.add(keySpot, keySpot.target);
+
+const lampLight = new THREE.PointLight(0xffb45e, 36, 8, 2.0);
+lampLight.position.set(2.35, 1.30, -1.88);
+scene.add(lampLight);
+
+const fireLight = new THREE.PointLight(0xff8a33, 22, 5.5, 2.0);
+fireLight.position.set(-2.85, 0.42, -2.02);
+scene.add(fireLight);
+
+const chandelierLight = new THREE.PointLight(0xffc27a, 30, 10, 2.0);
+chandelierLight.position.set(0, 2.32, -0.5);
+scene.add(chandelierLight);
+
+const moonLight = new THREE.DirectionalLight(0x8fa5cc, 0.85);
+moonLight.position.set(6, 3.4, -0.1);
+moonLight.target.position.set(-1, 0.9, -1.7);
+scene.add(moonLight, moonLight.target);
+
+const trackerGlow = new THREE.PointLight(0xffc06a, 4.5, 1.6, 2.0);
+trackerGlow.position.set(0, 1.21, -1.28);
+scene.add(trackerGlow);
+
+/* ============================================================
+   3. PROCEDURAL CANVAS TEXTURES
+   ============================================================ */
+function makeCanvas(w,h,fn){
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  fn(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+/* --- rich mahogany --- */
+const woodTex = makeCanvas(512,512,(g,w,h)=>{
+  const r = mulberry32(101);
+  g.fillStyle='#462218'; g.fillRect(0,0,w,h);
+  for(let i=0;i<130;i++){
+    const x0=r()*w, dark=r()<0.62;
+    g.strokeStyle = dark?`rgba(30,12,6,${0.18+r()*0.3})`:`rgba(122,66,38,${0.14+r()*0.22})`;
+    g.lineWidth = 1+r()*5.5; g.beginPath(); g.moveTo(x0,0);
+    g.bezierCurveTo(x0+(r()-0.5)*70, h*0.33, x0+(r()-0.5)*70, h*0.66, x0+(r()-0.5)*46, h);
+    g.stroke();
+  }
+  for(let i=0;i<900;i++){ g.fillStyle=`rgba(0,0,0,${r()*0.09})`; g.fillRect(r()*w, r()*h, 1.5, 1.5+r()*9); }
+});
+woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping;
+
+const darkWoodTex = makeCanvas(256,256,(g,w,h)=>{
+  const r = mulberry32(202);
+  g.fillStyle='#2b150c'; g.fillRect(0,0,w,h);
+  for(let i=0;i<70;i++){ g.strokeStyle=`rgba(12,5,2,${0.3+r()*0.4})`; g.lineWidth=1+r()*3;
+    const x0=r()*w; g.beginPath(); g.moveTo(x0,0); g.bezierCurveTo(x0+(r()-0.5)*40,h/3,x0+(r()-0.5)*40,2*h/3,x0+(r()-0.5)*24,h); g.stroke(); }
+});
+darkWoodTex.wrapS = darkWoodTex.wrapT = THREE.RepeatWrapping;
+
+/* --- spruce soundboard --- */
+const spruceTex = makeCanvas(512,512,(g,w,h)=>{
+  const r = mulberry32(303);
+  g.fillStyle='#b8894e'; g.fillRect(0,0,w,h);
+  for(let i=0;i<110;i++){
+    g.strokeStyle=`rgba(84,52,20,${0.12+r()*0.2})`; g.lineWidth=1+r()*2.4;
+    const y0=r()*h; g.beginPath(); g.moveTo(0,y0);
+    g.bezierCurveTo(w*0.3, y0+(r()-0.5)*22, w*0.7, y0+(r()-0.5)*22, w, y0+(r()-0.5)*12); g.stroke();
+  }
+  const grad = g.createRadialGradient(w/2,h/2,40,w/2,h/2,320);
+  grad.addColorStop(0,'rgba(255,235,180,0.22)'); grad.addColorStop(1,'rgba(60,35,10,0.30)');
+  g.fillStyle=grad; g.fillRect(0,0,w,h);
+});
+
+/* --- floor planks --- */
+const floorTex = makeCanvas(1024,1024,(g,w,h)=>{
+  const r = mulberry32(404);
+  g.fillStyle='#241408'; g.fillRect(0,0,w,h);
+  const rows=8, rh=h/rows;
+  for(let row=0; row<rows; row++){
+    let x = -r()*300;
+    while(x < w){
+      const pw = 180+r()*260;
+      const tone = 15+r()*11;
+      g.fillStyle = `hsl(${22+r()*9},${34+r()*14}%,${tone}%)`;
+      g.fillRect(x, row*rh+2, pw-4, rh-4);
+      for(let i=0;i<26;i++){
+        g.strokeStyle=`rgba(15,7,3,${0.14+r()*0.25})`; g.lineWidth=1+r()*1.6;
+        const y=row*rh+4+r()*(rh-8);
+        g.beginPath(); g.moveTo(x+6,y); g.bezierCurveTo(x+pw*0.3,y+(r()-0.5)*8,x+pw*0.7,y+(r()-0.5)*8,x+pw-8,y+(r()-0.5)*5); g.stroke();
+      }
+      g.fillStyle='#0e0703'; g.fillRect(x+pw-5, row*rh, 5, rh);
+      x += pw;
+    }
+    g.fillStyle='#0e0703'; g.fillRect(0, row*rh, w, 3);
+  }
+});
+floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+floorTex.repeat.set(3,2.4);
+
+/* --- Victorian wallpaper (deep green + gold diamond trellis) --- */
+const wallTex = makeCanvas(256,256,(g,w,h)=>{
+  const r = mulberry32(505);
+  g.fillStyle='#25332a'; g.fillRect(0,0,w,h);
+  for(let i=0;i<500;i++){ g.fillStyle=`rgba(0,0,0,${r()*0.16})`; g.fillRect(r()*w,r()*h,2,2); }
+  g.strokeStyle='rgba(197,162,92,0.42)'; g.lineWidth=2;
+  const s=64;
+  for(let y=-s;y<h+s;y+=s){
+    for(let x=-s;x<w+s;x+=s){
+      g.beginPath(); g.moveTo(x+s/2,y); g.lineTo(x+s,y+s/2); g.lineTo(x+s/2,y+s); g.lineTo(x,y+s/2); g.closePath(); g.stroke();
+    }
+  }
+  g.fillStyle='rgba(212,178,102,0.55)';
+  for(let y=0;y<=h;y+=s){
+    for(let x=0;x<=w;x+=s){
+      g.save(); g.translate(x,y);
+      g.beginPath(); g.moveTo(0,-9); g.lineTo(7,0); g.lineTo(0,9); g.lineTo(-7,0); g.closePath(); g.fill();
+      g.beginPath(); g.arc(0,0,2.2,0,Math.PI*2); g.fillStyle='#efe0b0'; g.fill();
+      g.restore(); g.fillStyle='rgba(212,178,102,0.55)';
+    }
+  }
+});
+wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+wallTex.repeat.set(7,2.4);
+
+/* --- wainscot panels --- */
+const wainscotTex = makeCanvas(512,256,(g,w,h)=>{
+  g.fillStyle='#33200f'; g.fillRect(0,0,w,h);
+  const panels=4, pw=w/panels;
+  for(let i=0;i<panels;i++){
+    const x=i*pw;
+    g.fillStyle='#402917592'; g.fillRect(x,0,4,h);
+    g.fillStyle='#241408'; g.fillRect(x+14,18,pw-28,h-36);
+    g.fillStyle='#4a2f1a'; g.fillRect(x+22,26,pw-44,h-52);
+    g.fillStyle='#553722'; g.fillRect(x+30,34,pw-60,h-68);
+    g.strokeStyle='#5f4126'; g.lineWidth=3; g.strokeRect(x+22,26,pw-44,h-52);
+  }
+});
+wainscotTex.wrapS = wainscotTex.wrapT = THREE.RepeatWrapping;
+wainscotTex.repeat.set(6,1);
+
+/* --- the rug — crimson & gold medallion --- */
+const rugTex = makeCanvas(1024,640,(g,w,h)=>{
+  const r = mulberry32(606);
+  g.fillStyle='#571c19'; g.fillRect(0,0,w,h);
+  for(let i=0;i<2600;i++){ g.fillStyle=`rgba(${r()<0.5?0:255},${r()<0.5?0:220},180,${r()*0.05})`; g.fillRect(r()*w,r()*h,2,2); }
+  g.strokeStyle='#c9a961'; g.lineWidth=16; g.strokeRect(18,18,w-36,h-36);
+  g.strokeStyle='#2e1c08'; g.lineWidth=5;  g.strokeRect(40,40,w-80,h-80);
+  g.strokeStyle='#e2c078'; g.lineWidth=3;  g.strokeRect(52,52,w-104,h-104);
+  /* border motif */
+  g.fillStyle='#c9a961';
+  for(let x=70;x<w-60;x+=52){ diamond(g,x,29,7); diamond(g,x,h-29,7); }
+  for(let y=70;y<h-60;y+=52){ diamond(g,29,y,7); diamond(g,w-29,y,7); }
+  /* central medallion */
+  const cx=w/2, cy=h/2;
+  const rings=[[150,'#c9a961',10],[120,'#8a2b23',26],[86,'#c9a961',6],[56,'#1f4a44',20],[26,'#c9a961',8]];
+  for(const [rad,col,lw] of rings){ g.strokeStyle=col; g.lineWidth=lw; g.beginPath(); g.ellipse(cx,cy,rad,rad*0.62,0,0,Math.PI*2); g.stroke(); }
+  for(let i=0;i<16;i++){
+    const a=i/16*Math.PI*2;
+    g.save(); g.translate(cx+Math.cos(a)*104, cy+Math.sin(a)*64); g.rotate(a);
+    g.fillStyle = i%2 ? '#c9a961' : '#1f4a44';
+    g.beginPath(); g.ellipse(0,0,15,8,0,0,Math.PI*2); g.fill(); g.restore();
+  }
+  diamond(g,cx,cy,16,'#e2c078');
+  /* corner fans */
+  for(const [fx,fy,rot] of [[64,64,0],[w-64,64,Math.PI/2],[w-64,h-64,Math.PI],[64,h-64,-Math.PI/2]]){
+    g.save(); g.translate(fx,fy); g.rotate(rot);
+    for(let i=0;i<5;i++){ g.strokeStyle=i%2?'#c9a961':'#1f4a44'; g.lineWidth=6;
+      g.beginPath(); g.moveTo(0,0); g.arc(0,0,26+i*15, 0.15, Math.PI/2-0.15); g.stroke(); }
+    g.restore();
+  }
+  function diamond(g2,x,y,s,col){ if(col)g2.fillStyle=col;
+    g2.beginPath(); g2.moveTo(x,y-s); g2.lineTo(x+s*0.7,y); g2.lineTo(x,y+s); g2.lineTo(x-s*0.7,y); g2.closePath(); g2.fill(); }
+});
+
+/* --- maker's name board --- */
+const makerTex = makeCanvas(512,128,(g,w,h)=>{
+  const grad=g.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0,'#241a10'); grad.addColorStop(0.5,'#120c07'); grad.addColorStop(1,'#241a10');
+  g.fillStyle=grad; g.fillRect(0,0,w,h);
+  g.strokeStyle='#c9a961'; g.lineWidth=5; g.strokeRect(10,10,w-20,h-20);
+  g.strokeStyle='rgba(201,169,97,.5)'; g.lineWidth=1.5; g.strokeRect(18,18,w-36,h-36);
+  const tg=g.createLinearGradient(0,34,0,86);
+  tg.addColorStop(0,'#f6e096'); tg.addColorStop(0.45,'#d4af5e'); tg.addColorStop(0.75,'#8a6a2a'); tg.addColorStop(1,'#e8cd8a');
+  g.fillStyle=tg; g.font='600 46px Georgia,serif'; g.textAlign='center'; g.textBaseline='middle';
+  g.save(); try{ g.letterSpacing='14px'; }catch(e){}
+  g.fillText('HOFFMANN', w/2, 56); g.restore();
+  g.fillStyle='#a8843e'; g.font='italic 12px Georgia'; g.fillText('— E S T .  1 8 9 7 —', w/2, 100);
+});
+
+/* --- moody landscape paintings --- */
+function painting(seed, skyTop, skyLow){
+  return makeCanvas(512,640,(g,w,h)=>{
+    const r = mulberry32(seed);
+    const sky=g.createLinearGradient(0,0,0,h*0.66);
+    sky.addColorStop(0,skyTop); sky.addColorStop(0.75,skyLow); sky.addColorStop(1,'#c98a4a');
+    g.fillStyle=sky; g.fillRect(0,0,w,h*0.66);
+    const sun=g.createRadialGradient(w*0.62,h*0.52,4,w*0.62,h*0.52,150);
+    sun.addColorStop(0,'rgba(255,225,160,0.9)'); sun.addColorStop(1,'rgba(255,225,160,0)');
+    g.fillStyle=sun; g.fillRect(0,0,w,h*0.66);
+    for(let i=0;i<9;i++){ /* brooding clouds */
+      g.fillStyle=`rgba(28,26,34,${0.35+r()*0.35})`;
+      const cy=r()*h*0.4, cw=90+r()*190;
+      g.beginPath(); g.ellipse(r()*w, cy, cw, 13+r()*17, 0, 0, Math.PI*2); g.fill();
+    }
+    g.fillStyle='#191512'; /* far ridge */
+    g.beginPath(); g.moveTo(0,h*0.58);
+    for(let x=0;x<=w;x+=24) g.lineTo(x, h*0.58 - Math.sin(x*0.021+seed)*26 - r()*8);
+    g.lineTo(w,h*0.66); g.lineTo(0,h*0.66); g.fill();
+    g.fillStyle='#100d0a'; g.fillRect(0,h*0.62,w,h*0.4); /* near ground */
+    /* gnarled tree */
+    g.strokeStyle='#080604'; g.lineCap='round';
+    (function branch(x,y,ang,len,wd){
+      if(len<9) return;
+      const nx=x+Math.cos(ang)*len, ny=y+Math.sin(ang)*len;
+      g.lineWidth=wd; g.beginPath(); g.moveTo(x,y); g.lineTo(nx,ny); g.stroke();
+      branch(nx,ny,ang-0.32-r()*0.3, len*0.74, wd*0.66);
+      branch(nx,ny,ang+0.30+r()*0.3, len*0.76, wd*0.66);
+      if(r()<0.6) branch(nx,ny,ang+(r()-0.5)*0.4, len*0.7, wd*0.6);
+    })(w*0.24, h*0.98, -Math.PI/2+0.15, 96, 13);
+    /* glaze */
+    const vg=g.createRadialGradient(w/2,h/2,h*0.25,w/2,h/2,h*0.72);
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.55)');
+    g.fillStyle=vg; g.fillRect(0,0,w,h);
+  });
+}
+const paintingA = painting(11,'#232030','#5a4632');
+const paintingB = painting(23,'#1d2636','#4a3a30');
+
+/* --- night window view --- */
+const windowTex = makeCanvas(512,640,(g,w,h)=>{
+  const r = mulberry32(707);
+  const sky=g.createLinearGradient(0,0,0,h);
+  sky.addColorStop(0,'#060b1e'); sky.addColorStop(0.6,'#131f3a'); sky.addColorStop(0.82,'#332a3c'); sky.addColorStop(1,'#191420');
+  g.fillStyle=sky; g.fillRect(0,0,w,h);
+  for(let i=0;i<130;i++){ g.fillStyle=`rgba(255,255,255,${0.3+r()*0.7})`; const s=r()<0.12?2:1; g.fillRect(r()*w, r()*h*0.55, s, s); }
+  const moon=g.createRadialGradient(w*0.68,h*0.24,4,w*0.68,h*0.24,90);
+  moon.addColorStop(0,'#fffbe8'); moon.addColorStop(0.16,'#f4ecd2'); moon.addColorStop(0.45,'rgba(230,225,200,0.28)'); moon.addColorStop(1,'rgba(230,225,200,0)');
+  g.fillStyle=moon; g.fillRect(0,0,w,h*0.62);
+  g.fillStyle='#e8e2c8'; g.beginPath(); g.arc(w*0.68,h*0.24,26,0,Math.PI*2); g.fill();
+  for(let i=0;i<6;i++){ g.fillStyle='rgba(20,26,44,0.8)'; g.beginPath(); g.ellipse(r()*w, h*(0.3+r()*0.3), 70+r()*80, 9+r()*9, 0,0,Math.PI*2); g.fill(); }
+  g.fillStyle='#05070e'; /* rooftops & chimneys */
+  g.fillRect(0,h*0.78,w,h*0.22);
+  let x=0;
+  while(x<w){ const bw=40+r()*70, bh=20+r()*70; g.fillRect(x, h*0.78-bh, bw, bh);
+    if(r()<0.5) g.fillRect(x+bw*0.3, h*0.78-bh-14-r()*12, 10+r()*10, 20); x+=bw+8; }
+  for(let i=0;i<7;i++){ g.fillStyle='rgba(255,196,110,0.85)'; g.fillRect(r()*w, h*0.82+r()*h*0.1, 3, 4); } /* lit windows */
+});
+
+/* --- fire --- */
+const fireTex = makeCanvas(256,256,(g,w,h)=>{
+  g.fillStyle='#000000'; g.fillRect(0,0,w,h);
+  const r = mulberry32(808);
+  const blob=(cx,cy,rad,c0,c1)=>{ const gr=g.createRadialGradient(cx,cy,1,cx,cy,rad);
+    gr.addColorStop(0,c0); gr.addColorStop(1,c1); g.fillStyle=gr;
+    g.beginPath(); g.ellipse(cx,cy,rad*0.62,rad,0,0,Math.PI*2); g.fill(); };
+  blob(128,215,120,'rgba(255,120,20,0.9)','rgba(120,20,0,0)');
+  blob(98,190,80,'rgba(255,160,40,0.9)','rgba(140,40,0,0)');
+  blob(160,185,72,'rgba(255,180,60,0.9)','rgba(140,40,0,0)');
+  blob(128,150,66,'rgba(255,225,120,0.95)','rgba(180,80,0,0)');
+  blob(116,110,34,'rgba(255,246,190,0.95)','rgba(220,140,20,0)');
+  blob(148,128,26,'rgba(255,240,170,0.9)','rgba(220,140,20,0)');
+  for(let i=0;i<22;i++){ g.fillStyle=`rgba(255,${180+r()*70|0},80,${0.5+r()*0.5})`;
+    g.fillRect(90+r()*80, 60+r()*140, 2, 2); }
+});
+
+/* --- lampshade — rose silk with gold stars, self-lit --- */
+const shadeTex = makeCanvas(512,256,(g,w,h)=>{
+  const gr=g.createLinearGradient(0,0,0,h);
+  gr.addColorStop(0,'#5e2630'); gr.addColorStop(0.42,'#8a3d46'); gr.addColorStop(0.78,'#a8545c'); gr.addColorStop(1,'#6e2e38');
+  g.fillStyle=gr; g.fillRect(0,0,w,h);
+  const r = mulberry32(909);
+  g.fillStyle='#e7c876';
+  for(let i=0;i<60;i++){
+    const x=r()*w, y=h*0.18+r()*h*0.55, s=3+r()*4;
+    g.save(); g.translate(x,y); g.beginPath();
+    for(let k=0;k<5;k++){ const a=k/5*Math.PI*2-Math.PI/2;
+      g.lineTo(Math.cos(a)*s, Math.sin(a)*s); g.lineTo(Math.cos(a+Math.PI/5)*s*0.45, Math.sin(a+Math.PI/5)*s*0.45); }
+    g.closePath(); g.fill(); g.restore();
+  }
+  g.fillStyle='#e7c876'; g.fillRect(0,h-26,w,5); g.fillRect(0,h*0.14,w,3);
+  g.fillStyle='rgba(0,0,0,0.22)';
+  for(let x=0;x<w;x+=32) g.fillRect(x,0,3,h);
+});
+
+/* --- curtain stripes --- */
+const curtainTex = makeCanvas(256,512,(g,w,h)=>{
+  g.fillStyle='#4c1f26'; g.fillRect(0,0,w,h);
+  for(let x=0;x<w;x+=32){
+    const gr=g.createLinearGradient(x,0,x+32,0);
+    gr.addColorStop(0,'#3a141b'); gr.addColorStop(0.4,'#6b2f38'); gr.addColorStop(0.62,'#7e3c46'); gr.addColorStop(1,'#34131a');
+    g.fillStyle=gr; g.fillRect(x,0,32,h);
+  }
+  g.fillStyle='#c9a961'; g.fillRect(0,h-16,w,4);
+});
+curtainTex.wrapS = curtainTex.wrapT = THREE.RepeatWrapping;
+curtainTex.repeat.set(2,1);
+
+/* ============================================================
+   4. TUNE — note data (beats, 4/4) — "Für Elise" + chordal middle
+   ============================================================ */
+const TOTAL_BEATS = 57;
+const TUNE = [
+  /* main theme */
+  [1.0,76,0.5],[1.5,75,0.5],[2.0,76,0.5],[2.5,75,0.5],[3.0,76,0.5],[3.5,71,0.5],[4.0,74,0.5],[4.5,72,0.5],[5.0,69,1.5],
+  [7.0,60,0.5],[7.5,64,0.5],[8.0,69,1.0],[9.0,71,1.0],[10.0,64,1.5],
+  [12.0,68,0.5],[12.5,71,0.5],[13.0,72,1.5],[15.0,64,0.5],[15.5,76,0.5],[16.0,75,0.5],[16.5,76,0.5],[17.0,75,0.5],
+  [17.5,76,0.5],[18.0,71,0.5],[18.5,74,0.5],[19.0,72,0.5],[19.5,69,1.5],
+  [21.5,60,0.5],[22.0,64,0.5],[22.5,69,1.0],[23.5,71,0.5],[24.0,64,0.5],[24.5,72,0.5],[25.0,71,0.5],[25.5,69,2.0],
+  /* chordal middle — Am / F / C / E7 / Am */
+  [29.0,45,2.0],[29.0,57,2.0],[29.0,60,2.0],[29.0,64,2.0],
+  [31.0,41,2.0],[31.0,53,2.0],[31.0,57,2.0],[31.0,65,2.0],
+  [33.0,48,2.0],[33.0,55,2.0],[33.0,60,2.0],[33.0,64,2.0],
+  [35.0,52,2.0],[35.0,56,2.0],[35.0,59,2.0],[35.0,62,2.0],
+  [37.0,45,3.5],[37.0,57,3.5],[37.0,60,3.5],[37.0,64,3.5],[37.0,69,3.5],
+  /* reprise */
+  [41.5,76,0.5],[42.0,75,0.5],[42.5,76,0.5],[43.0,75,0.5],[43.5,76,0.5],[44.0,71,0.5],[44.5,74,0.5],[45.0,72,0.5],[45.5,69,2.5],
+  [48.5,60,0.5],[49.0,64,0.5],[49.5,69,1.0],[50.5,71,0.5],[51.0,64,1.5],
+  /* final Am chord */
+  [53.0,45,3.5],[53.0,57,3.5],[53.0,64,3.5],[53.0,69,3.5]
+].sort((a,b)=>a[0]-b[0]);
+
+const PEDAL_SEGMENTS = [[4.5,6.9],[12.3,14.7],[18.8,21.4],[28.5,37.2],[44.3,48.2],[52.3,56.9]];
+
+/* count = 79 notes, including five big chords */
+
+/* ============================================================
+   5. PAPER ROLL TEXTURES — punched from the SAME note data
+   ============================================================ */
+const ROLL_W = 2048, ROLL_H = 352;
+function laneX(midi){ const lane = midi-21; return 30 + (lane+0.5)/88*(ROLL_W-60); }
+function holeY(beat){ return 12 + (beat/TOTAL_BEATS)*(ROLL_H-24); }
+
+const rollTexCanvas = document.createElement('canvas'); rollTexCanvas.width=ROLL_W; rollTexCanvas.height=ROLL_H;
+{
+  const g = rollTexCanvas.getContext('2d');
+  const bg = g.createLinearGradient(0,0,0,ROLL_H);
+  bg.addColorStop(0,'#e9d9ad'); bg.addColorStop(0.5,'#dcc992'); bg.addColorStop(1,'#cbbc85');
+  g.fillStyle=bg; g.fillRect(0,0,ROLL_W,ROLL_H);
+  const r = mulberry32(1111);
+  for(let i=0;i<240;i++){ g.fillStyle=`rgba(120,88,40,${0.05+r()*0.09})`;
+    g.beginPath(); g.ellipse(r()*ROLL_W, r()*ROLL_H, 20+r()*70, 8+r()*26, r()*3, 0, Math.PI*2); g.fill(); }
+  /* lane rules */
+  g.strokeStyle='rgba(110,80,36,0.34)'; g.lineWidth=1;
+  for(let i=0;i<=88;i++){ const x=30+i/88*(ROLL_W-60);
+    g.beginPath(); g.moveTo(x,6); g.lineTo(x,ROLL_H-6); g.stroke(); }
+  g.strokeStyle='rgba(70,48,18,0.65)'; g.lineWidth=3;
+  g.beginPath(); g.moveTo(30,6); g.lineTo(30,ROLL_H-6); g.moveTo(ROLL_W-30,6); g.lineTo(ROLL_W-30,ROLL_H-6); g.stroke();
+  /* edge tracker perforations */
+  g.fillStyle='#14100a';
+  for(let y=13;y<ROLL_H-6;y+=24){ g.beginPath(); g.arc(15,y,4,0,Math.PI*2); g.arc(ROLL_W-15,y,4,0,Math.PI*2); g.fill(); }
+  /* THE HOLES — one per note in the tune */
+  for(const [beat,midi] of TUNE){
+    g.fillStyle='#100c07';
+    g.beginPath(); g.ellipse(laneX(midi), holeY(beat), 10.5, 7.2, 0, 0, Math.PI*2); g.fill();
+    g.strokeStyle='rgba(255,240,200,0.35)'; g.lineWidth=1.4; g.stroke();
+  }
+}
+const rollEmissiveCanvas = document.createElement('canvas'); rollEmissiveCanvas.width=ROLL_W; rollEmissiveCanvas.height=ROLL_H;
+{
+  const g = rollEmissiveCanvas.getContext('2d');
+  g.fillStyle='#000000'; g.fillRect(0,0,ROLL_W,ROLL_H);
+  for(const [beat,midi] of TUNE){
+    const x=laneX(midi), y=holeY(beat);
+    let gr = g.createRadialGradient(x,y,0.5,x,y,15);
+    gr.addColorStop(0,'#ffd98a'); gr.addColorStop(0.42,'#e89b3c'); gr.addColorStop(1,'rgba(60,28,4,0)');
+    g.fillStyle=gr; g.beginPath(); g.ellipse(x,y,15,11,0,0,Math.PI*2); g.fill();
+    g.fillStyle='#ffe9b0'; g.beginPath(); g.ellipse(x,y,7.4,4.9,0,0,Math.PI*2); g.fill();
+  }
+  for(let y=13;y<ROLL_H-6;y+=24){ /* tracking holes glow faintly too */
+    for(const x of [15, ROLL_W-15]){
+      const gr=g.createRadialGradient(x,y,0.4,x,y,6);
+      gr.addColorStop(0,'#d89a4a'); gr.addColorStop(1,'rgba(40,20,4,0)');
+      g.fillStyle=gr; g.beginPath(); g.arc(x,y,6,0,Math.PI*2); g.fill();
+    }
+  }
+}
+const rollMap      = new THREE.CanvasTexture(rollTexCanvas);
+const rollEmissive = new THREE.CanvasTexture(rollEmissiveCanvas);
+rollMap.colorSpace = THREE.SRGBColorSpace; rollEmissive.colorSpace = THREE.SRGBColorSpace;
+rollMap.repeat.set(1,0.20); rollEmissive.repeat.set(1,0.20);
+rollMap.wrapS = rollEmissive.wrapS = THREE.ClampToEdgeWrapping;
+rollMap.wrapT = rollEmissive.wrapT = THREE.ClampToEdgeWrapping;
+
+/* ============================================================
+   6. ROOM — floor, walls, wainscot, rug
+   ============================================================ */
+const room = new THREE.Group(); scene.add(room);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(10.4, 7.6),
+  new THREE.MeshStandardMaterial({ map:floorTex, roughness:0.55, metalness:0.12 }));
+floor.rotation.x = -Math.PI/2; floor.position.set(0,0,0.6); floor.receiveShadow = true; room.add(floor);
+
+const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(10.4, 7.6),
+  new THREE.MeshStandardMaterial({ color:0x171310, roughness:0.95 }));
+ceiling.rotation.x = Math.PI/2; ceiling.position.set(0,3.4,0.6); room.add(ceiling);
+
+function wall(w,h,x,y,z,ry){
+  const grp = new THREE.Group();
+  const upper = new THREE.Mesh(new THREE.PlaneGeometry(w, h-1.06),
+    new THREE.MeshStandardMaterial({ map:wallTex, roughness:0.92 }));
+  upper.position.y = 1.06 + (h-1.06)/2; grp.add(upper);
+  const lower = new THREE.Mesh(new THREE.PlaneGeometry(w, 1.06),
+    new THREE.MeshStandardMaterial({ map:wainscotTex, roughness:0.6 }));
+  lower.position.y = 0.53; grp.add(lower);
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.055, 0.035),
+    new THREE.MeshStandardMaterial({ color:0x4a2f1a, roughness:0.4 }));
+  rail.position.set(0, 1.06, 0.012); grp.add(rail);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w, 0.14, 0.05),
+    new THREE.MeshStandardMaterial({ color:0x2a1a0e, roughness:0.45 }));
+  base.position.set(0, 0.07, 0.018); grp.add(base);
+  const crown = new THREE.Mesh(new THREE.BoxGeometry(w, 0.15, 0.09),
+    new THREE.MeshStandardMaterial({ color:0xb8a684, roughness:0.5 }));
+  crown.position.set(0, h-0.075, 0.02); grp.add(crown);
+  grp.position.set(x,0,z); grp.rotation.y = ry;
+  grp.traverse(o=>{ if(o.isMesh) o.receiveShadow = true; });
+  room.add(grp);
+}
+wall(10.4, 3.4,  0, 0, -2.62, 0);            /* back  */
+wall(7.6,  3.4, -5.2, 0, 0.6, Math.PI/2);    /* left  */
+wall(7.6,  3.4,  5.2, 0, 0.6, -Math.PI/2);   /* right */
+
+const rug = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 2.9),
+  new THREE.MeshStandardMaterial({ map:rugTex, roughness:0.96 }));
+rug.rotation.x = -Math.PI/2; rug.position.set(0, 0.008, -0.75); rug.receiveShadow = true; room.add(rug);
+
+/* ============================================================
+   7. THE PIANO — cabinet, 88 keys, exposed action, 214 strings
+   ============================================================ */
+const PIANO_POS = new THREE.Vector3(0, 0, -1.78);
+const piano = new THREE.Group(); piano.position.copy(PIANO_POS); scene.add(piano);
+
+const mahogany  = new THREE.MeshPhysicalMaterial({ map:woodTex, roughness:0.22, metalness:0.05, clearcoat:0.85, clearcoatRoughness:0.18 });
+const darkMahog = new THREE.MeshStandardMaterial({ map:darkWoodTex, roughness:0.4 });
+const brass     = new THREE.MeshStandardMaterial({ color:0xa8843e, roughness:0.28, metalness:0.9 });
+const bronze    = new THREE.MeshStandardMaterial({ color:0x6e5230, roughness:0.35, metalness:0.85 });
+const feltRed   = new THREE.MeshStandardMaterial({ color:0x5e1414, roughness:0.98 });
+const feltGreen = new THREE.MeshStandardMaterial({ color:0x1d3a22, roughness:0.98 });
+const ivoryKey  = new THREE.MeshStandardMaterial({ color:0xf2e9d6, roughness:0.32, metalness:0.0 });
+const ebonyKey  = new THREE.MeshPhysicalMaterial({ color:0x0b0b0e, roughness:0.12, clearcoat:0.9, clearcoatRoughness:0.1 });
+const spruce    = new THREE.MeshStandardMaterial({ map:spruceTex, roughness:0.72 });
+
+function box(w,h,d,mat,x,y,z,parent){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z); m.castShadow = true; m.receiveShadow = true;
+  (parent||piano).add(m); return m;
+}
+
+/* --- cabinet shell --- */
+box(1.56, 0.20, 0.62, darkMahog, 0, 0.10, 0.28);            /* toe plinth        */
+box(1.34, 0.10, 0.56, mahogany,  0, 0.245, 0.27);           /* keyframe          */
+box(1.30, 0.045,0.05, feltGreen, 0, 0.305, 0.535);          /* green felt strip  */
+box(0.17, 1.46, 0.60, mahogany, -0.685, 0.73, 0.24);        /* left cheek        */
+box(0.17, 1.46, 0.60, mahogany,  0.685, 0.73, 0.24);        /* right cheek       */
+box(0.045,0.62, 0.42, mahogany, -0.635, 0.40, 0.10);        /* inner liners      */
+box(0.045,0.62, 0.42, mahogany,  0.635, 0.40, 0.10);
+box(1.36, 1.30, 0.055, darkMahog, 0, 0.83, -0.065);         /* back panel        */
+box(1.38, 0.115,0.055, mahogany, 0, 0.845, 0.52);           /* name board        */
+box(1.52, 0.085,0.66, mahogany, 0, 1.475, 0.22);            /* top cornice       */
+box(1.60, 0.045,0.72, mahogany, 0, 1.415, 0.22);            /* cornice molding   */
+box(1.44, 0.05, 0.62, darkMahog, 0, 1.435, 0.22);           /* top inset         */
+box(0.05, 0.50, 0.045, mahogany, -0.615, 1.165, 0.505);     /* opening jambs     */
+box(0.05, 0.50, 0.045, mahogany,  0.615, 1.165, 0.505);
+box(1.28, 0.045,0.045, mahogany, 0, 1.435, 0.505);          /* opening head      */
+box(1.28, 0.03, 0.03,  brass,    0, 0.895, 0.515);          /* brass trim        */
+
+/* maker's plate */
+const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.085),
+  new THREE.MeshStandardMaterial({ map:makerTex, roughness:0.35, metalness:0.3,
+    emissive:0x33240e, emissiveMap:makerTex, emissiveIntensity:0.35 }));
+plate.position.set(0, 0.845, 0.549); piano.add(plate);
+
+/* the REMOVED front panel, leaning on the piano's flank */
+const fallenPanel = box(1.06, 0.46, 0.035, mahogany, -1.06, 0.235, 0.52);
+fallenPanel.rotation.set(-0.06, 0.32, 0.30);
+const knobGeo = new THREE.SphereGeometry(0.016, 16, 12);
+for(const dx of [-0.36, 0.36]){
+  const k = new THREE.Mesh(knobGeo, brass);
+  k.position.set(dx, 0.02, 0.028); fallenPanel.add(k);
+}
+
+/* --- soundboard & cast plate --- */
+box(1.22, 0.44, 0.028, spruce, 0, 1.135, -0.028);
+const plateBronze = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.075, 0.02), bronze);
+plateBronze.position.set(0, 1.27, -0.008); plateBronze.rotation.z = 0.052; piano.add(plateBronze);
+const plateBronze2 = plateBronze.clone();
+plateBronze2.position.set(0, 1.06, -0.008); plateBronze2.rotation.z = -0.046; piano.add(plateBronze2);
+for(const b of [plateBronze, plateBronze2]){ b.castShadow = true; }
+box(0.9, 0.045, 0.02, darkMahog, 0, 0.925, -0.005).rotation.z = 0.16;   /* bridge hints */
+box(0.9, 0.045, 0.02, darkMahog, 0, 0.985, -0.005).rotation.z = -0.15;
+
+/* --- KEY LAYOUT (MIDI 21 A0 … 108 C8) --- */
+const WHITE_PITCH = 0.0242, WHITE_W = 0.0224, WHITE_D = 0.152, WHITE_H = 0.021;
+const BLACK_W = 0.0138, BLACK_D = 0.098, BLACK_H = 0.020;
+const KEY_FRONT_Z = 0.795, KEY_BACK_Z = KEY_FRONT_Z - WHITE_D;   /* 0.643 */
+const WHITE_TOP_Y = 0.755;
+const isBlack = m => [1,3,6,8,10].includes(m % 12);
+
+const keyX = {}, whiteIndex = {};
+let wi = 0;
+for(let m=21; m<=108; m++){
+  if(isBlack(m)) keyX[m] = (wi - 0.5 - 25.5) * WHITE_PITCH;
+  else { keyX[m] = (wi - 25.5) * WHITE_PITCH; whiteIndex[m] = wi; wi++; }
+}
+const N_KEYS = 88;
+const keyGroups=[], keyTargets=[], clickTargets=[];
+const keyHoldUntil = new Float64Array(109).fill(-1);
+const keyPress = new Float32Array(109);
+
+const whiteGeo = new THREE.BoxGeometry(WHITE_W, WHITE_H, WHITE_D);
+const blackGeo = new THREE.BoxGeometry(BLACK_W, BLACK_H, BLACK_D);
+
+for(let m=21; m<=108; m++){
+  const x = keyX[m];
+  const pivot = new THREE.Group();
+  pivot.position.set(x, 0, KEY_BACK_Z);
+  piano.add(pivot);
+  let mesh;
+  if(isBlack(m)){
+    mesh = new THREE.Mesh(blackGeo, ebonyKey);
+    mesh.position.set(0, WHITE_TOP_Y + 0.0125 - BLACK_H/2 + BLACK_H/2 - 0.010, BLACK_D/2 + 0.012);
+    mesh.position.y = WHITE_TOP_Y + BLACK_H/2 + 0.0015;
+    mesh.position.z = 0.055;
+  } else {
+    mesh = new THREE.Mesh(whiteGeo, ivoryKey);
+    mesh.position.set(0, WHITE_TOP_Y - WHITE_H/2, WHITE_D/2);
+  }
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.userData.midi = m;
+  pivot.add(mesh);
+  keyGroups[m] = pivot; keyTargets[m] = mesh; clickTargets.push(mesh);
+}
+
+/* key slip (front rail below keys) with red felt */
+box(1.34, 0.075, 0.04, mahogany, 0, 0.697, 0.815);
+box(1.30, 0.016, 0.02, feltRed,  0, 0.735, 0.812);
+
+/* --- STRINGS: 214 total, wound bass, 3 unisons on top --- */
+const STRING_Y0 = 0.875, STRING_Y1 = 1.345, STRING_H = STRING_Y1 - STRING_Y0;
+const stringMatPlain = new THREE.MeshStandardMaterial({ color:0xd3d6da, roughness:0.22, metalness:0.95 });
+const stringMatWound = new THREE.MeshStandardMaterial({ color:0x9a6f38, roughness:0.38, metalness:0.85 });
+const stringMeshes = [];
+for(let m=21; m<=108; m++){
+  const wound = m < 52, plain3 = m >= 52;
+  const n = m < 40 ? 1 : (m < 52 ? 2 : 3);
+  const x0 = keyX[m] * 0.92;   /* strings fan slightly narrower than keys */
+  for(let s=0; s<n; s++){
+    const off = n===1 ? 0 : (s - (n-1)/2) * 0.0062;
+    const r = wound ? 0.0026 : 0.00115;
+    const geo = new THREE.CylinderGeometry(r, r, STRING_H, wound?10:6, 1);
+    const mesh = new THREE.Mesh(geo, wound ? stringMatWound : stringMatPlain);
+    mesh.position.set(x0+off, (STRING_Y0+STRING_Y1)/2, 0.028);
+    piano.add(mesh);
+    stringMeshes.push({ midi:m, mesh, x:x0+off });
+  }
+}
+/* agraffe row + capo bar + top nut */
+const agGeo = new THREE.CylinderGeometry(0.0042, 0.0042, 0.008, 8);
+for(let m=21; m<=108; m++){
+  const a = new THREE.Mesh(agGeo, brass);
+  a.position.set(keyX[m]*0.92, 1.062, 0.042); piano.add(a);
+}
+box(1.14, 0.022, 0.035, brass, 0, 1.115, 0.032);   /* capo d'astro */
+box(1.14, 0.026, 0.030, brass, 0, 1.315, 0.032);   /* pinblock nut */
+
+/* --- VIBRATION GHOST LINES (one per string) --- */
+const vibLines = [];
+for(const s of stringMeshes){
+  const SEG = 13;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array((SEG+1)*3);
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.LineBasicMaterial({ color:0xffe9ad, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false });
+  const line = new THREE.Line(geo, mat);
+  line.visible = false; line.frustumCulled = false;
+  line.raycast = ()=>{};
+  piano.add(line);
+  vibLines.push({ midi:s.midi, x:s.x, z:0.028, line, geo, pos, SEG });
+}
+
+/* --- 88 HAMMERS --- */
+const HAMMER_PIVOT_Y = 0.868, HAMMER_PIVOT_Z = 0.315, SHANK_LEN = 0.185;
+const hammerRest = 0.40, hammerStrike = 0.025;
+const hammerPivots = [];
+const shankGeo = new THREE.CylinderGeometry(0.0034, 0.0046, SHANK_LEN, 6);
+const headGeo  = new THREE.CylinderGeometry(0.0205, 0.0205, 0.023, 14);
+const headCore = new THREE.CylinderGeometry(0.011, 0.011, 0.024, 10);
+const flangeGeo= new THREE.BoxGeometry(0.017, 0.024, 0.014);
+const shankMat = new THREE.MeshStandardMaterial({ color:0x7a4a26, roughness:0.6 });
+const feltHead = new THREE.MeshStandardMaterial({ color:0xe8dcc2, roughness:0.95 });
+const flangeMat= new THREE.MeshStandardMaterial({ color:0x552222, roughness:0.7 });
+
+for(let m=21; m<=108; m++){
+  const pivot = new THREE.Group();
+  pivot.position.set(keyX[m]*0.92, HAMMER_PIVOT_Y, HAMMER_PIVOT_Z);
+  const shank = new THREE.Mesh(shankGeo, shankMat);
+  shank.position.y = SHANK_LEN/2; shank.castShadow = true; pivot.add(shank);
+  const core = new THREE.Mesh(headCore, shankMat);
+  core.rotation.z = Math.PI/2; core.position.y = SHANK_LEN + 0.004; pivot.add(core);
+  const head = new THREE.Mesh(headGeo, feltHead);
+  head.rotation.z = Math.PI/2; head.position.y = SHANK_LEN + 0.004; head.castShadow = true; pivot.add(head);
+  const flange = new THREE.Mesh(flangeGeo, flangeMat);
+  flange.position.set(0, -0.013, 0.006); pivot.add(flange);
+  pivot.rotation.x = hammerRest;
+  piano.add(pivot);
+  hammerPivots[m] = pivot;
+}
+/* hammer rail + repetition rail */
+box(1.14, 0.028, 0.05, darkMahog, 0, 0.845, 0.33);
+box(1.14, 0.016, 0.03, feltRed,   0, 0.862, 0.335);
+
+/* --- 88 DAMPERS --- */
+const damperGroups = [];
+const dampBlockGeo = new THREE.BoxGeometry(0.0165, 0.034, 0.020);
+const dampFeltGeo  = new THREE.BoxGeometry(0.0175, 0.013, 0.021);
+const wireGeo      = new THREE.CylinderGeometry(0.0013, 0.0013, 0.085, 6);
+const dampWood = new THREE.MeshStandardMaterial({ color:0x4e3420, roughness:0.7 });
+const steelWire = new THREE.MeshStandardMaterial({ color:0xb9bdc2, roughness:0.3, metalness:0.9 });
+
+for(let m=21; m<=108; m++){
+  const g = new THREE.Group();
+  g.position.set(keyX[m]*0.92, 1.088, 0.055);
+  const felt = new THREE.Mesh(dampFeltGeo, feltRed); felt.position.y = -0.023; g.add(felt);
+  const block = new THREE.Mesh(dampBlockGeo, dampWood); block.position.y = 0.0; block.castShadow = true; g.add(block);
+  const wire = new THREE.Mesh(wireGeo, steelWire); wire.position.y = 0.055; g.add(wire);
+  piano.add(g);
+  damperGroups[m] = g;
+}
+box(1.14, 0.02, 0.05, darkMahog, 0, 1.145, 0.062);
+const dampState = new Float32Array(109);
+
+/* --- PEDAL LYRE + SUSTAIN PEDAL (animated) --- */
+const lyreMat = mahogany;
+box(0.36, 0.055, 0.20, lyreMat, 0, 0.072, 0.72);                 /* lyre body      */
+box(0.045,0.20, 0.09, lyreMat, -0.155, 0.155, 0.60);             /* left pillar    */
+box(0.045,0.20, 0.09, lyreMat,  0.155, 0.155, 0.60);             /* right pillar   */
+box(0.36, 0.05, 0.10, lyreMat, 0, 0.255, 0.585);                 /* lyre cap       */
+const pedalPivot = new THREE.Group();
+pedalPivot.position.set(0.075, 0.085, 0.76); piano.add(pedalPivot);
+const sustainPedal = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.014, 0.185), brass);
+sustainPedal.position.set(0, 0, 0.075); sustainPedal.castShadow = true; pedalPivot.add(sustainPedal);
+const unaPedal = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.013, 0.175),
+  new THREE.MeshStandardMaterial({ color:0x6e5a28, roughness:0.35, metalness:0.8 }));
+unaPedal.position.set(-0.075, 0.072, 0.825); piano.add(unaPedal);
+
+/* --- PAPER ROLL — tracker bar, spools, glowing punched sheet --- */
+const ROLL_W_M = 1.04, SPOOL_Y = 1.322, TRACKER_Y = 1.155;
+const rollBack = new THREE.Mesh(new THREE.PlaneGeometry(ROLL_W_M, 0.185),
+  new THREE.MeshBasicMaterial({ color:0x553311 }));
+rollBack.position.set(0, (SPOOL_Y+TRACKER_Y)/2, 0.052); piano.add(rollBack);
+
+const rollPaper = new THREE.Mesh(new THREE.PlaneGeometry(ROLL_W_M, SPOOL_Y-TRACKER_Y),
+  new THREE.MeshStandardMaterial({ map:rollMap, emissiveMap:rollEmissive,
+    emissive:0xffc478, emissiveIntensity:1.35, roughness:0.9, side:THREE.DoubleSide }));
+rollPaper.position.set(0, (SPOOL_Y+TRACKER_Y)/2, 0.088); piano.add(rollPaper);
+
+const spoolGeo = new THREE.CylinderGeometry(0.034, 0.034, ROLL_W_M, 20); spoolGeo.rotateZ(Math.PI/2);
+const spoolMat = new THREE.MeshStandardMaterial({ color:0x3d2412, roughness:0.45 });
+const topSpool = new THREE.Mesh(spoolGeo, spoolMat); topSpool.position.set(0, SPOOL_Y+0.022, 0.088); topSpool.castShadow = true; piano.add(topSpool);
+const botRollerGeo = new THREE.CylinderGeometry(0.016, 0.016, ROLL_W_M, 14); botRollerGeo.rotateZ(Math.PI/2);
+const botRoller = new THREE.Mesh(botRollerGeo, brass); botRoller.position.set(0, TRACKER_Y-0.012, 0.088); piano.add(botRoller);
+const trackerBar = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, ROLL_W_M, 12), brass);
+trackerBar.geometry.rotateZ(Math.PI/2);
+trackerBar.position.set(0, TRACKER_Y, 0.062); piano.add(trackerBar);
+for(const sx of [-1,1]){
+  box(0.035, 0.30, 0.075, darkMahog, sx*(ROLL_W_M/2+0.022), (SPOOL_Y+TRACKER_Y)/2+0.01, 0.062);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.02, 12, 10), brass);
+  cap.position.set(sx*(ROLL_W_M/2+0.022), SPOOL_Y+0.022, 0.088); piano.add(cap);
+}
+/* rosette ends on top */
+for(const sx of [-1,1]){
+  const ros = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.014, 20), darkMahog);
+  ros.position.set(sx*0.52, 1.502, 0.22); piano.add(ros);
+}
+
+/* --- METRONOME on top (pendulum driven by tempo) --- */
+const metro = new THREE.Group(); metro.position.set(0.46, 1.523, 0.24); piano.add(metro);
+const metroBody = new THREE.Mesh(new THREE.CylinderGeometry(0.030, 0.075, 0.135, 4, 1),
+  new THREE.MeshStandardMaterial({ color:0x2e1a0e, roughness:0.3, flatShading:true }));
+metroBody.rotation.y = Math.PI/4; metroBody.position.y = 0.068; metroBody.castShadow = true; metro.add(metroBody);
+const metroFace = new THREE.Mesh(new THREE.PlaneGeometry(0.075, 0.105),
+  new THREE.MeshStandardMaterial({ color:0xe8dcc0, roughness:0.6 }));
+metroFace.position.set(0, 0.066, 0.045); metroFace.rotation.x = -0.18; metro.add(metroFace);
+const pendulum = new THREE.Group(); pendulum.position.set(0, 0.028, 0.056); metro.add(pendulum);
+const rod = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.115, 0.002), brass); rod.position.y = 0.058; pendulum.add(rod);
+const weight = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.02, 0.006), brass); weight.position.y = 0.078; pendulum.add(weight);
+
+/* --- books on top --- */
+const book1 = box(0.20, 0.035, 0.14, new THREE.MeshStandardMaterial({ color:0x5a1f1f, roughness:0.7 }), -0.42, 1.541, 0.26);
+book1.rotation.y = 0.24;
+const book2 = box(0.16, 0.030, 0.115, new THREE.MeshStandardMaterial({ color:0x1f3a2a, roughness:0.7 }), -0.415, 1.574, 0.255);
+book2.rotation.y = 0.10;
+
+/* ============================================================
+   8. PARLOUR FURNITURE — lamp, table, fireplace, window, chandelier
+   ============================================================ */
+/* --- side table with fringed lamp (right of piano) --- */
+const table = new THREE.Group(); table.position.set(2.32, 0, -1.82); scene.add(table);
+const tableMat = mahogany;
+const tTop = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.30, 0.028, 28), tableMat);
+tTop.position.y = 0.615; tTop.castShadow = tTop.receiveShadow = true; table.add(tTop);
+const tCol = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.055, 0.55, 12), tableMat);
+tCol.position.y = 0.31; tCol.castShadow = true; table.add(tCol);
+const tBase = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.05, 20), tableMat);
+tBase.position.y = 0.025; tBase.castShadow = true; table.add(tBase);
+/* books on table */
+const tb1 = new THREE.Mesh(new THREE.BoxGeometry(0.17,0.032,0.12), new THREE.MeshStandardMaterial({ color:0x27364f, roughness:0.7 }));
+tb1.position.set(-0.12, 0.645, 0.08); tb1.rotation.y = 0.4; tb1.castShadow = true; table.add(tb1);
+const tb2 = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.028,0.10), new THREE.MeshStandardMaterial({ color:0x59401f, roughness:0.7 }));
+tb2.position.set(-0.115, 0.674, 0.075); tb2.rotation.y = 0.18; tb2.castShadow = true; table.add(tb2);
+
+/* lamp */
+const lamp = new THREE.Group(); lamp.position.set(0.06, 0.63, -0.04); table.add(lamp);
+const lampBaseProfile = [];
+[[0.001,0],[0.075,0],[0.078,0.012],[0.030,0.03],[0.026,0.075],[0.055,0.115],[0.062,0.145],[0.028,0.165],[0.022,0.205],[0.038,0.215],[0.001,0.22]]
+  .forEach(p=>lampBaseProfile.push(new THREE.Vector2(p[0],p[1])));
+const lampBase = new THREE.Mesh(new THREE.LatheGeometry(lampBaseProfile, 26),
+  new THREE.MeshPhysicalMaterial({ color:0x7a5a20, roughness:0.25, metalness:0.85, clearcoat:0.6 }));
+lampBase.castShadow = true; lamp.add(lampBase);
+const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.155, 0.165, 26, 1, true),
+  new THREE.MeshStandardMaterial({ map:shadeTex, emissive:0xffa54e, emissiveMap:shadeTex,
+    emissiveIntensity:0.72, roughness:0.9, side:THREE.DoubleSide }));
+shade.position.y = 0.315; lamp.add(shade);
+const shadeTop = new THREE.Mesh(new THREE.CircleGeometry(0.088, 26),
+  new THREE.MeshStandardMaterial({ color:0x40161c, emissive:0xff9a44, emissiveIntensity:0.5 }));
+shadeTop.rotation.x = -Math.PI/2; shadeTop.position.y = 0.398; lamp.add(shadeTop);
+/* fringe — 34 hanging silk tassels */
+const fringeGeo = new THREE.ConeGeometry(0.0075, 0.052, 7);
+const fringeMat = new THREE.MeshStandardMaterial({ color:0xd8a04e, emissive:0x7a4a10, emissiveIntensity:0.5, roughness:0.8 });
+for(let i=0;i<34;i++){
+  const a = i/34*Math.PI*2;
+  const f = new THREE.Mesh(fringeGeo, fringeMat);
+  f.position.set(Math.cos(a)*0.152, 0.212, Math.sin(a)*0.152);
+  f.rotation.x = Math.PI; lamp.add(f);
+  const bead = new THREE.Mesh(new THREE.SphereGeometry(0.005, 6, 5), fringeMat);
+  bead.position.set(Math.cos(a)*0.152, 0.238, Math.sin(a)*0.152); lamp.add(bead);
+}
+const finial = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 10), fringeMat);
+finial.position.y = 0.408; lamp.add(finial);
+
+/* --- fireplace (left, on back wall) --- */
+const FP_X = -2.85;
+const marble = new THREE.MeshStandardMaterial({ color:0xcfc2ac, roughness:0.32, metalness:0.02 });
+const marbleDark = new THREE.MeshStandardMaterial({ color:0x8f8471, roughness:0.4 });
+box(0.32, 1.10, 0.24, marble, FP_X-0.62, 0.55, -2.42, scene);
+box(0.32, 1.10, 0.24, marble, FP_X+0.62, 0.55, -2.42, scene);
+box(1.66, 0.17, 0.30, marble, FP_X, 1.19, -2.42, scene);
+box(1.30, 0.09, 0.26, marbleDark, FP_X, 1.31, -2.42, scene);
+box(1.62, 0.10, 0.42, marbleDark, FP_X, 0.05, -2.30, scene);   /* hearth */
+box(1.00, 0.92, 0.06, new THREE.MeshStandardMaterial({ color:0x070302, roughness:1 }), FP_X, 0.52, -2.545, scene);
+/* logs */
+const logMat = new THREE.MeshStandardMaterial({ color:0x241108, roughness:0.95 });
+const log1 = new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.055,0.62,10), logMat);
+log1.rotation.z = Math.PI/2; log1.rotation.y = 0.16; log1.position.set(FP_X, 0.175, -2.38); scene.add(log1);
+const log2 = new THREE.Mesh(new THREE.CylinderGeometry(0.042,0.042,0.5,10), logMat);
+log2.rotation.z = Math.PI/2; log2.rotation.y = -0.22; log2.position.set(FP_X+0.03, 0.255, -2.37); scene.add(log2);
+/* fire plane — additive, animated by light flicker */
+const fire = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.5),
+  new THREE.MeshBasicMaterial({ map:fireTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false }));
+fire.position.set(FP_X, 0.36, -2.44); scene.add(fire);
+/* andirons */
+for(const dx of [-0.24, 0.24]){
+  const and = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), brass);
+  and.position.set(FP_X+dx, 0.13, -2.28); scene.add(and);
+}
+/* candlesticks on mantel */
+const flames = [];
+for(const dx of [-0.42, 0.42]){
+  const cs = new THREE.Group(); cs.position.set(FP_X+dx, 1.275, -2.42); scene.add(cs);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.038, 0.115, 12), brass);
+  stem.position.y = 0.058; stem.castShadow = true; cs.add(stem);
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.018, 0.024, 12), brass);
+  cup.position.y = 0.125; cs.add(cup);
+  const wax = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.055, 10),
+    new THREE.MeshStandardMaterial({ color:0xe9e0cd, roughness:0.5 }));
+  wax.position.y = 0.163; cs.add(wax);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.011, 0.038, 8),
+    new THREE.MeshStandardMaterial({ color:0xffd982, emissive:0xffb636, emissiveIntensity:2.6 }));
+  flame.position.y = 0.214; cs.add(flame);
+  flames.push(flame);
+}
+
+/* --- window with moonlit rooftops (right wall) --- */
+const winGroup = new THREE.Group(); winGroup.position.set(5.16, 1.9, -0.35); winGroup.rotation.y = -Math.PI/2; scene.add(winGroup);
+const winPane = new THREE.Mesh(new THREE.PlaneGeometry(1.42, 2.0),
+  new THREE.MeshBasicMaterial({ map:windowTex }));
+winPane.position.z = 0.01; winGroup.add(winPane);
+const winFrameMat = new THREE.MeshStandardMaterial({ color:0xd8cbb0, roughness:0.5 });
+const wf = (w,h,d,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), winFrameMat);
+  m.position.set(x,y,z); m.castShadow = true; winGroup.add(m); };
+wf(1.62, 0.09, 0.09, 0,  1.045, 0.03); wf(1.62, 0.09, 0.09, 0, -1.045, 0.03);
+wf(0.09, 2.18, 0.09, -0.765, 0, 0.03); wf(0.09, 2.18, 0.09, 0.765, 0, 0.03);
+wf(0.055, 2.0, 0.06, 0, 0, 0.035); wf(1.42, 0.055, 0.06, 0, 0.32, 0.035); wf(1.42, 0.055, 0.06, 0, -0.36, 0.035);
+wf(1.9, 0.08, 0.22, 0, -1.14, 0.1);   /* sill */
+/* curtains */
+for(const s of [-1,1]){
+  const cur = new THREE.Mesh(new THREE.BoxGeometry(0.34, 2.45, 0.09),
+    new THREE.MeshStandardMaterial({ map:curtainTex, roughness:0.95 }));
+  cur.position.set(s*1.02, -0.06, 0.14); cur.castShadow = true; winGroup.add(cur);
+  const tie = new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.075,0.36,10), fringeMat.clone());
+  tie.rotation.z = Math.PI/2; tie.position.set(s*1.02, -0.52, 0.15); winGroup.add(tie);
+}
+const rodC = new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.025,2.6,10), brass);
+rodC.rotation.z = Math.PI/2; rodC.position.set(0, 1.24, 0.14); winGroup.add(rodC);
+
+/* --- framed pictures --- */
+function framed(tex, w, h, x, y, z, ry){
+  const g = new THREE.Group(); g.position.set(x,y,z); g.rotation.y = ry||0;
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(w+0.09, h+0.09, 0.05),
+    new THREE.MeshStandardMaterial({ color:0x8a6a2a, roughness:0.3, metalness:0.75 }));
+  frame.castShadow = true; g.add(frame);
+  const art = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+    new THREE.MeshStandardMaterial({ map:tex, roughness:0.85 }));
+  art.position.z = 0.027; g.add(art);
+  scene.add(g);
+}
+framed(paintingA, 1.05, 0.72,  FP_X, 2.28, -2.585, 0);
+framed(paintingA, 0.0, 0.0, 99,99,9,0); /* placeholder removed below */
+scene.remove(scene.children[scene.children.length-1]);
+framed(paintingB, 0.62, 0.82,  1.72, 2.18, -2.585, 0);
+framed(paintingB, 0.44, 0.56,  2.62, 2.02, -2.585, 0);
+
+/* --- chandelier --- */
+const chand = new THREE.Group(); chand.position.set(0, 3.4, -0.5); scene.add(chand);
+const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.62, 6), brass);
+chain.position.y = -0.31; chand.add(chain);
+const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.028, 10, 32), brass);
+ring.rotation.x = Math.PI/2; ring.position.y = -0.62; ring.castShadow = true; chand.add(ring);
+const hub = new THREE.Mesh(new THREE.SphereGeometry(0.05, 14, 10), brass);
+hub.position.y = -0.62; chand.add(hub);
+const chandFlames = [];
+for(let i=0;i<6;i++){
+  const a = i/6*Math.PI*2;
+  const cx = Math.cos(a)*0.34, cz = Math.sin(a)*0.34;
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.34, 6), brass);
+  arm.rotation.z = Math.PI/2; arm.rotation.y = -a; arm.position.set(cx*0.5, -0.645, cz*0.5); chand.add(arm);
+  const cupM = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.02, 0.035, 10), brass);
+  cupM.position.set(cx, -0.60, cz); chand.add(cupM);
+  const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.085, 8),
+    new THREE.MeshStandardMaterial({ color:0xe9e0cd, roughness:0.5 }));
+  candle.position.set(cx, -0.545, cz); chand.add(candle);
+  const fl = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.045, 8),
+    new THREE.MeshStandardMaterial({ color:0xffd982, emissive:0xffb636, emissiveIntensity:2.8 }));
+  fl.position.set(cx, -0.48, cz); chand.add(fl); chandFlames.push(fl);
+}
+
+/* --- dust motes in the lamplight --- */
+const DUST = 130;
+const dustBase = new Float32Array(DUST*3);
+const dustGeo = new THREE.BufferGeometry();
+{
+  const r = mulberry32(1212);
+  for(let i=0;i<DUST;i++){
+    dustBase[i*3]   = 0.4 + (r()-0.5)*2.6;
+    dustBase[i*3+1] = 0.5 + r()*2.2;
+    dustBase[i*3+2] = -1.1 + (r()-0.5)*2.4;
+  }
+}
+const dustPos = new Float32Array(DUST*3);
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+const dust = new THREE.Points(dustGeo,
+  new THREE.PointsMaterial({ color:0xffdca0, size:0.016, transparent:true, opacity:0.55,
+    blending:THREE.AdditiveBlending, depthWrite:false, sizeAttenuation:true }));
+dust.frustumCulled = false; scene.add(dust);
+
+/* ============================================================
+   9. AUDIO — additive synth, A4 = 440 Hz, inharmonic partials
+   ============================================================ */
+const midiToFreq = m => 440 * Math.pow(2, (m-69)/12);
+let audioCtx = null, masterGain = null;
+function ensureAudio(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.42;
+    const comp = audioCtx.createDynamicsCompressor();
+    comp.threshold.value = -18; comp.ratio.value = 5;
+    masterGain.connect(comp); comp.connect(audioCtx.destination);
+  }
+  if(audioCtx.state === 'suspended') audioCtx.resume();
+}
+function synthNote(midi, durSec, vel){
+  if(!audioCtx) return;
+  const f0 = midiToFreq(midi);
+  const sr = audioCtx.sampleRate;
+  const dur = Math.min(durSec + 2.0, 4.5);
+  const n = Math.floor(sr * dur);
+  const buf = audioCtx.createBuffer(1, n, sr);
+  const out = buf.getChannelData(0);
+  const B = 0.00045; /* piano inharmonicity */
+  const partials = [[1,1.0,1.6],[2,0.62,2.4],[3,0.42,3.1],[4,0.30,3.9],[5,0.20,4.8],[6,0.13,5.6],[7,0.09,6.5],[8,0.06,7.3],[9,0.04,8.2],[10,0.025,9.0]];
+  for(const [p, amp, decay] of partials){
+    const fp = p * f0 * Math.sqrt(1 + B*p*p);
+    const a = amp * vel * Math.exp(-decay * 0.32);
+    const w = 2*Math.PI*fp/sr;
+    const d = Math.exp(-decay/ (dur*0.9) * 1.15);
+    let phase = 0;
+    const norm = 1;
+    for(let i=0;i<n;i++){
+      out[i] += a * Math.sin(phase) * Math.pow(d, i/n* n/sr * (1/dur) * dur + i/sr * 0 ) * Math.exp(-decay*i/sr/dur*1.9);
+      phase += w;
+    }
+  }
+  /* gentle low-pass body */
+  const src = audioCtx.createBufferSource(); src.buffer = buf;
+  const lp = audioCtx.createBiquadFilter(); lp.type='lowpass';
+  lp.frequency.value = Math.min(12000, 1200 + f0*6); lp.Q.value = 0.4;
+  const g = audioCtx.createGain();
+  const t = audioCtx.currentTime;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.9, t + 0.008);
+  g.gain.setTargetAtTime(0.0, t + durSec*0.72, 0.42);
+  src.connect(lp); lp.connect(g); g.connect(masterGain);
+  src.start();
+}
+
+/* ============================================================
+   10. SIMULATION STATE — deterministic, stepped
+   ============================================================ */
+const DEFAULT_TEMPO = 116, SHOW_TEMPO = 168, SHOW_DURATION = 12.0;
+const state = {
+  simTime: 0, beat: 0, nextEvent: 0,
+  tunePlaying: true, tempo: DEFAULT_TEMPO,
+  notesPlayed: 0, pedalV: 0, inShowcase: false
+};
+const sounding = [];       /* {midi, start, end} */
+const recentStrikes = [];  /* {midi, t0}          */
+
+const window_bench = { notesPlayed:0, activeKeys:[], tempo:DEFAULT_TEMPO, rollPosition:0 };
+window.__bench = window_bench;
+
+function effectiveTempo(){ return state.inShowcase ? SHOW_TEMPO : state.tempo; }
+
+function resetSimulation(){
+  state.simTime = 0; state.beat = 0; state.nextEvent = 0;
+  state.notesPlayed = 0; state.pedalV = 0;
+  keyHoldUntil.fill(-1); keyPress.fill(0); dampState.fill(0);
+  sounding.length = 0; recentStrikes.length = 0;
+  for(let m=21;m<=108;m++){
+    if(keyGroups[m]){ keyGroups[m].position.y = 0; keyGroups[m].rotation.x = 0;
+      hammerPivots[m].rotation.x = hammerRest;
+      damperGroups[m].position.set(keyX[m]*0.92, 1.088, 0.055); }
+  }
+  for(const v of vibLines){ v.line.visible = false; v.line.material.opacity = 0; }
+  rollMap.offset.y = rollEmissive.offset.y = 0.80;
+}
+
+function noteOn(midi, durSec, vel){
+  const t = state.simTime;
+  keyHoldUntil[midi] = t + durSec + 0.16;
+  sounding.push({ midi, start:t, end:t + durSec });
+  recentStrikes.push({ midi, t0:t });
+  state.notesPlayed++;
+  if(audioCtx && !state.inShowcase) synthNote(midi, durSec, vel);
+}
+
+function pedalOnAt(beat){
+  for(const [a,b] of PEDAL_SEGMENTS) if(beat >= a && beat <= b) return true;
+  return false;
+}
+
+function stepSimulation(dt, advanceTune){
+  state.simTime += dt;
+  const tempo = effectiveTempo();
+  const secPerBeat = 60/tempo;
+
+  if(advanceTune){
+    state.beat += dt * tempo/60;
+    while(state.nextEvent < TUNE.length && TUNE[state.nextEvent][0] <= state.beat){
+      const [b, midi, durB] = TUNE[state.nextEvent];
+      noteOn(midi, durB*secPerBeat, 0.82 + ((state.nextEvent*37)%13)/40);
+      state.nextEvent++;
+    }
+  }
+  /* keys ease toward targets */
+  const kpRateUp = 13, kpRateDown = 8;
+  for(let m=21;m<=108;m++){
+    const target = state.simTime < keyHoldUntil[m] ? 1 : 0;
+    const cur = keyPress[m];
+    keyPress[m] = target > cur ? Math.min(target, cur + kpRateUp*dt)
+                               : Math.max(target, cur - kpRateDown*dt);
+  }
+  /* sustain pedal eases toward segment target */
+  const pedalTarget = advanceTune && pedalOnAt(state.beat) ? 1 : 0;
+  state.pedalV += clamp(pedalTarget - state.pedalV, -3.2*dt, 3.2*dt);
+  /* dampers follow max(key, pedal) */
+  for(let m=21;m<=108;m++){
+    const lift = Math.max(keyPress[m], state.pedalV);
+    dampState[m] += clamp(lift - dampState[m], -9*dt, 9*dt);
+  }
+  /* prune finished notes / strikes */
+  for(let i=sounding.length-1;i>=0;i--){
+    const s = sounding[i];
+    if(state.simTime > s.end + (state.pedalV > 0.5 ? 2.6 : 0.15)) sounding.splice(i,1);
+  }
+  for(let i=recentStrikes.length-1;i>=0;i--){
+    if(state.simTime - recentStrikes[i].t0 > 1.15) recentStrikes.splice(i,1);
+  }
+}
+
+/* ============================================================
+   11. VISUAL UPDATE — keys, hammers, dampers, strings, roll
+   ============================================================ */
+const _v3 = new THREE.Vector3();
+
+function updateVisuals(){
+  const t = state.simTime;
+
+  /* keys */
+  for(let m=21;m<=108;m++){
+    const p = keyPress[m];
+    const g = keyGroups[m];
+    g.position.y = -0.0075 * p;
+    g.rotation.x = 0.030 * p;
+  }
+  /* hammers — swing profile per recent strike */
+  const hammerAngle = new Float32Array(109).fill(hammerRest);
+  for(const s of recentStrikes){
+    const dt = t - s.t0;
+    let swing;
+    if(dt < 0) swing = 0;
+    else if(dt < 0.085){ const u = dt/0.085; swing = Math.pow(u, 1.7); }
+    else if(dt < 0.34){ const u = (dt-0.085)/0.255; swing = 1 - smooth(u)*0.92;
+      swing += Math.sin((dt-0.085)*34)*0.055*Math.exp(-(dt-0.085)*9); }
+    else swing = 0.08 * Math.exp(-(dt-0.34)*5);
+    const ang = hammerRest - clamp(swing,0,1.06) * (hammerRest - hammerStrike);
+    if(ang < hammerAngle[s.midi]) hammerAngle[s.midi] = ang;
+  }
+  for(let m=21;m<=108;m++) hammerPivots[m].rotation.x = hammerAngle[m];
+
+  /* dampers */
+  for(let m=21;m<=108;m++){
+    const d = dampState[m];
+    damperGroups[m].position.set(keyX[m]*0.92, 1.088 + 0.012*d, 0.055 + 0.030*d);
+  }
+
+  /* sustain pedal mesh */
+  pedalPivot.rotation.x = 0.135 * state.pedalV;
+
+  /* roll scroll — visible window of full canvas */
+  const progress = clamp(state.beat / TOTAL_BEATS, 0, 1);
+  rollMap.offset.y      = 0.80 * (1 - progress);
+  rollEmissive.offset.y = 0.80 * (1 - progress);
+  topSpool.rotation.x  = progress * Math.PI * 7;
+  botRoller.rotation.x = progress * Math.PI * 11;
+
+  /* string vibration — standing-wave ghost lines */
+  for(const s of stringMeshes){ /* decay ghost visibility by nearest sounding note */ }
+  for(const v of vibLines){
+    let bestAmp = 0, bestAge = 0, bestDur = 1;
+    for(const s of sounding){
+      if(s.midi !== v.midi) continue;
+      const age = t - s.start;
+      let amp;
+      if(t <= s.end) amp = 0.0042 * Math.exp(-2.1*age) * Math.min(1, age*30+0.12);
+      else if(state.pedalV > 0.5) amp = 0.0042 * Math.exp(-2.1*(s.end-s.start)) * Math.exp(-0.85*(t-s.end));
+      else amp = 0;
+      if(amp > bestAmp){ bestAmp = amp; bestAge = age; }
+    }
+    if(bestAmp > 0.00035){
+      v.line.visible = true;
+      v.line.material.opacity = clamp(bestAmp/0.0042, 0, 1) * 0.9;
+      const pos = v.pos, SEG = v.SEG;
+      const detune = (v.x*997) % 1;
+      for(let i=0;i<=SEG;i++){
+        const u = i/SEG;
+        const env = Math.sin(Math.PI*u);
+        const w1 = Math.sin(2*Math.PI*(5.5*bestAge*3 + detune) + u*Math.PI*3.2);
+        const d  = bestAmp * env * (0.75*Math.sin(Math.PI*u + w1*0.6) + 0.3*Math.sin(2*Math.PI*u + w1));
+        pos[i*3]   = v.x + d;
+        pos[i*3+1] = STRING_Y0 + u*STRING_H;
+        pos[i*3+2] = v.z + d*0.35;
+      }
+      v.geo.attributes.position.needsUpdate = true;
+    } else {
+      v.line.visible = false;
+    }
+  }
+
+  /* metronome pendulum — locked to tempo */
+  pendulum.rotation.z = 0.42 * Math.sin(Math.PI * effectiveTempo()/60 * t);
+
+  /* fire & candle flicker — pure functions of simTime (deterministic) */
+  const fl = Math.sin(t*11.3)*0.5 + Math.sin(t*23.7+1.7)*0.3 + Math.sin(t*5.1+0.6)*0.2;
+  fireLight.intensity = 21 + fl*6.5;
+  fire.material.opacity = 0.9 + fl*0.1;
+  chandelierLight.intensity = 28 + Math.sin(t*9.1+2.0)*2.4 + Math.sin(t*17.7)*1.4;
+  lampLight.intensity = 35 + Math.sin(t*6.3+0.8)*1.1;
+  for(let i=0;i<flames.length;i++) flames[i].scale.setScalar(1 + 0.16*Math.sin(t*13+i*2.4) + 0.08*Math.sin(t*29+i));
+  for(let i=0;i<chandFlames.length;i++) chandFlames[i].scale.setScalar(1 + 0.18*Math.sin(t*12+i*1.9+3) + 0.09*Math.sin(t*27+i*0.7));
+
+  /* dust motes drifting through lamplight */
+  for(let i=0;i<DUST;i++){
+    dustPos[i*3]   = dustBase[i*3]   + Math.sin(t*0.32 + i*1.7)*0.055;
+    dustPos[i*3+1] = dustBase[i*3+1] + Math.sin(t*0.21 + i*2.3)*0.075 - (t*0.008 % 0.4);
+    dustPos[i*3+2] = dustBase[i*3+2] + Math.cos(t*0.27 + i*1.1)*0.055;
+  }
+  dustGeo.attributes.position.needsUpdate = true;
+
+  /* bench feed */
+  window_bench.notesPlayed = state.notesPlayed;
+  const act = [];
+  for(let m=21;m<=108;m++) if(keyPress[m] > 0.08) act.push(m);
+  window_bench.activeKeys = act;
+  window_bench.tempo = state.tempo;
+  window_bench.rollPosition = clamp(state.beat / TOTAL_BEATS, 0, 1);
+}
+
+/* ============================================================
+   12. SHOWCASE — deterministic 12 s camera & simulation
+   ============================================================ */
+const SHOW_CAMS = [
+  { t:0.0,  p:[ 3.55, 2.15,  3.65], l:[ 0.0, 1.02, -1.60] },
+  { t:2.0,  p:[ 1.62, 1.42,  1.55], l:[ 0.0, 0.94, -1.35] },
+  { t:4.1,  p:[ 0.72, 0.94,  0.30], l:[ 0.05, 0.80, -0.95] },
+  { t:6.1,  p:[-0.62, 1.13,  0.10], l:[-0.10, 1.00, -1.70] },
+  { t:8.1,  p:[ 0.30, 1.26,  0.28], l:[ 0.0, 1.24, -1.70] },
+  { t:10.1, p:[-1.85, 1.55,  1.05], l:[ 0.1, 0.95, -1.65] },
+  { t:12.0, p:[ 2.75, 1.90,  3.35], l:[ 0.0, 1.04, -1.55] }
+];
+function showcaseCamAt(t){
+  let a = SHOW_CAMS[0], b = SHOW_CAMS[SHOW_CAMS.length-1];
+  for(let i=0;i<SHOW_CAMS.length-1;i++){
+    if(t >= SHOW_CAMS[i].t && t <= SHOW_CAMS[i+1].t){ a = SHOW_CAMS[i]; b = SHOW_CAMS[i+1]; break; }
+  }
+  const span = Math.max(0.0001, b.t - a.t);
+  const u = smooth(clamp((t - a.t)/span, 0, 1));
+  camera.position.set(lerp(a.p[0],b.p[0],u), lerp(a.p[1],b.p[1],u), lerp(a.p[2],b.p[2],u));
+  _v3.set(lerp(a.l[0],b.l[0],u), lerp(a.l[1],b.l[1],u), lerp(a.l[2],b.l[2],u));
+  camera.lookAt(_v3);
+}
+
+function seekShowcase(t){
+  t = clamp(t, 0, SHOW_DURATION);
+  const savedInShowcase = state.inShowcase;
+  resetSimulation();
+  state.inShowcase = true;
+  state.tunePlaying = true;
+  const DT = 1/240;
+  let acc = 0;
+  while(acc < t - 1e-9){
+    const step = Math.min(DT, t - acc);
+    stepSimulation(step, true);
+    acc += step;
+  }
+  updateVisuals();
+  showcaseCamAt(t);
+  composer.render();
+  /* restore interactive baseline; the frame above is what seek presents */
+  resetSimulation();
+  state.inShowcase = savedInShowcase;
+  state.tunePlaying = true;
+  camera.position.copy(CAM_HOME); controls.target.copy(TGT_HOME); controls.update();
+  updateVisuals();
+}
+window.showcase = { duration: SHOW_DURATION, seek: seekShowcase };
+
+/* ============================================================
+   13. RECORD VIDEO — captureStream + MediaRecorder → .webm
+   ============================================================ */
+const recordBtn = document.getElementById('recordBtn');
+let isRecording = false, recorder = null, recStart = 0;
+function startRecording(){
+  if(isRecording) return;
+  ensureAudio();
+  const stream = renderer.domElement.captureStream(60);
+  const mime = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
+    .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+  const chunks = [];
+  recorder = new MediaRecorder(stream, { mimeType:mime, videoBitsPerSecond: 16_000_000 });
+  recorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type:'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'hoffmann-upright-showcase.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    recordBtn.classList.remove('busy'); recordBtn.textContent = 'Record Video';
+  };
+  recorder.start(250);
+  isRecording = true; recStart = performance.now();
+  recordBtn.classList.add('busy'); recordBtn.textContent = 'RECORDING…';
+}
+recordBtn.addEventListener('click', startRecording);
+
+/* ============================================================
+   14. INPUT — Space / arrows / A–K / click keys / orbit
+   ============================================================ */
+const KEY_MAP = { a:60, w:61, s:62, e:63, d:64, f:65, t:66, g:67, y:68, h:69, u:70, j:71, k:72 };
+const tempoVal = document.getElementById('tempoVal');
+const playStateEl = document.getElementById('playState');
+const notesVal = document.getElementById('notesVal');
+
+window.addEventListener('keydown', e => {
+  if(e.code === 'Space'){ e.preventDefault(); ensureAudio(); state.tunePlaying = !state.tunePlaying; }
+  else if(e.code === 'ArrowUp'){ e.preventDefault(); state.tempo = clamp(state.tempo + 6, 60, 208); }
+  else if(e.code === 'ArrowDown'){ e.preventDefault(); state.tempo = clamp(state.tempo - 6, 60, 208); }
+  else {
+    const m = KEY_MAP[e.key.toLowerCase()];
+    if(m !== undefined && !e.repeat){ ensureAudio(); noteOn(m, 2.1, 0.9); }
+  }
+});
+
+const ray = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+let downX = 0, downY = 0;
+renderer.domElement.addEventListener('pointerdown', e => { downX = e.clientX; downY = e.clientY; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if(Math.hypot(e.clientX-downX, e.clientY-downY) > 6) return;
+  pointerNDC.set((e.clientX/window.innerWidth)*2-1, -(e.clientY/window.innerHeight)*2+1);
+  ray.setFromCamera(pointerNDC, camera);
+  const hits = ray.intersectObjects(clickTargets, false);
+  if(hits.length){ ensureAudio(); noteOn(hits[0].object.userData.midi, 1.7, 0.95); }
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  pointerNDC.set((e.clientX/window.innerWidth)*2-1, -(e.clientY/window.innerHeight)*2+1);
+  ray.setFromCamera(pointerNDC, camera);
+  renderer.domElement.style.cursor = ray.intersectObjects(clickTargets, false).length ? 'pointer' : 'grab';
+});
+
+/* ============================================================
+   15. MAIN LOOP
+   ============================================================ */
+const clock = new THREE.Clock();
+resetSimulation();
+state.tunePlaying = true;   /* self-playing from the moment the page opens */
+
+function animate(){
+  requestAnimationFrame(animate);
+
+  if(isRecording){
+    const t = (performance.now() - recStart)/1000;
+    seekShowcase(Math.min(t, SHOW_DURATION));
+    if(t >= SHOW_DURATION + 0.08 && recorder && recorder.state === 'recording'){
+      recorder.stop(); isRecording = false;
+    }
+  } else {
+    const dt = Math.min(clock.getDelta(), 0.05);
+    stepSimulation(dt, state.tunePlaying);
+    updateVisuals();
+    controls.update();
+    composer.render();
+  }
+  /* HUD */
+  tempoVal.textContent = state.tempo;
+  notesVal.textContent = state.notesPlayed;
+  playStateEl.textContent = state.tunePlaying ? 'PLAYING' : 'PAUSED';
+  playStateEl.style.color = state.tunePlaying ? '#8fd694' : '#e0a080';
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
+

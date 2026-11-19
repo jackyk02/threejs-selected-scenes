@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EYE OF THE STORM — Orbital Hurricane Surveillance</title>
+<link rel="icon" href="data:,">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#03070d;
+    font-family:"Avenir Next","Helvetica Neue",Helvetica,Arial,sans-serif; color:#dff2fb;
+    -webkit-user-select:none; user-select:none; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  .hud { position:fixed; z-index:5; pointer-events:none; }
+  .panel { pointer-events:auto; background:rgba(6,14,24,.58);
+    border:1px solid rgba(130,210,255,.16); border-radius:12px;
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    box-shadow:0 10px 44px rgba(0,0,0,.5), inset 0 1px 0 rgba(180,235,255,.08); }
+
+  /* ---------- top-left : mission block ---------- */
+  #mission { top:18px; left:18px; padding:14px 18px 13px; width:330px; }
+  .kicker { font-size:9px; letter-spacing:.34em; color:#7fd8ff; text-transform:uppercase;
+    display:flex; align-items:center; gap:8px; }
+  .live-dot { width:7px; height:7px; border-radius:50%; background:#ff5340;
+    box-shadow:0 0 8px #ff5340; animation:pulse 1.3s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1; transform:scale(1)} 50%{opacity:.35; transform:scale(.75)} }
+  #stormName { margin-top:8px; font-size:25px; font-weight:600; letter-spacing:.06em; color:#f2fbff; }
+  #stormName small { display:block; font-size:9px; font-weight:500; letter-spacing:.3em; color:#8fb8cc; margin-top:3px; }
+  .readout { margin-top:10px; padding-top:10px; border-top:1px solid rgba(130,210,255,.14);
+    font-size:11px; letter-spacing:.08em; color:#a9cfdd; line-height:1.9; font-variant-numeric:tabular-nums; }
+  .readout b { color:#eafaff; font-weight:600; }
+  .readout .flashes { color:#ffd9a0; }
+
+  /* ---------- top-right : category ---------- */
+  #catPanel { top:18px; right:18px; padding:12px 14px; text-align:center; }
+  #catPanel .kicker { justify-content:center; margin-bottom:9px; }
+  #pips { display:flex; gap:7px; }
+  .pip { width:38px; height:40px; border-radius:9px; border:1px solid rgba(160,225,255,.22);
+    background:rgba(10,22,34,.6); color:#8fd0e8; cursor:pointer; font-size:15px; font-weight:700;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+    transition:all .18s ease; font-family:inherit; }
+  .pip span { font-size:7px; letter-spacing:.16em; font-weight:600; opacity:.65; }
+  .pip:hover { border-color:rgba(160,225,255,.55); transform:translateY(-2px); }
+  .pip.on[data-cat="1"]{ background:#0f6f63; border-color:#2fe0c0; color:#bfffee; box-shadow:0 0 18px rgba(47,224,192,.4); }
+  .pip.on[data-cat="2"]{ background:#6f5c0f; border-color:#ffd94d; color:#fff3bf; box-shadow:0 0 18px rgba(255,217,77,.4); }
+  .pip.on[data-cat="3"]{ background:#6f3d0f; border-color:#ffae4d; color:#ffe3bf; box-shadow:0 0 20px rgba(255,174,77,.45); }
+  .pip.on[data-cat="4"]{ background:#6f1f0f; border-color:#ff5e4d; color:#ffc9bf; box-shadow:0 0 22px rgba(255,94,77,.5); }
+  .pip.on[data-cat="5"]{ background:#5e0f24; border-color:#ff2d55; color:#ffc2d1; box-shadow:0 0 24px rgba(255,45,85,.55); }
+  #catLabel { margin-top:9px; font-size:10px; letter-spacing:.18em; color:#ffd9a0; text-transform:uppercase; font-variant-numeric:tabular-nums; }
+
+  /* ---------- bottom-left : legend ---------- */
+  #legend { bottom:18px; left:18px; padding:10px 16px; font-size:10px; letter-spacing:.14em;
+    color:#9cc6d6; line-height:2.05; text-transform:uppercase; }
+  #legend b { display:inline-block; min-width:34px; color:#eafaff; border:1px solid rgba(160,225,255,.3);
+    border-radius:5px; padding:0 6px; margin-right:8px; text-align:center; background:rgba(14,28,42,.6); font-size:9px; }
+
+  /* ---------- bottom-right : record ---------- */
+  #recordWrap { bottom:18px; right:18px; text-align:right; }
+  #recordBtn { pointer-events:auto; cursor:pointer; border:1px solid rgba(255,120,90,.5);
+    background:linear-gradient(180deg, rgba(80,20,12,.85), rgba(40,8,6,.9));
+    color:#ffd7c2; font-family:inherit; font-size:11px; font-weight:700; letter-spacing:.24em;
+    text-transform:uppercase; padding:13px 22px; border-radius:999px;
+    display:flex; align-items:center; gap:10px; transition:all .2s ease;
+    box-shadow:0 8px 34px rgba(255,70,40,.18), inset 0 1px 0 rgba(255,200,170,.15); }
+  #recordBtn:hover { border-color:#ff8a5e; color:#fff; transform:translateY(-2px);
+    box-shadow:0 12px 44px rgba(255,70,40,.32), inset 0 1px 0 rgba(255,200,170,.2); }
+  #recordBtn .recDot { width:10px; height:10px; border-radius:50%; background:#ff5340; box-shadow:0 0 9px #ff5340; }
+  #recordBtn.recording { background:linear-gradient(180deg, rgba(120,18,8,.95), rgba(60,8,4,.95)); border-color:#ff6a3d; }
+  #recordBtn.recording .recDot { animation:pulse .7s infinite; }
+  #recHint { margin-top:7px; font-size:9px; letter-spacing:.26em; color:#7b98a6; text-transform:uppercase; }
+
+  /* ---------- toast ---------- */
+  #toast { bottom:96px; left:50%; transform:translate(-50%, 14px); padding:9px 22px; border-radius:999px;
+    background:rgba(8,20,32,.82); border:1px solid rgba(140,225,255,.3); color:#bfeaff;
+    font-size:10px; letter-spacing:.3em; text-transform:uppercase; opacity:0; transition:all .35s ease; pointer-events:none; }
+  #toast.show { opacity:1; transform:translate(-50%, 0); }
+
+  /* ---------- loader ---------- */
+  #loader { position:fixed; inset:0; z-index:50; background:#03070d; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; transition:opacity .8s ease; }
+  #loader.gone { opacity:0; pointer-events:none; }
+  #loader .lTitle { font-size:12px; letter-spacing:.5em; color:#7fd8ff; text-transform:uppercase; }
+  #loader .lBar { width:220px; height:1px; background:rgba(127,216,255,.15); overflow:hidden; }
+  #loader .lBar::after { content:""; display:block; width:60px; height:100%; background:#7fd8ff;
+    animation:scan 1.1s linear infinite; box-shadow:0 0 12px #7fd8ff; }
+  @keyframes scan { from{transform:translateX(-70px)} to{transform:translateX(230px)} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="loader">
+  <div class="lTitle">Generating Procedural Earth</div>
+  <div class="lBar"></div>
+</div>
+
+<div class="hud panel" id="mission">
+  <div class="kicker"><span class="live-dot"></span>Live · Orbital Pass</div>
+  <div id="stormName">HURRICANE KAI<small>ATLANTIC BASIN · CECIL&nbsp;SPACELAB OB-2</small></div>
+  <div class="readout">
+    EYE&nbsp;&nbsp;&nbsp;&nbsp;<b id="eyeCoords">16.5°N · 57.5°W</b><br>
+    TRACK&nbsp;&nbsp;<b id="trackInfo">TWN 285° · 22 km/h</b><br>
+    CELLS&nbsp;&nbsp;<b class="flashes" id="flashCount">0 LIGHTNING FLASHES</b><br>
+    HEMI&nbsp;&nbsp;&nbsp;<b id="hemiLabel">NORTHERN · CYCLONIC CCW</b>
+  </div>
+</div>
+
+<div class="hud panel" id="catPanel">
+  <div class="kicker">Storm Category</div>
+  <div id="pips"></div>
+  <div id="catLabel">Category 3 · Major</div>
+</div>
+
+<div class="hud panel" id="legend">
+  <b>Drag</b> Orbit &nbsp; <b>Wheel</b> Zoom<br>
+  <b>1–5</b> Category &nbsp; <b>H</b> Hemisphere &nbsp; <b>C</b> Record
+</div>
+
+<div class="hud" id="recordWrap">
+  <button id="recordBtn"><span class="recDot"></span><span id="recText">Record Showcase · 12s</span></button>
+  <div id="recHint">captures .webm via MediaRecorder</div>
+</div>
+
+<div class="hud" id="toast">Hemisphere flipped — spin reversed</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+const clamp = (x,a,b)=>Math.min(b,Math.max(a,x));
+const lerp = (a,b,t)=>a+(b-a)*t;
+const smoothstep=(a,b,x)=>{ const t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); };
+const smoother = t => { t=clamp(t,0,1); return t*t*t*(t*(t*6-15)+10); };
+
+/* ============================== deterministic RNG / noise ============================== */
+function mulberry32(seed){ return function(){ seed|=0; seed=(seed+0x6D2B79F5)|0; let t=Math.imul(seed^(seed>>>15),1|seed); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }; }
+const permTable = new Uint8Array(512);
+{ const r=mulberry32(1337); const p=new Uint8Array(256); for(let i=0;i<256;i++)p[i]=i;
+  for(let i=255;i>0;i--){ const j=(r()*(i+1))|0; const t=p[i]; p[i]=p[j]; p[j]=t; }
+  for(let i=0;i<512;i++) permTable[i]=p[i&255]; }
+function latHash(ix,iy,wrapX){ let x=((ix%wrapX)+wrapX)%wrapX; return permTable[(permTable[x&255]+iy)&255]/255; }
+function vnoise(x,y,wrapX){
+  const ix=Math.floor(x), iy=Math.floor(y), fx=x-ix, fy=y-iy;
+  const sx=fx*fx*(3-2*fx), sy=fy*fy*(3-2*fy);
+  const a=latHash(ix,iy,wrapX), b=latHash(ix+1,iy,wrapX), c=latHash(ix,iy+1,wrapX), d=latHash(ix+1,iy+1,wrapX);
+  const ab=a+(b-a)*sx, cd=c+(d-c)*sx;
+  return ab+(cd-ab)*sy;
+}
+function fbm(x,y,oct,baseWrap){
+  let amp=0.5, freq=1, sum=0, norm=0;
+  for(let i=0;i<oct;i++){
+    const w=Math.max(2, Math.round(baseWrap*freq));
+    sum += amp*vnoise(x*freq, y*freq, w); norm += amp; amp*=0.5; freq*=2;
+  }
+  return sum/norm;
+}
+
+/* ============================== procedural planet maps ============================== */
+const TW=1024, TH=512, EW=6, SEA=0.535;
+const hgrid = new Float32Array(TW*TH);
+const nygrid = new Float32Array(TW*TH);
+function heightAt(u,v){
+  const x=u*EW, y=v*EW*0.5;
+  const wx=fbm(x+5.2, y+1.3, 4, EW)-0.5;
+  const wy=fbm(x+1.7, y+9.1, 4, EW)-0.5;
+  return fbm(x+wx*2.6, y+wy*2.6, 6, EW);
+}
+function rampStops(stops,t){
+  if(t<=stops[0][0]) return [stops[0][1],stops[0][2],stops[0][3]];
+  for(let i=0;i<stops.length-1;i++){
+    const a=stops[i], b=stops[i+1];
+    if(t<=b[0]){ const f=(t-a[0])/(b[0]-a[0]); return [a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f, a[3]+(b[3]-a[3])*f]; }
+  }
+  const l=stops[stops.length-1]; return [l[1],l[2],l[3]];
+}
+const OCEAN=[[0,3,15,27],[0.45,6,35,56],[0.78,10,59,84],[0.93,17,93,113],[1,23,122,143]];
+const LAND =[[0,172,162,98],[0.07,148,156,88],[0.24,74,105,55],[0.42,55,87,45],[0.56,122,113,66],[0.69,110,98,80],[0.81,141,139,133],[0.91,215,221,229],[1,245,250,253]];
+
+function generatePlanetMaps(){
+  // pass 1 — height grid
+  for(let y=0;y<TH;y++){
+    const v=(y+0.5)/TH;
+    for(let x=0;x<TW;x++){
+      const u=(x+0.5)/TW;
+      hgrid[y*TW+x]=heightAt(u,v);
+      nygrid[y*TW+x]=Math.abs(v-0.5)*2;
+    }
+  }
+  // day map
+  const dayC=document.createElement('canvas'); dayC.width=TW; dayC.height=TH;
+  const dctx=dayC.getContext('2d'); const dImg=dctx.createImageData(TW,TH);
+  // specular (ocean mask) 256x128
+  const spC=document.createElement('canvas'); spC.width=256; spC.height=128;
+  const sctx=spC.getContext('2d'); const sImg=sctx.createImageData(256,128);
+  // night lights 1024x512
+  const niC=document.createElement('canvas'); niC.width=TW; niC.height=TH;
+  const nctx=niC.getContext('2d'); const nImg=nctx.createImageData(TW,TH);
+
+  for(let y=0;y<TH;y++){
+    const v=(y+0.5)/TH, ny=Math.abs(v-0.5)*2;
+    for(let x=0;x<TW;x++){
+      const i=y*TW+x, h=hgrid[i], u=(x+0.5)/TW;
+      let col;
+      if(h<SEA){
+        col=rampStops(OCEAN, h/SEA);
+      } else {
+        const t=(h-SEA)/(1-SEA);
+        col=rampStops(LAND, t);
+        const tundra=smoothstep(0.55,0.92,ny);
+        col=[lerp(col[0],118,tundra*0.6), lerp(col[1],112,tundra*0.6), lerp(col[2],98,tundra*0.6)];
+        // coastal sand fringe
+        if(h<SEA+0.014) col=[168,152,102];
+      }
+      // polar ice (only compute noise near poles)
+      if(ny>0.6){
+        const iceN=vnoise(u*9, v*5, 9)-0.5;
+        const ice=smoothstep(0.68,0.85, ny + iceN*0.22);
+        if(ice>0){ const f=ice*0.94; col=[lerp(col[0],232,f), lerp(col[1],238,f), lerp(col[2],246,f)]; }
+      }
+      const o=i*4;
+      dImg.data[o]=col[0]; dImg.data[o+1]=col[1]; dImg.data[o+2]=col[2]; dImg.data[o+3]=255;
+      // night lights
+      let li=0;
+      if(h>SEA && ny<0.66){
+        const civ=fbm(u*3.1+7.3, v*1.7+3.1, 3, 3);
+        const pop=fbm(u*11.0+13.7, v*5.5+9.2, 4, 11);
+        li=clamp((smoothstep(0.52,0.78,civ)*smoothstep(0.5,0.78,pop))*1.15, 0, 1);
+        li*=smoothstep(SEA, SEA+0.05, h)*0.75+0.35;
+      }
+      nImg.data[o]=255*li; nImg.data[o+1]=196*li; nImg.data[o+2]=116*li; nImg.data[o+3]=255;
+    }
+  }
+  dctx.putImageData(dImg,0,0);
+  nctx.putImageData(nImg,0,0);
+  // glowing city cores (seeded, only on land)
+  const gr=mulberry32(777001);
+  nctx.globalCompositeOperation='lighter';
+  for(let k=0;k<1100;k++){
+    const u=gr(), v=gr(); const ix=(u*TW)|0, iy=(v*TH)|0; const h=hgrid[iy*TW+ix];
+    if(h<=SEA) continue;
+    const civ=fbm(u*3.1+7.3, v*1.7+3.1, 3, 3);
+    if(civ<0.58) continue;
+    const rad=1.2+gr()*3.6, a=0.35+gr()*0.5;
+    const g=nctx.createRadialGradient(ix,iy,0,ix,iy,rad);
+    g.addColorStop(0,'rgba(255,214,150,'+a+')'); g.addColorStop(0.5,'rgba(255,180,100,'+(a*0.4)+')'); g.addColorStop(1,'rgba(255,180,100,0)');
+    nctx.fillStyle=g; nctx.beginPath(); nctx.arc(ix,iy,rad,0,7); nctx.fill();
+  }
+  nctx.globalCompositeOperation='source-over';
+  // specular ocean mask
+  for(let y=0;y<128;y++) for(let x=0;x<256;x++){
+    const hx=Math.min(TW-1, x*4), hy=Math.min(TH-1, y*4);
+    const ocean = hgrid[hy*TW+hx] < SEA ? 225 : 14;
+    const o=(y*256+x)*4; sImg.data[o]=ocean; sImg.data[o+1]=ocean; sImg.data[o+2]=ocean; sImg.data[o+3]=255;
+  }
+  sctx.putImageData(sImg,0,0);
+  return { dayCanvas:dayC, nightCanvas:niC, specCanvas:spC };
+}
+function generateCloudCanvas(){
+  const c=document.createElement('canvas'); c.width=TW; c.height=TH;
+  const ctx=c.getContext('2d'); const img=ctx.createImageData(TW,TH);
+  for(let y=0;y<TH;y++){
+    const v=(y+0.5)/TH, ny=Math.abs(v-0.5)*2;
+    for(let x=0;x<TW;x++){
+      const u=(x+0.5)/TW;
+      const cw=fbm(u*5.2, v*3.1+3.7, 5, 5);
+      const fine=fbm(u*13.0+9.1, v*6.5+1.9, 3, 13);
+      let a=smoothstep(0.50, 0.80, cw*0.78 + fine*0.30);
+      a=Math.pow(a, 1.35)*0.9;
+      if(ny>0.8) a*=0.85;
+      const o=(y*TW+x)*4;
+      img.data[o]=255; img.data[o+1]=255; img.data[o+2]=255; img.data[o+3]=a*255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+  return c;
+}
+function generateNoiseCanvas(){
+  const S=256, c=document.createElement('canvas'); c.width=S; c.height=S;
+  const ctx=c.getContext('2d'); const img=ctx.createImageData(S,S);
+  for(let y=0;y<S;y++) for(let x=0;x<S;x++){
+    const u=x/S*4, v=y/S*4;
+    img.data[(y*S+x)*4]  = fbm(u, v, 4, 4)*255;
+    img.data[(y*S+x)*4+1]= fbm(u+9.2, v+4.7, 4, 4)*255;
+    img.data[(y*S+x)*4+2]= fbm(u+3.3, v+11.1, 4, 4)*255;
+    img.data[(y*S+x)*4+3]= 255;
+  }
+  ctx.putImageData(img,0,0);
+  return c;
+}
+function makeGlowCanvas(size, inner, outer){
+  const c=document.createElement('canvas'); c.width=c.height=size;
+  const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(size/2,size/2,0,size/2,size/2,size/2);
+  g.addColorStop(0,inner); g.addColorStop(0.25,outer); g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,size,size);
+  return c;
+}
+function makeSunCanvas(){
+  const S=256, c=document.createElement('canvas'); c.width=c.height=S;
+  const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(S/2,S/2,0,S/2,S/2,S/2);
+  g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.08,'rgba(255,246,214,1)');
+  g.addColorStop(0.22,'rgba(255,214,140,0.55)'); g.addColorStop(0.55,'rgba(255,178,90,0.13)');
+  g.addColorStop(1,'rgba(255,160,60,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,S,S);
+  return c;
+}
+function makeBoltCanvas(variant){
+  const W=96, H=192, c=document.createElement('canvas'); c.width=W; c.height=H;
+  const ctx=c.getContext('2d'); const r=mulberry32(variant*7919+1013);
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  function strokePath(x0,y0,x1,y1,w,alpha){
+    const segs=6+((r()*4)|0);
+    ctx.beginPath(); ctx.moveTo(x0,y0);
+    for(let i=1;i<=segs;i++){
+      const f=i/segs;
+      const nx=x0+(x1-x0)*f + (r()-0.5)*20*(1-f*0.35);
+      const ny=y0+(y1-y0)*f;
+      ctx.lineTo(nx,ny);
+    }
+    ctx.shadowColor='#8fd4ff'; ctx.shadowBlur=13;
+    ctx.strokeStyle='rgba(185,228,255,'+alpha+')'; ctx.lineWidth=w; ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(255,255,255,'+Math.min(1,alpha+0.35)+')'; ctx.lineWidth=Math.max(0.8,w*0.4); ctx.stroke();
+  }
+  strokePath(W/2, 4, W/2+(r()-0.5)*24, 148+r()*34, 4.4, 0.95);
+  for(let i=0;i<3;i++){
+    const f=0.3+r()*0.5, sx=W/2+(r()-0.5)*16, sy=6+f*150;
+    strokePath(sx, sy, sx+(r()-0.5)*74, sy+38+r()*48, 1.9, 0.7);
+  }
+  return c;
+}
+
+/* ============================== scene setup ============================== */
+const container = document.getElementById('app');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x03070d);
+const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.01, 500);
+camera.position.set(2.35, 1.2, 2.55);
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.06;
+controls.minDistance = 1.35; controls.maxDistance = 9; controls.enablePan = false; controls.rotateSpeed = 0.6;
+
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(Math.min(devicePixelRatio, 2));
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.62, 0.65, 0.74);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* ---- textures ---- */
+const planetMaps = generatePlanetMaps();
+const dayTex = new THREE.CanvasTexture(planetMaps.dayCanvas); dayTex.colorSpace = THREE.SRGBColorSpace;
+const nightTex = new THREE.CanvasTexture(planetMaps.nightCanvas); nightTex.colorSpace = THREE.SRGBColorSpace;
+const specTex = new THREE.CanvasTexture(planetMaps.specCanvas);
+const cloudTex = new THREE.CanvasTexture(generateCloudCanvas()); cloudTex.colorSpace = THREE.SRGBColorSpace;
+const noiseTex = new THREE.CanvasTexture(generateNoiseCanvas());
+noiseTex.wrapS = noiseTex.wrapT = THREE.RepeatWrapping;
+const aniso = renderer.capabilities.getMaxAnisotropy();
+dayTex.anisotropy = nightTex.anisotropy = cloudTex.anisotropy = aniso;
+
+/* ---- stars ---- */
+{
+  const N=2600, pos=new Float32Array(N*3), col=new Float32Array(N*3);
+  const r=mulberry32(4242);
+  const palette=[[1,1,1],[0.82,0.9,1],[1,0.92,0.78],[0.68,0.78,1]];
+  for(let i=0;i<N;i++){
+    const u=r()*2-1, th=r()*Math.PI*2, s=Math.sqrt(1-u*u), rad=62+r()*38;
+    pos[i*3]=rad*s*Math.cos(th); pos[i*3+1]=rad*u; pos[i*3+2]=rad*s*Math.sin(th);
+    const p=palette[(r()*palette.length)|0], b=0.35+Math.pow(r(),2.2)*0.75;
+    col[i*3]=p[0]*b; col[i*3+1]=p[1]*b; col[i*3+2]=p[2]*b;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color', new THREE.BufferAttribute(col,3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ size:0.62, vertexColors:true, transparent:true, depthWrite:false })));
+}
+
+/* ---- sun sprite ---- */
+const sunTex = new THREE.CanvasTexture(makeSunCanvas()); sunTex.colorSpace = THREE.SRGBColorSpace;
+const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map:sunTex, color:0xfff2cf, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false }));
+sunSprite.scale.setScalar(9);
+scene.add(sunSprite);
+
+/* ============================== Earth ============================== */
+const earthGroup = new THREE.Group();
+scene.add(earthGroup);
+
+const SUN_DECL = 13 * D2R, SUN_LON0 = 10, SUN_RATE = 2.4; // deg per second — terminator sweeps the storm
+const sunDir = new THREE.Vector3(1,0,0);
+function computeSunDir(sunLonDeg){
+  const lo = sunLonDeg * D2R;
+  sunDir.set(Math.cos(SUN_DECL)*Math.sin(lo), Math.sin(SUN_DECL), Math.cos(SUN_DECL)*Math.cos(lo)).normalize();
+  return sunDir;
+}
+
+const earthUniforms = {
+  uDayTex:{ value:dayTex }, uNightTex:{ value:nightTex }, uSpecTex:{ value:specTex },
+  uSunDir:{ value:sunDir }
+};
+const earthMat = new THREE.ShaderMaterial({
+  uniforms: earthUniforms,
+  vertexShader: `
+    varying vec2 vUv; varying vec3 vWNormal; varying vec3 vWPos;
+    void main(){
+      vUv = uv;
+      vWNormal = normalize(mat3(modelMatrix) * normal);
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: `
+    uniform sampler2D uDayTex, uNightTex, uSpecTex;
+    uniform vec3 uSunDir;
+    varying vec2 vUv; varying vec3 vWNormal; varying vec3 vWPos;
+    void main(){
+      vec3 n = normalize(vWNormal);
+      vec3 v = normalize(cameraPosition - vWPos);
+      float sd = dot(n, uSunDir);
+      float dayF = smoothstep(-0.14, 0.22, sd);
+
+      vec3 dayCol = texture2D(uDayTex, vUv).rgb;
+      float dif = clamp(sd, 0.0, 1.0);
+      vec3 col = dayCol * (0.055 + 1.18 * pow(dif, 1.15));
+
+      // specular sun glint on oceans (Blinn-Phong)
+      vec3 h = normalize(uSunDir + v);
+      float spec = pow(max(dot(n, h), 0.0), 130.0);
+      float ocean = texture2D(uSpecTex, vUv).r;
+      col += vec3(1.0, 0.97, 0.9) * spec * ocean * smoothstep(-0.02, 0.28, sd) * 1.55;
+      col += vec3(0.9, 0.7, 0.45) * pow(max(dot(n,h),0.0), 8.0) * ocean * pow(clamp(1.0-abs(sd)*2.6,0.0,1.0), 2.0) * 0.4; // glint path at low sun
+
+      // night side — city lights
+      vec3 lights = texture2D(uNightTex, vUv).rgb;
+      vec3 nightAmb = dayCol * vec3(0.016, 0.022, 0.038);
+      vec3 nightCol = lights * vec3(1.0, 0.92, 0.78) * 1.25 + nightAmb;
+
+      col = mix(nightCol, col, dayF);
+
+      // atmospheric scattering rim
+      float fres = pow(1.0 - max(dot(n, v), 0.0), 2.7);
+      float daySide = smoothstep(-0.3, 0.45, sd);
+      vec3 atmo = mix(vec3(0.35, 0.58, 1.0), vec3(1.0, 0.55, 0.28), pow(clamp(1.0 - abs(sd)*2.4, 0.0, 1.0), 2.0));
+      col += atmo * fres * (0.18 + 0.9 * daySide);
+
+      gl_FragColor = vec4(col, 1.0);
+    }`
+});
+const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 96), earthMat);
+earthGroup.add(earth);
+
+/* ---- cloud layer (drifts) ---- */
+const cloudUniforms = { uCloudTex:{ value:cloudTex }, uSunDir:{ value:sunDir } };
+const cloudMat = new THREE.ShaderMaterial({
+  uniforms: cloudUniforms, transparent:true, depthWrite:false,
+  vertexShader: `
+    varying vec2 vUv; varying vec3 vWNormal; varying vec3 vWPos;
+    void main(){ vUv=uv; vWNormal=normalize(mat3(modelMatrix)*normal);
+      vec4 wp=modelMatrix*vec4(position,1.0); vWPos=wp.xyz;
+      gl_Position=projectionMatrix*viewMatrix*wp; }`,
+  fragmentShader: `
+    uniform sampler2D uCloudTex; uniform vec3 uSunDir;
+    varying vec2 vUv; varying vec3 vWNormal; varying vec3 vWPos;
+    void main(){
+      float a = texture2D(uCloudTex, vUv).a;
+      vec3 n = normalize(vWNormal);
+      float sd = dot(n, uSunDir);
+      float day = clamp(sd, 0.0, 1.0);
+      vec3 col = vec3(1.03) * (0.05 + 1.15 * pow(day, 1.25));
+      float low = pow(clamp(1.0 - abs(sd)*3.2, 0.0, 1.0), 2.0);
+      col = mix(col, vec3(1.12, 0.62, 0.32), low*0.65);   // sunset-lit cloud tops on terminator
+      float nightFade = smoothstep(-0.32, 0.12, sd);
+      gl_FragColor = vec4(col, a * (0.25 + 0.68*nightFade + 0.07));
+    }`
+});
+const cloudSphere = new THREE.Mesh(new THREE.SphereGeometry(1.014, 96, 72), cloudMat);
+cloudSphere.renderOrder = 2;
+earthGroup.add(cloudSphere);
+
+/* ---- atmosphere shell ---- */
+const atmoMat = new THREE.ShaderMaterial({
+  uniforms: { uSunDir:{ value:sunDir } },
+  transparent:true, side:THREE.BackSide, blending:THREE.AdditiveBlending, depthWrite:false,
+  vertexShader: `
+    varying vec3 vN; varying vec3 vWp;
+    void main(){ vN = normalize(normalMatrix * normal);
+      vec4 wp = modelMatrix * vec4(position,1.0); vWp = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp; }`,
+  fragmentShader: `
+    uniform vec3 uSunDir;
+    varying vec3 vN; varying vec3 vWp;
+    void main(){
+      float intensity = pow(clamp(0.72 - dot(normalize(vN), vec3(0.0,0.0,1.0)), 0.0, 1.0), 4.2);
+      vec3 radial = normalize(vWp);
+      float sd = dot(radial, uSunDir);
+      float daySide = 0.12 + 0.88 * smoothstep(-0.4, 0.5, sd);
+      vec3 rim = mix(vec3(0.32,0.56,1.0), vec3(1.0,0.52,0.22), pow(clamp(1.0-abs(sd)*2.4,0.0,1.0), 2.0));
+      gl_FragColor = vec4(rim, 1.0) * intensity * daySide * 1.6;
+    }`
+});
+const atmoShell = new THREE.Mesh(new THREE.SphereGeometry(1.17, 64, 48), atmoMat);
+atmoShell.renderOrder = 5;
+earthGroup.add(atmoShell);
+
+/* ============================== Hurricane ============================== */
+const STORM_R = 0.37;
+const START_LAT = 16.5, START_LON = -57.5;
+const V_LAT = 0.10, V_LON = -0.33; // degrees / s  (tracks WNW toward the Caribbean)
+
+const CATEGORIES = [ null,
+  { eye:0.315, density:0.82, spin:0.85, name:'CATEGORY 1', desc:'Hurricane',        wind:'119–153 km/h', pres:'985 hPa' },
+  { eye:0.255, density:0.98, spin:1.18, name:'CATEGORY 2', desc:'Hurricane',        wind:'154–177 km/h', pres:'968 hPa' },
+  { eye:0.200, density:1.18, spin:1.52, name:'CATEGORY 3', desc:'Major Hurricane',  wind:'178–208 km/h', pres:'946 hPa' },
+  { eye:0.155, density:1.42, spin:1.95, name:'CATEGORY 4', desc:'Major Hurricane',  wind:'209–251 km/h', pres:'922 hPa' },
+  { eye:0.118, density:1.72, spin:2.45, name:'CATEGORY 5', desc:'Catastrophic',     wind:'≥ 252 km/h',   pres:'905 hPa' } ];
+
+let category = 3, hemisphere = 'N';
+const spinSign = () => (hemisphere === 'N' ? 1 : -1);
+
+const stormGroup = new THREE.Group();
+earthGroup.add(stormGroup);
+
+const hurricaneUniforms = {
+  uTime:{ value:0 }, uSpin:{ value:CATEGORIES[3].spin }, uEye:{ value:CATEGORIES[3].eye },
+  uDensity:{ value:CATEGORIES[3].density }, uFlash:{ value:0 },
+  uNoise:{ value:noiseTex }, uSunDir:{ value:sunDir }
+};
+const hurricaneMat = new THREE.ShaderMaterial({
+  uniforms: hurricaneUniforms, transparent:true, depthWrite:false,
+  vertexShader: `
+    varying vec2 vP; varying vec3 vWNormal;
+    void main(){ vP = position.xy;
+      vWNormal = normalize(mat3(modelMatrix) * vec3(0.0,0.0,1.0));
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform float uTime, uSpin, uEye, uDensity, uFlash;
+    uniform sampler2D uNoise; uniform vec3 uSunDir;
+    varying vec2 vP; varying vec3 vWNormal;
+    void main(){
+      float r = length(vP);
+      if(r > 1.0) discard;
+      float ang = atan(vP.y, vP.x);
+      float rs = smoothstep(0.0, 1.0, r);
+
+      // differential rotation — the eye spins much faster than the outflow
+      float omega = mix(2.35, 0.55, pow(rs, 0.75));
+      float a2 = ang - uSpin * uTime * omega;
+
+      // logarithmic spiral bands
+      float u = a2 + 3.6 * log(r + 0.045);
+      float arms = 0.5 + 0.5 * cos(5.0 * u);
+      arms = pow(arms, 3.1);
+
+      float n1 = texture2D(uNoise, vec2(a2 * 0.127 + r * 0.55, r * 2.1 - uTime * 0.004)).r;
+      float n2 = texture2D(uNoise, vP * 2.3 + vec2(uTime * 0.006, -uTime * 0.005)).g;
+
+      float clear = smoothstep(uEye, uEye * 1.28, r);                 // calm eye
+      float dw = (r - uEye * 1.38) / (uEye * 0.42);
+      float eyewall = exp(-dw * dw) * 1.5;                            // dense eyewall
+      float body = smoothstep(uEye * 0.95, uEye * 1.75, r)
+                 * (1.0 - smoothstep(0.60, 0.97, r));                 // spiral envelope
+      float bands = arms * body * (0.42 + 0.85 * n1) * (0.72 + 0.5 * n2);
+      float cloud = (bands * 1.28 + eyewall * (0.65 + 0.55 * n2)) * clear * uDensity;
+      float alpha = clamp(cloud, 0.0, 1.0);
+      if(alpha < 0.015) discard;
+
+      vec3 nW = normalize(vWNormal);
+      float sd = dot(nW, uSunDir);
+      float day = clamp(sd * 0.9 + 0.30, 0.10, 1.2);
+      vec3 base = mix(vec3(0.55, 0.60, 0.71), vec3(1.05, 1.05, 1.01), clamp(cloud * 0.9, 0.0, 1.0));
+      vec3 col = base * day;
+      float low = pow(clamp(1.0 - abs(sd) * 3.0, 0.0, 1.0), 2.0);
+      col = mix(col, vec3(1.18, 0.6, 0.28), low * 0.55);              // terminator edge glow
+      col += uFlash * vec3(0.62, 0.78, 1.15) * (0.35 + 0.95 * clamp(cloud, 0.0, 1.0));
+      gl_FragColor = vec4(col, alpha * 0.97);
+    }`
+});
+const hurricaneDisc = new THREE.Mesh(new THREE.CircleGeometry(1, 160), hurricaneMat);
+hurricaneDisc.renderOrder = 3;
+hurricaneDisc.scale.setScalar(STORM_R);
+stormGroup.add(hurricaneDisc);
+
+/* cirrus outflow shield above the storm */
+const cirrusUniforms = {
+  uTime:{ value:0 }, uSpin:{ value:CATEGORIES[3].spin },
+  uNoise:{ value:noiseTex }, uSunDir:{ value:sunDir }
+};
+const cirrusMat = new THREE.ShaderMaterial({
+  uniforms: cirrusUniforms, transparent:true, depthWrite:false,
+  vertexShader: `
+    varying vec2 vP; varying vec3 vWNormal;
+    void main(){ vP = position.xy;
+      vWNormal = normalize(mat3(modelMatrix) * vec3(0.0,0.0,1.0));
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform float uTime, uSpin; uniform sampler2D uNoise; uniform vec3 uSunDir;
+    varying vec2 vP; varying vec3 vWNormal;
+    void main(){
+      float r = length(vP);
+      if(r > 1.0) discard;
+      float ang = atan(vP.y, vP.x);
+      float a2 = ang - uSpin * uTime * 0.11 - 1.35 * log(r + 0.05);
+      float streak = texture2D(uNoise, vec2(a2 * 2.4 / 6.2832, r * 4.4)).r;
+      float wisp = smoothstep(0.42, 0.8, streak);
+      float ring = smoothstep(0.10, 0.38, r) * (1.0 - smoothstep(0.72, 1.0, r));
+      float spokes = pow(0.5 + 0.5 * cos(a2 * 9.0 + r * 5.0), 5.0) * 0.35;
+      float alpha = (wisp * 0.55 + spokes) * ring * 0.62;
+      vec3 nW = normalize(vWNormal);
+      float sd = dot(nW, uSunDir);
+      vec3 col = vec3(0.96, 0.99, 1.05) * clamp(sd * 0.8 + 0.34, 0.14, 1.1);
+      gl_FragColor = vec4(col, alpha);
+    }`
+});
+const cirrus = new THREE.Mesh(new THREE.CircleGeometry(1, 128), cirrusMat);
+cirrus.position.z = 0.017;
+cirrus.scale.setScalar(STORM_R * 1.55);
+cirrus.renderOrder = 4;
+stormGroup.add(cirrus);
+
+const stormScaleShell = new THREE.Group(); // reserved (kept empty intentionally)
+stormGroup.scale.setScalar(1);
+
+/* ---- lightning ---- */
+const boltTextures = [0,1,2,3].map(i => { const t = new THREE.CanvasTexture(makeBoltCanvas(i)); t.colorSpace = THREE.SRGBColorSpace; return t; });
+const glowTex = new THREE.CanvasTexture(makeGlowCanvas(128, 'rgba(255,255,255,1)', 'rgba(150,210,255,0.55)')); glowTex.colorSpace = THREE.SRGBColorSpace;
+const flashGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xa8ccff, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false }));
+flashGlow.scale.setScalar(1.6);
+earthGroup.add(flashGlow);
+
+const activeFlashes = []; // { t0, sprite, seed }
+let flashPtr = 0, flashesTotal = 0;
+const FLASH_TIMES = (() => {
+  const r = mulberry32(20240607); const arr = [];
+  let t = 0.6; while (t < 240) { arr.push(t); t += 0.8 + r() * 1.7; }
+  for (const s of [1.75, 5.85, 6.4, 8.7, 10.5, 11.35]) arr.push(s);   // scripted showcase beats
+  return arr.sort((a,b) => a-b);
+})();
+function flashIntensity(age, seed){
+  if (age < 0.05) return 1.0;
+  const flick = Math.abs(Math.sin(age*34 + seed*12.9) * Math.sin(age*17 + seed*7.3));
+  return Math.exp(-(age-0.05)*5.2) * (0.35 + 0.65*flick);
+}
+function latLonFrame(latDeg, lonDeg){
+  const la = latDeg*D2R, lo = lonDeg*D2R;
+  const outward = new THREE.Vector3(Math.cos(la)*Math.sin(lo), Math.sin(la), Math.cos(la)*Math.cos(lo));
+  const east = new THREE.Vector3(Math.cos(lo), 0, -Math.sin(lo));
+  const north = new THREE.Vector3(-Math.sin(la)*Math.sin(lo), Math.cos(la), -Math.sin(la)*Math.cos(lo));
+  return { outward, east, north };
+}
+function spawnFlash(time){
+  const idx = flashesTotal;
+  const r = mulberry32(99991 + idx*7919);
+  const rf = (0.30 + r()*0.42) * STORM_R, ang = r()*Math.PI*2;
+  const { outward, east, north } = latLonFrame(sim.stormLat, sim.stormLon);
+  const pos = outward.clone().multiplyScalar(1.037)
+    .addScaledVector(east, Math.cos(ang)*rf)
+    .addScaledVector(north, Math.sin(ang)*rf);
+  const mat = new THREE.SpriteMaterial({ map:boltTextures[(r()*4)|0], color:0xd8ecff, transparent:true,
+    blending:THREE.AdditiveBlending, depthWrite:false, rotation:(r()-0.5)*1.6 });
+  const spr = new THREE.Sprite(mat);
+  spr.position.copy(pos);
+  spr.scale.set(0.13+r()*0.13, 0.27+r()*0.24, 1);
+  earthGroup.add(spr);
+  activeFlashes.push({ t0:time, sprite:spr, seed:r()*100, baseScale:spr.scale.clone() });
+  flashesTotal++;
+}
+
+/* ============================== simulation state ============================== */
+const sim = { time:0, stormLat:START_LAT, stormLon:START_LON, earthSpin:0, cloudDrift:0, sunLon:SUN_LON0 };
+const EARTH_SPIN = 0.012, CLOUD_DRIFT = 0.02;
+
+function syncScene(){
+  earthGroup.rotation.y = sim.earthSpin;
+  cloudSphere.rotation.y = sim.cloudDrift;
+  earthGroup.updateMatrixWorld(true);
+  const { outward } = latLonFrame(sim.stormLat, sim.stormLon);
+  stormGroup.position.copy(outward).multiplyScalar(1.031);
+  const outwardWorld = outward.clone().applyAxisAngle(new THREE.Vector3(0,1,0), sim.earthSpin);
+  stormGroup.lookAt(outwardWorld.clone().multiplyScalar(2));
+  earthGroup.updateMatrixWorld(true);
+  computeSunDir(sim.sunLon);
+  sunSprite.position.copy(sunDir).multiplyScalar(58);
+  flashGlow.position.copy(outward).multiplyScalar(1.042);
+  hurricaneUniforms.uTime.value = sim.time;
+  cirrusUniforms.uTime.value = sim.time;
+  hurricaneUniforms.uSpin.value = spinSign() * CATEGORIES[category].spin;
+  cirrusUniforms.uSpin.value = spinSign() * CATEGORIES[category].spin;
+  hurricaneUniforms.uEye.value = CATEGORIES[category].eye;
+  hurricaneUniforms.uDensity.value = CATEGORIES[category].density;
+  // flash intensity → uniforms & sprites
+  let glow = 0;
+  for (const f of activeFlashes){
+    const age = sim.time - f.t0;
+    const inten = flashIntensity(age, f.seed);
+    f.sprite.material.opacity = clamp(inten, 0, 1);
+    const s = 1 + inten * 0.35;
+    f.sprite.scale.set(f.baseScale.x * s, f.baseScale.y * s, 1);
+    glow += inten;
+  }
+  glow = clamp(glow, 0, 1.4);
+  hurricaneUniforms.uFlash.value = glow;
+  flashGlow.material.opacity = glow * 0.5;
+  flashGlow.scale.setScalar(1.15 + glow * 0.8);
+}
+function stepSim(dt){
+  sim.time += dt;
+  sim.stormLat += V_LAT * dt;
+  sim.stormLon += V_LON * dt;
+  sim.sunLon   += SUN_RATE * dt;
+  sim.earthSpin += EARTH_SPIN * dt;
+  sim.cloudDrift += CLOUD_DRIFT * dt;
+  while (flashPtr < FLASH_TIMES.length && FLASH_TIMES[flashPtr] <= sim.time){
+    spawnFlash(FLASH_TIMES[flashPtr]); flashPtr++;
+  }
+  for (let i = activeFlashes.length-1; i >= 0; i--){
+    if (sim.time - activeFlashes[i].t0 > 1.05){
+      const f = activeFlashes[i];
+      earthGroup.remove(f.sprite); f.sprite.material.dispose();
+      activeFlashes.splice(i, 1);
+    }
+  }
+  syncScene();
+}
+function resetSim(){
+  sim.time = 0; sim.stormLat = START_LAT; sim.stormLon = START_LON;
+  sim.earthSpin = 0; sim.cloudDrift = 0; sim.sunLon = SUN_LON0;
+  flashPtr = 0; flashesTotal = 0;
+  for (const f of activeFlashes){ earthGroup.remove(f.sprite); f.sprite.material.dispose(); }
+  activeFlashes.length = 0;
+  hurricaneUniforms.uFlash.value = 0;
+  syncScene();
+}
+
+/* ============================== showcase ============================== */
+const SHOWCASE_DURATION = 12.0;
+const CAM_KEYS = [
+  { t:0.0,  az:297, el:16, dist:3.55, focus:0.00 },
+  { t:2.2,  az:338, el:27, dist:2.30, focus:0.55 },
+  { t:4.6,  az:252, el:57, dist:1.12, focus:1.00 },
+  { t:6.2,  az:325, el:33, dist:1.40, focus:1.00 },
+  { t:8.3,  az:286, el:6,  dist:2.15, focus:0.35 },
+  { t:10.2, az:205, el:13, dist:2.70, focus:0.15 },
+  { t:12.0, az:297, el:24, dist:3.55, focus:0.00 }
+];
+const _target = new THREE.Vector3(), _stormW = new THREE.Vector3();
+function applyShowcaseCamera(t){
+  t = clamp(t, 0, SHOWCASE_DURATION);
+  let i = 0;
+  while (i < CAM_KEYS.length-2 && t > CAM_KEYS[i+1].t) i++;
+  const a = CAM_KEYS[i], b = CAM_KEYS[i+1];
+  const f = smoother((t - a.t) / Math.max(1e-5, b.t - a.t));
+  const az = lerp(a.az, b.az, f) * D2R, el = lerp(a.el, b.el, f) * D2R;
+  const dist = lerp(a.dist, b.dist, f), focus = lerp(a.focus, b.focus, f);
+  stormGroup.getWorldPosition(_stormW);
+  _target.copy(_stormW).multiplyScalar(focus); // focus 0 → planet center, 1 → storm
+  const dir = new THREE.Vector3(Math.sin(az)*Math.cos(el), Math.sin(el), Math.cos(az)*Math.cos(el));
+  camera.position.copy(_target).addScaledVector(dir, dist);
+  camera.up.set(0,1,0);
+  camera.lookAt(_target);
+  return _target.clone();
+}
+function renderShowcaseFrame(t){
+  resetSim();
+  const dt = 1/60;
+  let remaining = t;
+  while (remaining > 1e-6){ const d = Math.min(dt, remaining); stepSim(d); remaining -= d; }
+  const target = applyShowcaseCamera(t);
+  composer.render();
+  updateBench();
+  return target;
+}
+const windowShowcase = {
+  duration: SHOWCASE_DURATION,
+  seek(t){
+    if (recording) return;
+    t = clamp(+t || 0, 0, SHOWCASE_DURATION);
+    const target = renderShowcaseFrame(t);
+    controls.target.copy(target);
+    controls.enabled = true;
+    updateHUD();
+  }
+};
+window.showcase = windowShowcase;
+
+/* ============================== bench & HUD ============================== */
+window.__bench = { category:3, eyeLat:START_LAT, eyeLon:START_LON, flashes:0 };
+const normLon = lon => { let l = ((lon + 180) % 360 + 360) % 360 - 180; return l; };
+function updateBench(){
+  window.__bench.category = category;
+  window.__bench.eyeLat = sim.stormLat;
+  window.__bench.eyeLon = normLon(sim.stormLon);
+  window.__bench.flashes = flashesTotal;
+}
+const $ = id => document.getElementById(id);
+const eyeCoordsEl=$('eyeCoords'), flashCountEl=$('flashCount'), hemiLabelEl=$('hemiLabel'),
+      catLabelEl=$('catLabel'), trackInfoEl=$('trackInfo');
+function fmtLat(lat){ return Math.abs(lat).toFixed(1) + '°' + (lat>=0?'N':'S'); }
+function fmtLon(lon){ const l=normLon(lon); return Math.abs(l).toFixed(1) + '°' + (l>=0?'E':'W'); }
+function updateHUD(){
+  eyeCoordsEl.textContent = fmtLat(sim.stormLat) + ' · ' + fmtLon(sim.stormLon);
+  flashCountEl.textContent = flashesTotal + ' LIGHTNING FLASHES';
+  trackInfoEl.textContent = 'TWN 285° · 22 km/h';
+  const c = CATEGORIES[category];
+  catLabelEl.textContent = c.name + ' · ' + c.desc + ' · ' + c.pres;
+  hemiLabelEl.textContent = (hemisphere==='N' ? 'NORTHERN · CYCLONIC CCW' : 'SOUTHERN · CYCLONIC CW');
+  document.querySelectorAll('.pip').forEach(p => p.classList.toggle('on', +p.dataset.cat === category));
+}
+/* category pips */
+const pipsEl = $('pips');
+for (let i=1;i<=5;i++){
+  const b=document.createElement('button');
+  b.className='pip'; b.dataset.cat=i; b.innerHTML = i + '<span>CAT</span>';
+  b.addEventListener('click', () => setCategory(i));
+  pipsEl.appendChild(b);
+}
+const pipTitles = ['', '119–153 km/h','154–177 km/h','178–208 km/h','209–251 km/h','≥ 252 km/h'];
+document.querySelectorAll('.pip').forEach(p => p.title = pipTitles[+p.dataset.cat]);
+function setCategory(n){
+  category = clamp(n|0, 1, 5);
+  hurricaneUniforms.uEye.value = CATEGORIES[category].eye;
+  hurricaneUniforms.uDensity.value = CATEGORIES[category].density;
+  updateHUD(); updateBench();
+}
+let toastTimer = null;
+function showToast(msg){
+  const el = $('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+function toggleHemisphere(){
+  hemisphere = (hemisphere === 'N') ? 'S' : 'N';
+  sim.stormLat = Math.abs(sim.stormLat) * (hemisphere === 'N' ? 1 : -1);
+  syncScene(); updateHUD(); updateBench();
+  showToast(hemisphere === 'N' ? 'Northern hemisphere — spin counter-clockwise' : 'Southern hemisphere — spin reversed');
+}
+
+/* ============================== record ============================== */
+let recording = false, recStart = 0, mediaRecorder = null, recChunks = [];
+const recordBtn = $('recordBtn'), recText = $('recText');
+function pickMime(){
+  for (const m of ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']){
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';
+}
+function startRecording(){
+  if (recording) return;
+  if (!renderer.domElement.captureStream || !window.MediaRecorder){
+    showToast('MediaRecorder unavailable in this browser'); return;
+  }
+  const stream = renderer.domElement.captureStream(60);
+  const mime = pickMime();
+  try {
+    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType:mime, videoBitsPerSecond:14_000_000 } : undefined);
+  } catch(e){ showToast('Recording not supported'); return; }
+  recChunks = [];
+  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recChunks, { type: mime || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'hurricane-showcase.webm';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    recording = false;
+    recordBtn.classList.remove('recording');
+    recText.textContent = 'Record Showcase · 12s';
+    controls.enabled = true;
+    controls.target.set(0,0,0);
+    updateHUD();
+  };
+  recording = true;
+  recStart = performance.now();
+  recChunks = [];
+  mediaRecorder.start(250);
+  controls.enabled = false;
+  recordBtn.classList.add('recording');
+}
+recordBtn.addEventListener('click', startRecording);
+
+/* ============================== input ============================== */
+window.addEventListener('keydown', e => {
+  switch (e.code){
+    case 'Digit1': setCategory(1); break;
+    case 'Digit2': setCategory(2); break;
+    case 'Digit3': setCategory(3); break;
+    case 'Digit4': setCategory(4); break;
+    case 'Digit5': setCategory(5); break;
+    case 'KeyH': toggleHemisphere(); break;
+    case 'KeyC': startRecording(); break;
+  }
+});
+
+/* ============================== resize ============================== */
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+/* ============================== main loop ============================== */
+resetSim();
+updateHUD();
+updateBench();
+let last = performance.now(), acc = 0, hudThrottle = 0;
+function animate(){
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  if (recording){
+    const t = (now - recStart) / 1000;
+    recordBtn && (recText.textContent = 'REC ' + Math.min(t, SHOWCASE_DURATION).toFixed(1) + 's / 12s');
+    renderShowcaseFrame(Math.min(t, SHOWCASE_DURATION));
+    if (t >= SHOWCASE_DURATION && mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    last = now;
+    return;
+  }
+  let dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  acc += dt;
+  const step = 1/60;
+  let n = 0;
+  while (acc >= step && n < 4){ stepSim(step); acc -= step; n++; }
+  controls.update();
+  composer.render();
+  updateBench();
+  hudThrottle += dt;
+  if (hudThrottle > 0.2){ hudThrottle = 0; updateHUD(); }
+}
+animate();
+
+/* reveal */
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  document.getElementById('loader').classList.add('gone');
+}));
+</script>
+</body>
+</html>
+

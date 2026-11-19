@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Midtown Grid — Night Traffic</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#05070d;height:100%;
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;}
+  #app{position:fixed;inset:0;}
+  #hud{position:fixed;top:14px;left:16px;color:#cfd8ff;z-index:10;pointer-events:none;
+    text-shadow:0 0 8px #000,0 0 2px #000;user-select:none;}
+  #hud h1{font-size:15px;letter-spacing:3px;margin:0 0 4px 0;color:#ffe9b0;font-weight:600;}
+  #hud h1 span{color:#7fd4ff;}
+  #bench{font-size:11px;color:#9fb4e8;letter-spacing:1px;}
+  #bench b{color:#ffd166;}
+  #keys{position:fixed;bottom:14px;left:16px;color:#8fa0c8;font-size:11px;letter-spacing:1px;
+    z-index:10;pointer-events:none;text-shadow:0 0 6px #000;user-select:none;}
+  #keys b{color:#e8eeff;background:#1c2333;border:1px solid #39445f;border-radius:4px;padding:0 5px;}
+  #recordBtn{position:fixed;top:14px;right:16px;z-index:20;cursor:pointer;
+    font:600 12px "SF Mono",ui-monospace,Menlo,monospace;letter-spacing:1.5px;
+    color:#0b0e16;background:linear-gradient(180deg,#ffd166,#f0a832);
+    border:none;border-radius:6px;padding:10px 16px;
+    box-shadow:0 0 18px rgba(255,209,102,.45),0 2px 0 #8a5a00;transition:transform .12s;}
+  #recordBtn:hover{transform:translateY(-1px);}
+  #recordBtn:active{transform:translateY(1px);}
+  #recordBtn[disabled]{opacity:.6;cursor:wait;}
+  #rec{position:fixed;top:18px;right:210px;z-index:20;color:#ff5d5d;font-size:12px;letter-spacing:2px;
+    display:none;align-items:center;gap:8px;}
+  #rec .dot{width:10px;height:10px;border-radius:50%;background:#ff3b3b;animation:blink 0.7s steps(1) infinite;}
+  @keyframes blink{50%{opacity:.15;}}
+</style>
+<script type="importmap">
+{"imports":{
+  "three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div id="hud">
+  <h1>MIDTOWN <span>GRID</span> // NIGHT TRAFFIC</h1>
+  <div id="bench">cars <b>0</b> · collisions <b>0</b> · red-light violations <b>0</b></div>
+</div>
+<div id="keys"><b>C</b> ride a car &nbsp;·&nbsp; <b>drag</b> orbit &nbsp;·&nbsp; <b>scroll</b> zoom &nbsp;·&nbsp; <b>R</b> record</div>
+<button id="recordBtn">◉ RECORD VIDEO</button>
+<div id="rec"><span class="dot"></span>REC SHOWCASE</div>
+
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+
+/* ============================================================
+   MIDTOWN GRID — interactive 3D night city with agent traffic
+   ============================================================ */
+
+// ---------- deterministic RNG ----------
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+
+// ---------- world layout constants ----------
+const BLOCKS=6, NROAD=BLOCKS+1, PITCH=46, ROAD_W=13, HALF_ROAD=ROAD_W/2;
+const LANE=3.1, CAR_LEN=4.4, CAR_WID=1.9, WORLD=640, DT=1/60;
+const roadCoords=[]; for(let i=0;i<NROAD;i++) roadCoords.push((i-BLOCKS/2)*PITCH);
+const nodeId=(i,j)=>i*NROAD+j;
+
+// ---------- scene / camera / renderer ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05070d);
+scene.fog = new THREE.FogExp2(0x0a0e1c, 0.0026);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 1200);
+camera.position.set(150, 120, 150);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,4,0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.maxPolarAngle = Math.PI*0.495;
+controls.minDistance = 12;
+controls.maxDistance = 420;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.55;
+
+// ---------- lights ----------
+const hemi = new THREE.HemisphereLight(0x33415e, 0x05060a, 1.05);
+scene.add(hemi);
+const moon = new THREE.DirectionalLight(0xbdd0ff, 1.6);
+moon.position.set(140, 210, 80);
+moon.castShadow = true;
+moon.shadow.mapSize.set(4096, 4096);
+moon.shadow.camera.left=-180; moon.shadow.camera.right=180;
+moon.shadow.camera.top=180;   moon.shadow.camera.bottom=-180;
+moon.shadow.camera.near=20;   moon.shadow.camera.far=520;
+moon.shadow.bias=-0.0004; moon.shadow.normalBias=0.02; moon.shadow.radius=4;
+scene.add(moon);
+const amb = new THREE.AmbientLight(0x1a2138, 0.9);
+scene.add(amb);
+
+// ---------- procedural canvas helpers ----------
+function makeCanvas(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; }
+
+/* --- ground texture: asphalt, sidewalks, markings, crosswalks, stop lines --- */
+function buildGroundTexture(){
+  const S=2048, c=makeCanvas(S,S), g=c.getContext('2d');
+  const px=m=>S/WORLD*m, X=x=>(x+WORLD/2)*S/WORLD;
+  const rng=mulberry32(9001);
+  // base
+  g.fillStyle='#0c0e13'; g.fillRect(0,0,S,S);
+  // city slab
+  g.fillStyle='#10131a'; g.fillRect(X(-3*PITCH-HALF_ROAD-14),X(-3*PITCH-HALF_ROAD-14),
+                                     (6*PITCH+ROAD_W+28)*S/WORLD,(6*PITCH+ROAD_W+28)*S/WORLD);
+  // blocks: sidewalk + lot
+  for(let i=0;i<BLOCKS;i++)for(let j=0;j<BLOCKS;j++){
+    const x0=roadCoords[i]+HALF_ROAD, x1=roadCoords[i+1]-HALF_ROAD;
+    const z0=roadCoords[j]+HALF_ROAD, z1=roadCoords[j+1]-HALF_ROAD;
+    g.fillStyle='#262c37'; g.fillRect(X(x0),X(z0),(x1-x0)*S/WORLD,(z1-z0)*S/WORLD);
+    g.fillStyle='#161a23'; g.fillRect(X(x0+2.2),X(z0+2.2),(x1-x0-4.4)*S/WORLD,(z1-z0-4.4)*S/WORLD);
+    for(let k=0;k<260;k++){ g.fillStyle=`rgba(255,255,255,${rng()*0.05})`;
+      g.fillRect(X(x0)+rng()*(x1-x0)*S/WORLD, X(z0)+rng()*(z1-z0)*S/WORLD, 2,2); }
+  }
+  // roads (wet sheen gradient)
+  const roadLen=(6*PITCH+ROAD_W)*S/WORLD;
+  for(const cpos of roadCoords){
+    // horizontal road (along x) — vertical gradient
+    let gr=g.createLinearGradient(0,X(cpos-HALF_ROAD),0,X(cpos+HALF_ROAD));
+    gr.addColorStop(0,'#101219'); gr.addColorStop(0.5,'#1d222c'); gr.addColorStop(1,'#101219');
+    g.fillStyle=gr; g.fillRect(X(-3*PITCH-HALF_ROAD),X(cpos-HALF_ROAD),roadLen,ROAD_W*S/WORLD);
+    gr=g.createLinearGradient(X(cpos-HALF_ROAD),0,X(cpos+HALF_ROAD),0);
+    gr.addColorStop(0,'#101219'); gr.addColorStop(0.5,'#1d222c'); gr.addColorStop(1,'#101219');
+    g.fillStyle=gr; g.fillRect(X(cpos-HALF_ROAD),X(-3*PITCH-HALF_ROAD),ROAD_W*S/WORLD,roadLen);
+  }
+  // asphalt speckle
+  for(let k=0;k<6500;k++){
+    const onX=rng()<0.5; const cpos=roadCoords[(rng()*NROAD)|0];
+    const along=(-3*PITCH-HALF_ROAD)+rng()*(6*PITCH+ROAD_W);
+    const off=(rng()*2-1)*(HALF_ROAD-0.3);
+    const wx=onX?along:cpos+off, wz=onX?cpos+off:along;
+    g.fillStyle=`rgba(${180+rng()*60|0},${190+rng()*50|0},255,${rng()*0.06})`;
+    g.fillRect(X(wx),X(wz),1.6,1.6);
+  }
+  // lane lines per segment (skip intersection boxes)
+  g.lineCap='butt';
+  for(let i=0;i<NROAD;i++){
+    for(let seg=0;seg<BLOCKS;seg++){
+      const a=roadCoords[seg]+HALF_ROAD+1.2, b=roadCoords[seg+1]-HALF_ROAD-1.2;
+      for(const horiz of [true,false]){
+        const cpos=roadCoords[i];
+        // center dashed line
+        g.strokeStyle='rgba(255,208,96,0.85)'; g.lineWidth=px(0.28); g.setLineDash([px(3),px(2.6)]);
+        g.beginPath();
+        if(horiz){g.moveTo(X(a),X(cpos));g.lineTo(X(b),X(cpos));}else{g.moveTo(X(cpos),X(a));g.lineTo(X(cpos),X(b));}
+        g.stroke();
+        // solid edge lines
+        g.setLineDash([]); g.strokeStyle='rgba(225,235,255,0.42)'; g.lineWidth=px(0.18);
+        for(const s of [-1,1]){
+          g.beginPath();
+          if(horiz){g.moveTo(X(a),X(cpos+s*(HALF_ROAD-0.55)));g.lineTo(X(b),X(cpos+s*(HALF_ROAD-0.55)));}
+          else{g.moveTo(X(cpos+s*(HALF_ROAD-0.55)),X(a));g.lineTo(X(cpos+s*(HALF_ROAD-0.55)),X(b));}
+          g.stroke();
+        }
+      }
+    }
+  }
+  g.setLineDash([]);
+  // crosswalks + stop lines at every intersection, all four approaches
+  const stripe=(cx,cz,alongX)=>{
+    g.fillStyle='rgba(235,240,255,0.8)';
+    for(let s=-HALF_ROAD+1.1;s<HALF_ROAD-0.8;s+=1.15){
+      if(alongX) g.fillRect(X(cx+s-0.38),X(cz-1.5),px(0.76),px(3.0));
+      else       g.fillRect(X(cx-1.5),X(cz+s-0.38),px(3.0),px(0.76));
+    }
+  };
+  for(let i=0;i<NROAD;i++)for(let j=0;j<NROAD;j++){
+    const cx=roadCoords[i], cz=roadCoords[j];
+    const o=HALF_ROAD+1.1, stop=HALF_ROAD+4.6;
+    stripe(cx, cz-o, true); stripe(cx, cz+o, true);
+    stripe(cx-o, cz, false); stripe(cx+o, cz, false);
+    g.fillStyle='rgba(235,240,255,0.9)';
+    // stop lines (one per approach, right-hand side)
+    g.fillRect(X(cx+0.6), X(cz-stop-0.35), px(HALF_ROAD-0.8), px(0.7));   // from west, heading east
+    g.fillRect(X(cx-HALF_ROAD+0.2), X(cz+stop-0.35), px(HALF_ROAD-0.8), px(0.7)); // from east
+    g.fillRect(X(cx+stop-0.35), X(cz+0.6), px(0.7), px(HALF_ROAD-0.8));   // from north
+    g.fillRect(X(cx-stop-0.35), X(cz-HALF_ROAD+0.2), px(0.7), px(HALF_ROAD-0.8)); // from south
+  }
+  const tex=new THREE.CanvasTexture(c);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+/* --- facade texture pair (albedo + emissive windows) --- */
+function buildFacade(seed, warmth, floors, cols){
+  const rng=mulberry32(seed);
+  const c=makeCanvas(256,512), e=makeCanvas(256,512);
+  const g=c.getContext('2d'), ge=e.getContext('2d');
+  const grad=g.createLinearGradient(0,0,0,512);
+  grad.addColorStop(0,'#232a38'); grad.addColorStop(1,'#161b26');
+  g.fillStyle=grad; g.fillRect(0,0,256,512);
+  // vertical mullions / floor bands
+  for(let f=0;f<=floors;f++){ g.fillStyle='rgba(0,0,0,0.35)'; g.fillRect(0,(f*512/floors)|0,256,2); }
+  for(let k=0;k<120;k++){ g.fillStyle=`rgba(255,255,255,${rng()*0.04})`; g.fillRect(rng()*256,rng()*512,3,3); }
+  ge.fillStyle='#000'; ge.fillRect(0,0,256,512);
+  const wW=256/cols*0.52, wH=512/floors*0.42;
+  for(let f=0;f<floors;f++)for(let col=0;col<cols;col++){
+    const x=(col+0.5)*256/cols-wW/2, y=(f+0.5)*512/floors-wH/2;
+    const lit=rng()<warmth;
+    if(lit){
+      const warm=rng()<0.72;
+      const colLit=warm?'#ffd9a0':'#a8d8ff';
+      g.fillStyle=warm?'#8a6b3a':'#3a5a78'; g.fillRect(x,y,wW,wH);
+      ge.fillStyle=colLit; ge.fillRect(x,y,wW,wH);
+      ge.fillStyle='rgba(0,0,0,0.25)'; ge.fillRect(x,y+wH*0.45,wW,2); // blind split
+    } else {
+      g.fillStyle='#0e1420'; g.fillRect(x,y,wW,wH);
+    }
+  }
+  const map=new THREE.CanvasTexture(c); map.colorSpace=THREE.SRGBColorSpace;
+  const emissive=new THREE.CanvasTexture(e); emissive.colorSpace=THREE.SRGBColorSpace;
+  map.anisotropy=4; emissive.anisotropy=4;
+  return {map, emissive};
+}
+
+/* --- radial glow texture (lamp pools) --- */
+function buildGlowTexture(){
+  const c=makeCanvas(128,128), g=c.getContext('2d');
+  const gr=g.createRadialGradient(64,64,2,64,64,64);
+  gr.addColorStop(0,'rgba(255,225,150,0.9)');
+  gr.addColorStop(0.35,'rgba(255,205,110,0.35)');
+  gr.addColorStop(1,'rgba(255,200,100,0)');
+  g.fillStyle=gr; g.fillRect(0,0,128,128);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+
+// ---------- ground ----------
+const groundMat=new THREE.MeshPhysicalMaterial({
+  map:buildGroundTexture(), roughness:0.32, metalness:0.25,
+  clearcoat:0.9, clearcoatRoughness:0.28, envMapIntensity:0.6
+});
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(WORLD,WORLD), groundMat);
+ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
+
+// ---------- buildings ----------
+const facadeVariants=[
+  buildFacade(11,0.42,16,6), buildFacade(23,0.30,22,7),
+  buildFacade(37,0.55,12,5), buildFacade(53,0.24,26,8)
+];
+const buildingGroup=new THREE.Group(); scene.add(buildingGroup);
+const antennaTips=[];
+{
+  const rng=mulberry32(777);
+  const roofMat=new THREE.MeshStandardMaterial({color:0x11151d, roughness:0.9});
+  const towerMat=new THREE.MeshStandardMaterial({color:0x1c212c, roughness:0.8});
+  for(let i=0;i<BLOCKS;i++)for(let j=0;j<BLOCKS;j++){
+    const x0=roadCoords[i]+HALF_ROAD, x1=roadCoords[i+1]-HALF_ROAD;
+    const z0=roadCoords[j]+HALF_ROAD, z1=roadCoords[j+1]-HALF_ROAD;
+    const bx=(x0+x1)/2, bz=(z0+z1)/2, bw=(x1-x0), bd=(z1-z0);
+    const plaza=rng()<0.14;
+    const n = plaza?0 : (rng()<0.55?1:(rng()<0.7?2:3));
+    for(let b=0;b<n;b++){
+      const fw = plaza?0:(n===1?bw*0.72:bw*0.34+rng()*bw*0.12);
+      const fd = plaza?0:(n===1?bd*0.72:bd*0.34+rng()*bd*0.12);
+      const h  = 16+rng()*rng()*58+(n===1?14:0);
+      const ox = n===1?0:(b%2? 1:-1)*bw*0.21*(rng()<0.5?1:0.6);
+      const oz = n===1?0:(b<2? -1:1)*bd*0.21*(rng()<0.5?1:0.6);
+      const v=facadeVariants[(rng()*facadeVariants.length)|0];
+      const mat=new THREE.MeshStandardMaterial({
+        map:v.map, emissiveMap:v.emissive, emissive:0xffffff,
+        emissiveIntensity:1.35, roughness:0.82, metalness:0.08
+      });
+      const geo=new THREE.BoxGeometry(fw,h,fd);
+      const mesh=new THREE.Mesh(geo,mat);
+      mesh.position.set(bx+ox,h/2,bz+oz);
+      mesh.castShadow=true; mesh.receiveShadow=true;
+      buildingGroup.add(mesh);
+      // parapet
+      const par=new THREE.Mesh(new THREE.BoxGeometry(fw+0.6,1.1,fd+0.6),roofMat);
+      par.position.set(bx+ox,h+0.55,bz+oz); par.castShadow=true; buildingGroup.add(par);
+      // rooftop clutter
+      if(rng()<0.5){
+        const wt=new THREE.Mesh(new THREE.CylinderGeometry(1.4,1.6,2.6,10),towerMat);
+        wt.position.set(bx+ox+(rng()-0.5)*fw*0.4,h+2.2,bz+oz+(rng()-0.5)*fd*0.4);
+        wt.castShadow=true; buildingGroup.add(wt);
+        const cone=new THREE.Mesh(new THREE.ConeGeometry(1.5,1.2,10),roofMat);
+        cone.position.set(wt.position.x,h+4.1,wt.position.z); buildingGroup.add(cone);
+      }
+      if(h>38 && rng()<0.75){
+        const ah=6+rng()*9;
+        const ant=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.3,ah,6),towerMat);
+        ant.position.set(bx+ox,h+ah/2,bz+oz); buildingGroup.add(ant);
+        const tipMat=new THREE.MeshBasicMaterial({color:0xff3b30});
+        const tip=new THREE.Mesh(new THREE.SphereGeometry(0.42,8,8),tipMat);
+        tip.position.set(bx+ox,h+ah+0.2,bz+oz); buildingGroup.add(tip);
+        antennaTips.push(tipMat);
+      }
+    }
+    if(plaza){ // low pavilion so plaza blocks aren't empty
+      const pav=new THREE.Mesh(new THREE.BoxGeometry(bw*0.4,4+rng()*3,bd*0.4),
+        new THREE.MeshStandardMaterial({color:0x1a1f2a,roughness:0.7,
+          emissive:0xffc06a,emissiveIntensity:0.35}));
+      pav.position.set(bx,pav.geometry.parameters.height/2,bz);
+      pav.castShadow=true; pav.receiveShadow=true; buildingGroup.add(pav);
+    }
+  }
+}
+
+// ---------- street lamps ----------
+const lampPositions=[];
+for(let i=0;i<NROAD;i++)for(let j=0;j<NROAD;j++){
+  const cx=roadCoords[i], cz=roadCoords[j];
+  lampPositions.push([cx+HALF_ROAD+1.6, cz+HALF_ROAD+1.6]);
+  lampPositions.push([cx-HALF_ROAD-1.6, cz-HALF_ROAD-1.6]);
+}
+{
+  const n=lampPositions.length;
+  const poleGeo=new THREE.CylinderGeometry(0.14,0.2,6.2,8);
+  const poleMat=new THREE.MeshStandardMaterial({color:0x2a3140,roughness:0.6,metalness:0.6});
+  const poles=new THREE.InstancedMesh(poleGeo,poleMat,n);
+  const headGeo=new THREE.BoxGeometry(1.6,0.28,0.6);
+  const headMat=new THREE.MeshBasicMaterial({color:0xffe6a8});
+  const heads=new THREE.InstancedMesh(headGeo,headMat,n);
+  const m=new THREE.Matrix4(), q=new THREE.Quaternion(), s=new THREE.Vector3(1,1,1);
+  const p=new THREE.Vector3();
+  lampPositions.forEach(([x,z],k)=>{
+    p.set(x,3.1,z); m.compose(p,q,s); poles.setMatrixAt(k,m);
+    p.set(x,6.25,z); m.compose(p,q,s); heads.setMatrixAt(k,m);
+  });
+  poles.castShadow=true;
+  scene.add(poles,heads);
+  // warm light pools on the wet asphalt
+  const poolTex=buildGlowTexture();
+  const poolGeo=new THREE.PlaneGeometry(13,13);
+  const poolMat=new THREE.MeshBasicMaterial({map:poolTex,transparent:true,opacity:0.75,
+    blending:THREE.AdditiveBlending,depthWrite:false});
+  const pools=new THREE.InstancedMesh(poolGeo,poolMat,n);
+  const rq=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2);
+  lampPositions.forEach(([x,z],k)=>{
+    p.set(x,0.06,z); m.compose(p,rq,s); pools.setMatrixAt(k,m);
+  });
+  scene.add(pools);
+}
+
+// ---------- stars ----------
+{
+  const n=900, pos=new Float32Array(n*3);
+  const rng=mulberry32(4242);
+  for(let i=0;i<n;i++){
+    const th=rng()*Math.PI*2, ph=rng()*Math.PI*0.42, r=850;
+    pos[i*3]=Math.cos(th)*Math.sin(ph)*r;
+    pos[i*3+1]=Math.cos(ph)*r*0.6+30;
+    pos[i*3+2]=Math.sin(th)*Math.sin(ph)*r;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xcfe0ff,size:1.6,sizeAttenuation:false,fog:false,transparent:true,opacity:0.9})));
+}
+
+// ---------- directed traffic edges ----------
+const nodes=[];
+for(let i=0;i<NROAD;i++)for(let j=0;j<NROAD;j++) nodes.push({i,j,x:roadCoords[i],z:roadCoords[j]});
+
+const edges=[], edgeKeyMap=new Map();
+function addEdge(axis, i, j, dirSign){
+  // axis 'x': road along x at z=roadCoords[j]; segment between x roads i..i+1
+  let a,b,sx,sz,dx,dz;
+  if(axis==='x'){
+    const iA=dirSign>0?i:i+1, iB=dirSign>0?i+1:i;
+    a=nodeId(iA,j); b=nodeId(iB,j);
+    sx=roadCoords[iA]; sz=roadCoords[j]; dx=dirSign; dz=0;
+  } else {
+    const jA=dirSign>0?j:j+1, jB=dirSign>0?j+1:j;
+    a=nodeId(i,jA); b=nodeId(i,jB);
+    sx=roadCoords[i]; sz=roadCoords[jA]; dx=0; dz=dirSign;
+  }
+  const dir=new THREE.Vector3(dx,0,dz);
+  const right=new THREE.Vector3(-dz,0,dx); // dir × up (right-hand side)
+  const start=new THREE.Vector3(sx,0,sz).addScaledVector(right,LANE);
+  const len=PITCH;
+  const e={id:edges.length, axis, a, b, start, dir, right, len, stopS:len-HALF_ROAD-2.1};
+  edges.push(e);
+  edgeKeyMap.set(`${a}|${dx},${dz}`, e);
+}
+for(let j=0;j<NROAD;j++)for(let i=0;i<BLOCKS;i++){ addEdge('x',i,j,+1); addEdge('x',i,j,-1); }
+for(let i=0;i<NROAD;i++)for(let j=0;j<BLOCKS;j++){ addEdge('z',i,j,+1); addEdge('z',i,j,-1); }
+const edgesFrom=new Map();
+for(const e of edges){ if(!edgesFrom.has(e.a)) edgesFrom.set(e.a,[]); edgesFrom.get(e.a).push(e); }
+
+// ---------- traffic light cycle ----------
+const CYCLE=17.5;
+function intersectionOffset(i,j){
+  const h=Math.sin(i*127.1+j*311.7)*43758.5453;
+  return (h-Math.floor(h))*CYCLE;
+}
+function axisState(axis, t, off){ // axis: 'ew' (roads along x) or 'ns'
+  const tt=((t+off)%CYCLE+CYCLE)%CYCLE;
+  if(axis==='ns'){ if(tt<6)return 'g'; if(tt<7.5)return 'a'; return 'r'; }
+  if(tt>=8.5&&tt<14.5)return 'g'; if(tt>=14.5&&tt<16)return 'a'; return 'r';
+}
+
+// ---------- traffic lights (instanced poles + heads + lamps) ----------
+const lightHeads=[]; // {nodeIdx, axis, i, j}
+{
+  const poleGeo=new THREE.CylinderGeometry(0.11,0.16,5.6,6);
+  const poleMat=new THREE.MeshStandardMaterial({color:0x232b38,roughness:0.55,metalness:0.65});
+  const nP=NROAD*NROAD*4;
+  const poles=new THREE.InstancedMesh(poleGeo,poleMat,nP);
+  const headGeo=new THREE.BoxGeometry(0.62,1.55,0.42);
+  const headMat=new THREE.MeshStandardMaterial({color:0x14181f,roughness:0.5,metalness:0.4});
+  const heads=new THREE.InstancedMesh(headGeo,headMat,nP);
+  const lampGeo=new THREE.SphereGeometry(0.17,10,10);
+  const lampMat=new THREE.MeshBasicMaterial({color:0xffffff});
+  const lamps=new THREE.InstancedMesh(lampGeo,lampMat,nP*3);
+  const m=new THREE.Matrix4(), q=new THREE.Quaternion(), s=new THREE.Vector3(1,1,1), p=new THREE.Vector3();
+  let k=0, li=0;
+  const up=new THREE.Vector3(0,1,0);
+  for(let i=0;i<NROAD;i++)for(let j=0;j<NROAD;j++){
+    const cx=roadCoords[i], cz=roadCoords[j];
+    // one signal per approach, facing the oncoming traffic
+    const approaches=[
+      {axis:'ew', yaw: Math.PI/2, px:cx-HALF_ROAD-1.2, pz:cz+HALF_ROAD+1.2},
+      {axis:'ew', yaw:-Math.PI/2, px:cx+HALF_ROAD+1.2, pz:cz-HALF_ROAD-1.2},
+      {axis:'ns', yaw: Math.PI,   px:cx+HALF_ROAD+1.2, pz:cz-HALF_ROAD-1.2},
+      {axis:'ns', yaw: 0,         px:cx-HALF_ROAD-1.2, pz:cz+HALF_ROAD+1.2},
+    ];
+    for(const ap of approaches){
+      q.setFromAxisAngle(up,ap.yaw);
+      p.set(ap.px,2.8,ap.pz); m.compose(p,q,s); poles.setMatrixAt(k,m);
+      p.set(ap.px,5.5,ap.pz); m.compose(p,q,s); heads.setMatrixAt(k,m);
+      const off=new THREE.Vector3(0,0,0.26).applyQuaternion(q);
+      for(let l=0;l<3;l++){
+        p.set(ap.px+off.x, 5.5+0.42-l*0.42, ap.pz+off.z);
+        m.compose(p,q,s); lamps.setMatrixAt(li,m);
+        lamps.setColorAt(li,new THREE.Color(0x201008));
+        li++;
+      }
+      lightHeads.push({axis:ap.axis, i, j, lampBase:(k*3)});
+      k++;
+    }
+  }
+  poles.castShadow=true;
+  lamps.instanceMatrix.needsUpdate=true;
+  if(lamps.instanceColor) lamps.instanceColor.needsUpdate=true;
+  scene.add(poles,heads,lamps);
+  var signalLamps=lamps;
+}
+const SIGNAL_COLORS={
+  red:new THREE.Color(0xff2a1a), amber:new THREE.Color(0xffb020), green:new THREE.Color(0x21ff70), off:new THREE.Color(0x1a0f08)
+};
+function updateSignalLamps(t){
+  for(const h of lightHeads){
+    const off=intersectionOffset(h.i,h.j);
+    const st=axisState(h.axis,t,off);
+    const base=h.lampBase;
+    signalLamps.setColorAt(base+0, st==='r'?SIGNAL_COLORS.red  :SIGNAL_COLORS.off);
+    signalLamps.setColorAt(base+1, st==='a'?SIGNAL_COLORS.amber:SIGNAL_COLORS.off);
+    signalLamps.setColorAt(base+2, st==='g'?SIGNAL_COLORS.green:SIGNAL_COLORS.off);
+  }
+  signalLamps.instanceColor.needsUpdate=true;
+}
+
+// ---------- cars (instanced) ----------
+const NUM_CARS=160;
+const carPalette=[0xb8bfc9,0x8f1f1f,0x1f3f8f,0xc9a227,0x2a2d34,0x6e737e,0x3a5f3f,0xd8d8de,0x54246e,0x9a4a12,0x11202e,0x7a1030];
+let cars=[];
+let simTime=0, collisions=0, redLightViolations=0;
+
+const bodyGeo=new THREE.BoxGeometry(CAR_WID,0.62,CAR_LEN);
+const bodyMat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.32,metalness:0.75});
+const bodyInst=new THREE.InstancedMesh(bodyGeo,bodyMat,NUM_CARS);
+bodyInst.castShadow=true; bodyInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+const cabinGeo=new THREE.BoxGeometry(CAR_WID-0.18,0.55,2.25);
+const cabinMat=new THREE.MeshStandardMaterial({color:0x0d1118,roughness:0.12,metalness:0.9,emissive:0x1a2536,emissiveIntensity:0.5});
+const cabinInst=new THREE.InstancedMesh(cabinGeo,cabinMat,NUM_CARS);
+cabinInst.castShadow=true; cabinInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+const skirtGeo=new THREE.BoxGeometry(CAR_WID+0.04,0.3,CAR_LEN+0.04);
+const skirtMat=new THREE.MeshStandardMaterial({color:0x05070a,roughness:0.7});
+const skirtInst=new THREE.InstancedMesh(skirtGeo,skirtMat,NUM_CARS);
+skirtInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+const headGeo=new THREE.BoxGeometry(0.34,0.15,0.08);
+const headMat=new THREE.MeshBasicMaterial({color:0xfff6cf});
+const headInst=new THREE.InstancedMesh(headGeo,headMat,NUM_CARS*2);
+headInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+const tailGeo=new THREE.BoxGeometry(0.4,0.14,0.08);
+const tailMat=new THREE.MeshBasicMaterial({color:0xff2015});
+const tailInst=new THREE.InstancedMesh(tailGeo,tailMat,NUM_CARS*2);
+tailInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+scene.add(bodyInst,cabinInst,skirtInst,headInst,tailInst);
+
+function chooseTurn(rng){ const r=rng(); return r<0.62?0:(r<0.81?1:-1); } // 0 straight, 1 left, -1 right
+
+function resetSim(){
+  const rng=mulberry32(1337);
+  simTime=0; collisions=0; redLightViolations=0;
+  cars=[];
+  const perEdge=new Map();
+  for(let i=0;i<NUM_CARS;i++){
+    // rejection-sample an edge with free space
+    let e, s, ok=false, tries=0;
+    while(!ok && tries++<40){
+      e=edges[(rng()*edges.length)|0];
+      s=8+rng()*(e.len-16);
+      const list=perEdge.get(e.id)||[];
+      ok=list.every(o=>Math.abs(o-s)>CAR_LEN+1.6);
+      if(ok){ list.push(s); perEdge.set(e.id,list); }
+    }
+    if(!e){ e=edges[i%edges.length]; s=10+ (i*7)%(e.len-20); }
+    const car={
+      id:i, edge:e, s,
+      speed:5+rng()*6, maxSpeed:8.5+rng()*4,
+      yaw:Math.atan2(e.dir.x,e.dir.z),
+      color:carPalette[(rng()*carPalette.length)|0],
+      turn:chooseTurn(rng), collisionCd:0
+    };
+    // position cache
+    car.pos=e.start.clone().addScaledVector(e.dir,car.s);
+    cars.push(car);
+  }
+  for(let i=0;i<NUM_CARS;i++) bodyInst.setColorAt(i,new THREE.Color(cars[i].color));
+  bodyInst.instanceColor.needsUpdate=true;
+  resetPeds();
+}
+
+/* leader scan + lights + car following */
+const _rel=new THREE.Vector3();
+function stepSim(dt){
+  simTime+=dt;
+  // cache positions
+  for(const car of cars){
+    car.pos.copy(car.edge.start).addScaledVector(car.edge.dir,car.s);
+    car.collisionCd=Math.max(0,car.collisionCd-dt);
+  }
+  for(const car of cars){
+    const e=car.edge;
+    const fx=Math.sin(car.yaw), fz=Math.cos(car.yaw);
+    const rx=Math.cos(car.yaw), rz=-Math.sin(car.yaw);
+    // --- leader via O(n) lane projection ---
+    let leadGap=Infinity, leadSpeed=0;
+    for(const o of cars){
+      if(o===car) continue;
+      const dx=o.pos.x-car.pos.x, dz=o.pos.z-car.pos.z;
+      const L=dx*fx+dz*fz; if(L<=0||L>50) continue;
+      const T=dx*rx+dz*rz; if(Math.abs(T)>2.05) continue;
+      const gap=L-CAR_LEN;
+      if(gap<leadGap){ leadGap=gap; leadSpeed=o.speed; }
+    }
+    // --- stop line at end-of-edge (intersection ahead) ---
+    const dStop=e.stopS-car.s;
+    const bNode=nodes[e.b];
+    const off=intersectionOffset(bNode.i,bNode.j);
+    const axis=e.axis==='x'?'ew':'ns';
+    const st=axisState(axis,simTime,off);
+    let mustStop=false;
+    if(st==='r') mustStop=dStop<40;
+    else if(st==='a' && dStop>1.5){
+      const brakeDist=(car.speed*car.speed)/(2*4.2);
+      if(brakeDist<dStop-0.8) mustStop=true; // can stop comfortably
+    }
+    let target=car.maxSpeed;
+    if(mustStop) target=Math.min(target,Math.max(0,(dStop-0.4)*0.85));
+    if(leadGap<Infinity){
+      const desired=2.3+car.speed*0.55;
+      if(leadGap<desired) target=Math.min(target,Math.max(0,leadSpeed+(leadGap-2.3)*0.7));
+    }
+    // --- integrate speed ---
+    if(car.speed<target) car.speed=Math.min(target,car.speed+5.2*dt);
+    else car.speed=Math.max(target,car.speed-7.6*dt);
+    // absolute no-overlap clamp
+    if(leadGap<0.8){
+      car.speed=Math.min(car.speed,leadSpeed*0.6);
+      if(leadGap<0.25 && car.collisionCd<=0){ collisions++; car.collisionCd=2; }
+    }
+    const prevS=car.s;
+    car.s+=car.speed*dt;
+    // red-light violation: crossing the stop line during red
+    if(prevS<e.stopS && car.s>=e.stopS && st==='r') redLightViolations++;
+    // --- reach intersection centre → turn ---
+    if(car.s>=e.len){
+      // desired new direction
+      let ndx=e.dir.x, ndz=e.dir.z;
+      if(car.turn!==0){
+        if(car.turn===1){ ndx=e.dir.z; ndz=-e.dir.x; }   // left
+        else            { ndx=-e.dir.z; ndz=e.dir.x; }   // right
+      }
+      const next=edgeKeyMap.get(`${e.b}|${ndx},${ndz}`);
+      let blocked=false;
+      if(next){
+        for(const o of cars){
+          if(o===car) continue;
+          if(o.edge===next && o.s<CAR_LEN+2.4){ blocked=true; break; }
+        }
+      }
+      if(!next || blocked){
+        car.s=e.len; car.speed=Math.min(car.speed,0.5);
+      } else {
+        car.s=car.s-e.len;
+        car.edge=next;
+        car.turn=chooseTurn(Math.random); // runtime decorator only; sim determinism kept via seed below
+        // deterministic turn selection from id+time bucket
+        const h=Math.sin((car.id+1)*12.9898+Math.floor(simTime*2)*78.233)*43758.5453;
+        const r=h-Math.floor(h);
+        car.turn=r<0.62?0:(r<0.81?1:-1);
+      }
+    }
+    // --- smooth yaw toward edge direction ---
+    const targetYaw=Math.atan2(car.edge.dir.x,car.edge.dir.z);
+    let dy=targetYaw-car.yaw;
+    while(dy>Math.PI)dy-=Math.PI*2; while(dy<-Math.PI)dy+=Math.PI*2;
+    car.yaw+=dy*Math.min(1,5.5*dt);
+  }
+  stepPeds(dt);
+}
+
+const _m=new THREE.Matrix4(), _q=new THREE.Quaternion(), _p=new THREE.Vector3(),
+      _s=new THREE.Vector3(1,1,1), _up=new THREE.Vector3(0,1,0),
+      _off1=new THREE.Matrix4(), _off2=new THREE.Matrix4(), _tmp=new THREE.Matrix4();
+_off1.makeTranslation(0,0.31,0);        // body center
+const _cabOff=new THREE.Matrix4().makeTranslation(0,1.06,-0.28);
+const _skirtOff=new THREE.Matrix4().makeTranslation(0,0.28,0);
+const _hlL=new THREE.Matrix4().makeTranslation( 0.62,0.62, CAR_LEN/2+0.01);
+const _hlR=new THREE.Matrix4().makeTranslation(-0.62,0.62, CAR_LEN/2+0.01);
+const _tlL=new THREE.Matrix4().makeTranslation( 0.64,0.66,-CAR_LEN/2-0.01);
+const _tlR=new THREE.Matrix4().makeTranslation(-0.64,0.66,-CAR_LEN/2-0.01);
+
+function applyCarInstances(){
+  for(let i=0;i<cars.length;i++){
+    const car=cars[i];
+    car.pos.copy(car.edge.start).addScaledVector(car.edge.dir,car.s);
+    _q.setFromAxisAngle(_up,car.yaw);
+    _p.copy(car.pos);
+    _m.compose(_p,_q,_s);
+    _tmp.multiplyMatrices(_m,_off1);    bodyInst.setMatrixAt(i,_tmp);
+    _tmp.multiplyMatrices(_m,_cabOff);  cabinInst.setMatrixAt(i,_tmp);
+    _tmp.multiplyMatrices(_m,_skirtOff);skirtInst.setMatrixAt(i,_tmp);
+    _tmp.multiplyMatrices(_m,_hlL);     headInst.setMatrixAt(i*2,_tmp);
+    _tmp.multiplyMatrices(_m,_hlR);     headInst.setMatrixAt(i*2+1,_tmp);
+    _tmp.multiplyMatrices(_m,_tlL);     tailInst.setMatrixAt(i*2,_tmp);
+    _tmp.multiplyMatrices(_m,_tlR);     tailInst.setMatrixAt(i*2+1,_tmp);
+  }
+  bodyInst.instanceMatrix.needsUpdate=true;
+  cabinInst.instanceMatrix.needsUpdate=true;
+  skirtInst.instanceMatrix.needsUpdate=true;
+  headInst.instanceMatrix.needsUpdate=true;
+  tailInst.instanceMatrix.needsUpdate=true;
+  updateSignalLamps(simTime);
+}
+
+// ---------- pedestrians ----------
+const PED_CAP=150;
+let peds=[];
+const pedBodyGeo=new THREE.CylinderGeometry(0.22,0.3,1.05,8);
+const pedBodyMat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.85});
+const pedBodyInst=new THREE.InstancedMesh(pedBodyGeo,pedBodyMat,PED_CAP);
+pedBodyInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+const pedHeadGeo=new THREE.SphereGeometry(0.17,8,8);
+const pedHeadMat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.6});
+const pedHeadInst=new THREE.InstancedMesh(pedHeadGeo,pedHeadMat,PED_CAP);
+pedHeadInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+pedBodyInst.castShadow=true;
+scene.add(pedBodyInst,pedHeadInst);
+const pedPalette=[0x4a5a80,0x703a3a,0x3a7050,0x706030,0x555c66,0x6b3a6e,0x2e4a5a];
+const skinTones=[0xd9a878,0xa9713f,0x6e4525,0xf0c8a0];
+
+function resetPeds(){ peds=[]; }
+function spawnPed(rng,ix,iz,alongX,side){
+  peds.push({
+    ix,iz,alongX,side,
+    t:0, dir:rng()<0.5?1:-1,
+    speed:1.1+rng()*0.6,
+    lat:(rng()-0.5)*1.4,
+    color:pedPalette[(rng()*pedPalette.length)|0],
+    skin:skinTones[(rng()*skinTones.length)|0]
+  });
+}
+function stepPeds(dt){
+  // spawn on crosswalks whose parallel traffic has green
+  const rng=Math.random;
+  if(peds.length<PED_CAP){
+    for(let i=0;i<NROAD;i++)for(let j=0;j<NROAD;j++){
+      const off=intersectionOffset(i,j);
+      if(axisState('ew',simTime,off)==='g' && rng()<0.012 && peds.length<PED_CAP){
+        spawnPed(rng,i,j,true,rng()<0.5?-1:1);   // walk along x across NS road
+      }
+      if(axisState('ns',simTime,off)==='g' && rng()<0.012 && peds.length<PED_CAP){
+        spawnPed(rng,i,j,false,rng()<0.5?-1:1);  // walk along z across EW road
+      }
+    }
+  }
+  const keep=[];
+  for(const p of peds){
+    p.t+=dt*p.speed/(ROAD_W+3);
+    if(p.t<1) keep.push(p);
+  }
+  peds=keep;
+}
+function applyPedInstances(){
+  let n=0;
+  for(const p of peds){
+    if(n>=PED_CAP) break;
+    const cx=roadCoords[p.ix], cz=roadCoords[p.iz];
+    const prog=(p.t*2-1)*(HALF_ROAD+1.5)*p.dir;
+    let x,z;
+    if(p.alongX){ x=cx+prog; z=cz+p.side*(HALF_ROAD+1.35)+p.lat*0.3; }
+    else        { z=cz+prog; x=cx+p.side*(HALF_ROAD+1.35)+p.lat*0.3; }
+    _q.identity();
+    _p.set(x,0.55,z); _m.compose(_p,_q,_s); pedBodyInst.setMatrixAt(n,_m);
+    pedBodyInst.setColorAt(n,new THREE.Color(p.color));
+    _p.set(x,1.28,z); _m.compose(_p,_q,_s); pedHeadInst.setMatrixAt(n,_m);
+    pedHeadInst.setColorAt(n,new THREE.Color(p.skin));
+    n++;
+  }
+  // park unused instances far underground
+  _p.set(0,-50,0); _m.compose(_p,_q,_s);
+  for(let k=n;k<PED_CAP;k++){ pedBodyInst.setMatrixAt(k,_m); pedHeadInst.setMatrixAt(k,_m); }
+  pedBodyInst.instanceMatrix.needsUpdate=true;
+  pedHeadInst.instanceMatrix.needsUpdate=true;
+  if(pedBodyInst.instanceColor) pedBodyInst.instanceColor.needsUpdate=true;
+  if(pedHeadInst.instanceColor) pedHeadInst.instanceColor.needsUpdate=true;
+}
+
+// ---------- composer / bloom ----------
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.85, 0.72, 0.62);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ---------- __bench ----------
+window.__bench={cars:NUM_CARS, collisions:0, redLightViolations:0};
+const benchEl=document.getElementById('bench');
+function updateBench(){
+  window.__bench.cars=cars.length;
+  window.__bench.collisions=collisions;
+  window.__bench.redLightViolations=redLightViolations;
+  benchEl.innerHTML=`cars <b>${cars.length}</b> · collisions <b>${collisions}</b> · red-light violations <b>${redLightViolations}</b>`;
+}
+
+// ---------- showcase (deterministic seek) ----------
+const showcaseDuration=12;
+const posCurve=new THREE.CatmullRomCurve3([
+  new THREE.Vector3(155,118,155),
+  new THREE.Vector3( 95, 62,  88),
+  new THREE.Vector3( 42, 15,  26),
+  new THREE.Vector3(  8,  5.6,  1.6),
+  new THREE.Vector3(-48,  5.2,  1.2),
+  new THREE.Vector3( 17,  4.6, 12.5),
+  new THREE.Vector3(-52, 30, -40),
+  new THREE.Vector3( 60, 72, 132),
+  new THREE.Vector3(150,108,150)
+], false, 'centripetal', 0.4);
+const tgtCurve=new THREE.CatmullRomCurve3([
+  new THREE.Vector3(0,8,0),
+  new THREE.Vector3(-10,5,0),
+  new THREE.Vector3(-40,3,0),
+  new THREE.Vector3(-80,3,0),
+  new THREE.Vector3(-130,3,0),
+  new THREE.Vector3(0,3.5,0),
+  new THREE.Vector3(-10,4,5),
+  new THREE.Vector3(0,10,0),
+  new THREE.Vector3(0,12,0)
+], false, 'centripetal', 0.4);
+
+let showcaseActive=false;
+function seek(t){
+  t=clamp(t,0,showcaseDuration);
+  showcaseActive=true;
+  controls.enabled=false;
+  controls.autoRotate=false;
+  // re-run the simulation deterministically from the seed
+  resetSim();
+  const steps=Math.floor(t/DT);
+  for(let i=0;i<steps;i++) stepSim(DT);
+  applyCarInstances();
+  applyPedInstances();
+  updateBench();
+  const u=t/showcaseDuration;
+  camera.position.copy(posCurve.getPoint(u));
+  const lt=tgtCurve.getPoint(u);
+  camera.lookAt(lt);
+  composer.render();
+}
+window.showcase={ duration:showcaseDuration, seek };
+
+// ---------- record button ----------
+const recordBtn=document.getElementById('recordBtn');
+const recBadge=document.getElementById('rec');
+let recording=false;
+async function startRecording(){
+  if(recording) return;
+  recording=true;
+  recordBtn.disabled=true; recBadge.style.display='flex';
+  const stream=renderer.domElement.captureStream(60);
+  const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
+    .find(m=>MediaRecorder.isTypeSupported(m))||'video/webm';
+  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:12_000_000});
+  const chunks=[];
+  rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
+  const done=new Promise(res=>rec.onstop=res);
+  rec.start(250);
+  const t0=performance.now();
+  await new Promise(resolve=>{
+    function frame(){
+      const t=(performance.now()-t0)/1000;
+      if(t>=showcaseDuration){ seek(showcaseDuration); resolve(); }
+      else { seek(t); requestAnimationFrame(frame); }
+    }
+    requestAnimationFrame(frame);
+  });
+  rec.stop();
+  await done;
+  const blob=new Blob(chunks,{type:mime});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='midtown-grid-showcase.webm'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+  recording=false; recordBtn.disabled=false; recBadge.style.display='none';
+  showcaseActive=false; controls.enabled=true; controls.autoRotate=true;
+}
+recordBtn.addEventListener('click',startRecording);
+
+// ---------- chase cam (C) ----------
+let chaseMode=false, chaseCar=null;
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='c'){
+    chaseMode=!chaseMode;
+    if(chaseMode){ chaseCar=cars[(Math.random()*cars.length)|0]; controls.enabled=false; controls.autoRotate=false; }
+    else { controls.enabled=true; controls.autoRotate=true; }
+  } else if(k==='r'){ startRecording(); }
+});
+const _chasePos=new THREE.Vector3(), _chaseTgt=new THREE.Vector3();
+function chaseUpdate(){
+  if(!chaseCar) return;
+  const e=chaseCar.edge;
+  chaseCar.pos.copy(e.start).addScaledVector(e.dir,chaseCar.s);
+  const fx=Math.sin(chaseCar.yaw), fz=Math.cos(chaseCar.yaw);
+  _chasePos.set(chaseCar.pos.x-fx*9.5, 5.2, chaseCar.pos.z-fz*9.5);
+  _chaseTgt.set(chaseCar.pos.x+fx*10, 1.2, chaseCar.pos.z+fz*10);
+  camera.position.lerp(_chasePos,0.18);
+  camera.lookAt(_chaseTgt);
+}
+
+// ---------- main loop ----------
+resetSim();
+applyCarInstances();
+applyPedInstances();
+const clock=new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  if(recording) return; // seek() drives the canvas during capture
+  if(showcaseActive){ // leave showcase on any user input
+    renderer.domElement.addEventListener('pointerdown',()=>{showcaseActive=false;controls.enabled=true;controls.autoRotate=true;},{once:true});
+    return;
+  }
+  const dt=Math.min(clock.getDelta(),0.05);
+  // fixed-substep for stability
+  let remaining=dt;
+  while(remaining>0){
+    const h=Math.min(remaining,DT);
+    stepSim(h);
+    remaining-=h;
+  }
+  applyCarInstances();
+  applyPedInstances();
+  updateBench();
+  // antenna beacons pulse
+  const pulse=0.35+0.65*Math.max(0,Math.sin(performance.now()*0.0035));
+  for(const m of antennaTips) m.color.setRGB(1*pulse+0.2,0.12*pulse,0.1*pulse);
+  if(chaseMode) chaseUpdate();
+  else controls.update();
+  composer.render();
+}
+animate();
+
+// ---------- resize ----------
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  composer.setSize(innerWidth,innerHeight);
+});
+
+updateBench();
+</script>
+</body>
+</html>
+

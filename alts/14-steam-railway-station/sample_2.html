@@ -1,0 +1,1747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kingsbridge Terminus — 1897 · Victorian Railway Showcase</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#0b0e12;height:100%;font-family:Georgia,'Times New Roman',serif;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;}
+  .panel{
+    position:fixed;top:14px;left:14px;z-index:10;color:#e9dcc0;
+    background:linear-gradient(160deg,rgba(24,22,18,.82),rgba(12,12,12,.78));
+    border:1px solid #8a6f3c;border-radius:6px;padding:10px 14px;max-width:320px;
+    box-shadow:0 4px 18px rgba(0,0,0,.5), inset 0 0 22px rgba(200,160,80,.08);
+    pointer-events:none;
+  }
+  .panel h1{margin:0 0 2px;font-size:17px;letter-spacing:2px;color:#f0e3bd;font-weight:normal;text-transform:uppercase;}
+  .panel .sub{font-size:11px;font-style:italic;color:#c8b070;letter-spacing:1px;margin-bottom:6px;}
+  .panel .keys{font-size:11.5px;line-height:1.65;color:#d8cba6;}
+  .panel b{color:#ffe9a8;background:#3a2f16;border:1px solid #6f5a26;border-radius:3px;padding:0 5px;font-family:Georgia;}
+  #recordBtn{
+    position:fixed;top:14px;right:14px;z-index:11;cursor:pointer;
+    font-family:Georgia;font-size:14px;letter-spacing:1.5px;text-transform:uppercase;
+    color:#241a08;background:linear-gradient(180deg,#f4d97a,#caa14a 55%,#a87e2e);
+    border:1px solid #6f5420;border-radius:6px;padding:12px 22px;
+    box-shadow:0 4px 16px rgba(0,0,0,.55), inset 0 1px 0 #fff7d0;
+    transition:transform .12s, filter .12s;
+  }
+  #recordBtn:hover{transform:translateY(-1px);filter:brightness(1.08);}
+  #recordBtn:active{transform:translateY(1px);}
+  #recordBtn:disabled{opacity:.65;cursor:wait;}
+  #chips{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:10;display:flex;gap:8px;}
+  .chip{
+    cursor:pointer;font-family:Georgia;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;
+    color:#e9dcc0;background:rgba(20,18,14,.78);border:1px solid #7a6330;border-radius:20px;
+    padding:7px 16px;user-select:none;
+  }
+  .chip:hover{background:rgba(60,48,22,.85);color:#ffe9a8;}
+  #modeTag{
+    position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:10;
+    color:#f0e3bd;background:rgba(20,18,14,.6);border:1px solid rgba(160,130,60,.5);
+    font-size:11px;letter-spacing:2px;text-transform:uppercase;border-radius:4px;padding:5px 14px;pointer-events:none;
+  }
+  #cabTag{
+    display:none;position:fixed;bottom:64px;left:50%;transform:translateX(-50%);z-index:10;
+    color:#ffd98a;background:rgba(30,16,4,.75);border:1px solid #a87e2e;border-radius:4px;
+    font-size:12px;letter-spacing:2px;padding:6px 18px;pointer-events:none;text-transform:uppercase;
+  }
+  #vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
+    background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.42) 100%);}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="vignette"></div>
+
+<div class="panel">
+  <h1>Kingsbridge Terminus</h1>
+  <div class="sub">Great Northern Railway · Opened 1864 · 5:40 from Metropolitan</div>
+  <div class="keys">
+    <b>Space</b> Dispatch train &nbsp;·&nbsp; <b>C</b> Ride in cab &nbsp;·&nbsp; <b>T</b> Afternoon / Evening gaslight<br>
+    Drag to orbit · Scroll to zoom
+  </div>
+</div>
+<button id="recordBtn">● Record Video</button>
+<div id="modeTag">Afternoon · Sun</div>
+<div id="cabTag">Cab View — press C to alight</div>
+<div id="chips">
+  <div class="chip" id="chipDispatch">Dispatch (Space)</div>
+  <div class="chip" id="chipCab">Cab (C)</div>
+  <div class="chip" id="chipTime">Evening Gaslight (T)</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+'use strict';
+/* ============================================================
+   KINGSBRIDGE TERMINUS — a Victorian railway in one file.
+   Everything procedural. No assets. Fixed-step simulation that
+   can be re-run deterministically from t=0 (see window.showcase).
+   ============================================================ */
+
+// ---------- deterministic RNG ----------
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let rng = mulberry32(20240607);
+
+// ---------- layout constants ----------
+const Z_MIN = -64, Z_MAX = 38;
+const SHED_LEN = Z_MAX - Z_MIN;
+const RX = 17, SPRING_Y = 8, RISE = 9.5;
+const TRACKS = [-9, 0, 9];
+const PLAT_X = [-4.5, 4.5];
+const COL_X = [-6.4, -2.6, 2.6, 6.4];
+
+// train dynamics
+const Z0 = -52, Z_STOP = -2.8, V0 = 24, BRAKE = 5.85;
+const T_ARRIVE = V0 / BRAKE;               // ≈ 4.10 s
+const OPEN_T = 4.75;                        // doors begin to open
+const SHOWCASE_DISPATCH = 8.8;              // scripted dispatch inside showcase
+const DRIVER_R = 0.92, TENDER_R = 0.55, COACH_R = 0.50;
+const FIXED_DT = 1 / 60;
+
+// ---------- renderer / scene / camera ----------
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const ATMO = {
+  afternoon: { bg:new THREE.Color(0xc9d4d8), fogNear:85, fogFar:330,
+    sun:2.35, sunCol:new THREE.Color(0xffe6bd), hemiSky:new THREE.Color(0xcfe0ea), hemiGround:new THREE.Color(0x6b5646), hemi:0.62,
+    lampGlow:0.35, lampLight:0.0, glassTint:new THREE.Color(0xcfe4e6), shaft:0.34, bloom:0.28, windowGlow:0.25, exposure:1.12 },
+  evening:   { bg:new THREE.Color(0x0d1420), fogNear:55, fogFar:230,
+    sun:0.32, sunCol:new THREE.Color(0x8496b8), hemiSky:new THREE.Color(0x232c3c), hemiGround:new THREE.Color(0x100c08), hemi:0.42,
+    lampGlow:2.6, lampLight:1.35, glassTint:new THREE.Color(0x36404e), shaft:0.07, bloom:0.62, windowGlow:2.0, exposure:0.98 }
+};
+let timeMode = 'afternoon';
+
+scene.background = ATMO.afternoon.bg.clone();
+scene.fog = new THREE.Fog(ATMO.afternoon.bg.clone(), ATMO.afternoon.fogNear, ATMO.afternoon.fogFar);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 500);
+camera.position.set(11.5, 4.8, 10.5);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2.3, -6);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 2.5;
+controls.maxDistance = 80;
+controls.maxPolarAngle = 1.52;
+controls.update();
+
+// composer + bloom
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), ATMO.afternoon.bloom, 0.55, 0.82);
+composer.addPass(bloom);
+
+// ---------- lights ----------
+const sunTarget = new THREE.Object3D();
+sunTarget.position.set(-4, 0, -12); scene.add(sunTarget);
+const sun = new THREE.DirectionalLight(ATMO.afternoon.sunCol, ATMO.afternoon.sun);
+sun.position.set(30, 38, 4);
+sun.target = sunTarget;
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.left = -55; sun.shadow.camera.right = 55;
+sun.shadow.camera.top = 55; sun.shadow.camera.bottom = -55;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 130;
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.03;
+scene.add(sun);
+
+const hemi = new THREE.HemisphereLight(ATMO.afternoon.hemiSky, ATMO.afternoon.hemiGround, ATMO.afternoon.hemi);
+scene.add(hemi);
+const amb = new THREE.AmbientLight(0xffffff, 0.12); scene.add(amb);
+
+// evening point lights (a subset of lamps, repositioned for warmth)
+const eveningLights = [];
+[[-4.5, 12.6, -32],[4.5, 12.6, -8],[-4.5, 12.6, 16],[0, 10.5, 30]].forEach(p=>{
+  const pl = new THREE.PointLight(0xffb45a, 0, 20, 2);
+  pl.position.set(p[0], p[1], p[2]);
+  scene.add(pl); eveningLights.push(pl);
+});
+
+// ============================================================
+//  procedural canvas textures
+// ============================================================
+function makeCanvas(w,h,fn){
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  fn(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.encoding = THREE.sRGBEncoding;
+  return t;
+}
+
+const brickTex = makeCanvas(256,256,(g,w,h)=>{
+  g.fillStyle='#33261f'; g.fillRect(0,0,w,h);
+  const bw=32, bh=16;
+  const shades=['#6b4234','#74493b','#5e3a2e','#7c5041','#66402f'];
+  for(let y=0;y<h;y+=bh){
+    const off=((y/bh)%2)*bw/2;
+    for(let x=-bw;x<w+bw;x+=bw){
+      g.fillStyle=shades[(Math.sin((x*13.7+y*7.1)*12.9898)*43758.5453 % 1 + 1)%1 * shades.length | 0] || shades[0];
+      g.fillRect(x+off+1,y+1,bw-2,bh-2);
+      g.fillStyle='rgba(0,0,0,0.18)'; g.fillRect(x+off+1,y+bh-4,bw-2,2);
+    }
+  }
+  for(let i=0;i<800;i++){ g.fillStyle='rgba(0,0,0,'+(Math.random()*0.15)+')'; g.fillRect(Math.random()*w,Math.random()*h,2,2); }
+});
+brickTex.repeat.set(0.5,0.5);
+
+const floorTex = makeCanvas(256,256,(g,w,h)=>{
+  g.fillStyle='#37363a'; g.fillRect(0,0,w,h);
+  for(let i=0;i<2600;i++){
+    const v=Math.random();
+    g.fillStyle = v<0.5 ? 'rgba(255,255,255,'+(Math.random()*0.05)+')' : 'rgba(0,0,0,'+(Math.random()*0.22)+')';
+    g.fillRect(Math.random()*w,Math.random()*h,2+Math.random()*3,2+Math.random()*3);
+  }
+});
+floorTex.repeat.set(6,6);
+
+const stoneTex = makeCanvas(256,256,(g,w,h)=>{
+  g.fillStyle='#8d8578'; g.fillRect(0,0,w,h);
+  for(let i=0;i<2000;i++){
+    g.fillStyle='rgba(0,0,0,'+(Math.random()*0.12)+')';
+    g.fillRect(Math.random()*w,Math.random()*h,2,2);
+  }
+  g.strokeStyle='rgba(40,36,30,0.85)'; g.lineWidth=3;
+  for(let y=0;y<=h;y+=64){ g.beginPath(); g.moveTo(0,y); g.lineTo(w,y); g.stroke(); }
+  for(let x=0;x<=w;x+=64){ g.beginPath(); g.moveTo(x,0); g.lineTo(x,h); g.stroke(); }
+});
+stoneTex.repeat.set(1.4,22);
+
+function liveryTexture(mirror){
+  return makeCanvas(512,160,(g,w,h)=>{
+    g.fillStyle='#163a29'; g.fillRect(0,0,w,h);
+    const grd=g.createLinearGradient(0,0,0,h);
+    grd.addColorStop(0,'#1d4530'); grd.addColorStop(0.5,'#163a29'); grd.addColorStop(1,'#10281c');
+    g.fillStyle=grd; g.fillRect(0,0,w,h);
+    // cream panel band
+    g.fillStyle='#e8dcc2'; g.fillRect(0,14,w,64);
+    g.fillStyle='#d8cba6'; g.fillRect(0,70,w,8);
+    // gold lining
+    g.fillStyle='#c9a24e'; g.fillRect(0,4,w,3); g.fillRect(0,84,w,3);
+    g.fillRect(0,120,w,2); g.fillRect(0,140,w,2);
+    // windows (dark, arched tops)
+    g.save(); if(mirror){ g.translate(w,0); g.scale(-1,1); }
+    for(let i=0;i<7;i++){
+      const x=26+i*68;
+      g.fillStyle='#10151c';
+      g.beginPath(); g.moveTo(x,66); g.lineTo(x,34); g.quadraticCurveTo(x+17,16,x+34,34); g.lineTo(x+34,66); g.closePath(); g.fill();
+      g.fillStyle='rgba(200,220,235,0.14)'; g.fillRect(x+4,30,10,30);
+    }
+    // lettering
+    g.fillStyle='#d9b45c';
+    g.font='bold 26px Georgia'; g.textAlign='center'; g.textBaseline='middle';
+    g.letterSpacing='6px';
+    g.fillText('GREAT NORTHERN', w/2, 112);
+    g.restore();
+  });
+}
+const liveryR = liveryTexture(false), liveryL = liveryTexture(true);
+
+const wheelTex = makeCanvas(256,256,(g,w,h)=>{
+  g.fillStyle='#0d0d0f'; g.beginPath(); g.arc(128,128,126,0,Math.PI*2); g.fill();
+  g.fillStyle='#1a1a1e'; g.beginPath(); g.arc(128,128,104,0,Math.PI*2); g.fill();
+  g.fillStyle='#2c2c31'; g.beginPath(); g.arc(128,128,86,0,Math.PI*2); g.fill();
+  // spokes
+  g.strokeStyle='#45454a'; g.lineWidth=14;
+  for(let i=0;i<12;i++){
+    const a=i*Math.PI/6;
+    g.beginPath(); g.moveTo(128+Math.cos(a)*22,128+Math.sin(a)*22); g.lineTo(128+Math.cos(a)*84,128+Math.sin(a)*84); g.stroke();
+  }
+  // counterweight crescent
+  g.fillStyle='#3a3a40'; g.beginPath(); g.arc(128,128,88,Math.PI*0.15,Math.PI*0.55); g.arc(128,128,58,Math.PI*0.55,Math.PI*0.15,true); g.fill();
+  g.fillStyle='#55555c'; g.beginPath(); g.arc(128,128,22,0,Math.PI*2); g.fill();
+  g.fillStyle='#77777e'; g.beginPath(); g.arc(128,128,8,0,Math.PI*2); g.fill();
+});
+
+const clockTex = makeCanvas(256,256,(g)=>{
+  g.clearRect(0,0,256,256);
+  g.fillStyle='#efe6cd'; g.beginPath(); g.arc(128,128,120,0,Math.PI*2); g.fill();
+  g.strokeStyle='#241d12'; g.lineWidth=8; g.beginPath(); g.arc(128,128,116,0,Math.PI*2); g.stroke();
+  g.lineWidth=2.5; g.beginPath(); g.arc(128,128,96,0,Math.PI*2); g.stroke();
+  const RN=['XII','I','II','III','IIII','V','VI','VII','VIII','IX','X','XI'];
+  g.fillStyle='#241d12'; g.font='bold 26px Georgia'; g.textAlign='center'; g.textBaseline='middle';
+  for(let i=0;i<12;i++){
+    const a=i*Math.PI/6 - Math.PI/2;
+    g.fillText(RN[i], 128+Math.cos(a)*74, 128+Math.sin(a)*74);
+  }
+  for(let i=0;i<60;i++){
+    const a=i*Math.PI/30;
+    g.lineWidth = i%5===0?4:1.5;
+    g.beginPath();
+    g.moveTo(128+Math.cos(a)*104,128+Math.sin(a)*104);
+    g.lineTo(128+Math.cos(a)*112,128+Math.sin(a)*112);
+    g.stroke();
+  }
+});
+
+const signTex = (makeCanvas(1024,160,(g,w,h)=>{
+  g.fillStyle='#12241a'; g.fillRect(0,0,w,h);
+  g.strokeStyle='#c9a24e'; g.lineWidth=6; g.strokeRect(8,8,w-16,h-16);
+  g.fillStyle='#e3c878'; g.font='bold 78px Georgia'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText('KINGSBRIDGE TERMINUS', w/2, h/2+2);
+}));
+const wayOutTex = (makeCanvas(512,128,(g,w,h)=>{
+  g.fillStyle='#141414'; g.fillRect(0,0,w,h);
+  g.strokeStyle='#c9a24e'; g.lineWidth=4; g.strokeRect(6,6,w-12,h-12);
+  g.fillStyle='#e3c878'; g.font='bold 56px Georgia'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText('WAY OUT', w/2, h/2);
+}));
+const posterTex = makeCanvas(256,340,(g,w,h)=>{
+  g.fillStyle='#cfe3e2'; g.fillRect(0,0,w,h);
+  const sky=g.createLinearGradient(0,0,0,h*0.55);
+  sky.addColorStop(0,'#7fb2c9'); sky.addColorStop(1,'#e8d9a8');
+  g.fillStyle=sky; g.fillRect(14,14,w-28,h*0.5);
+  g.fillStyle='#e8b23a'; g.beginPath(); g.arc(w/2,h*0.38,34,0,Math.PI*2); g.fill();
+  g.fillStyle='#3a6a8a'; g.fillRect(14,h*0.5,w-28,h*0.14);
+  g.fillStyle='#20405c'; g.fillRect(14,h*0.6,w-28,h*0.14);
+  g.fillStyle='#14202c'; g.font='bold 34px Georgia'; g.textAlign='center';
+  g.fillText('SEASIDE', w/2, h*0.82);
+  g.font='italic 15px Georgia'; g.fillText('Great Northern Railway', w/2, h*0.9);
+  g.strokeStyle='#14202c'; g.lineWidth=10; g.strokeRect(0,0,w,h);
+});
+const archDarkTex = makeCanvas(256,384,(g,w,h)=>{
+  g.fillStyle='#241a12'; g.fillRect(0,0,w,h);
+  const grd=g.createRadialGradient(w/2,h*0.62,20,w/2,h*0.6,w*0.75);
+  grd.addColorStop(0,'#000000'); grd.addColorStop(0.7,'#0a0805'); grd.addColorStop(1,'#241a12');
+  g.fillStyle=grd; g.fillRect(0,0,w,h);
+});
+const archWindowTex = makeCanvas(512,512,(g,w,h)=>{
+  g.fillStyle='#0e141c'; g.fillRect(0,0,w,h);
+  const grd=g.createRadialGradient(w/2,h*0.7,30,w/2,h*0.55,w*0.7);
+  grd.addColorStop(0,'#3d5068'); grd.addColorStop(1,'#0e141c');
+  g.fillStyle=grd; g.fillRect(0,0,w,h);
+  g.strokeStyle='#c9a24e'; g.lineWidth=10;
+  // radial fanlight bars
+  for(let i=0;i<=8;i++){
+    const a=Math.PI+(i/8)*Math.PI;
+    g.beginPath(); g.moveTo(w/2,h*0.52); g.lineTo(w/2+Math.cos(a)*w*0.46, h*0.52+Math.sin(a)*w*0.46); g.stroke();
+  }
+  g.lineWidth=14; g.beginPath(); g.arc(w/2,h*0.52,w*0.46,Math.PI,0); g.stroke();
+  g.beginPath(); g.arc(w/2,h*0.52,w*0.2,Math.PI,0); g.stroke();
+  for(let x=w*0.09;x<w;x+=w*0.13){ g.beginPath(); g.moveTo(x,h*0.52); g.lineTo(x,h); g.stroke(); }
+  g.lineWidth=14; g.beginPath(); g.moveTo(0,h*0.52); g.lineTo(w,h*0.52); g.stroke();
+});
+const softDotTex = makeCanvas(64,64,(g)=>{
+  const grd=g.createRadialGradient(32,32,1,32,32,31);
+  grd.addColorStop(0,'rgba(255,255,255,1)');
+  grd.addColorStop(0.35,'rgba(255,255,255,0.7)');
+  grd.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle=grd; g.fillRect(0,0,64,64);
+});
+const shaftTex = makeCanvas(128,256,(g,w,h)=>{
+  const grd=g.createLinearGradient(0,0,0,h);
+  grd.addColorStop(0,'rgba(255,244,214,0.9)');
+  grd.addColorStop(0.6,'rgba(255,244,214,0.28)');
+  grd.addColorStop(1,'rgba(255,244,214,0)');
+  g.fillStyle=grd; g.fillRect(0,0,w,h);
+  for(let i=0;i<7;i++){ g.fillStyle='rgba(255,255,255,0.28)'; const x=10+i*18+Math.random()*6; g.fillRect(x,0,3+Math.random()*4,h); }
+});
+
+function plateTex(text){
+  return makeCanvas(256,128,(g,w,h)=>{
+    g.fillStyle='#241a08'; g.fillRect(0,0,w,h);
+    g.strokeStyle='#e8c86a'; g.lineWidth=8; g.strokeRect(6,6,w-12,h-12);
+    g.fillStyle='#f4dc8e'; g.font='bold 56px Georgia'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(text, w/2, h/2+2);
+  });
+}
+
+// ============================================================
+//  materials
+// ============================================================
+const M = {
+  iron:      new THREE.MeshStandardMaterial({ color:0x2c3134, roughness:0.55, metalness:0.75 }),
+  ironGreen: new THREE.MeshStandardMaterial({ color:0x1e3529, roughness:0.5,  metalness:0.55 }),
+  ironLight: new THREE.MeshStandardMaterial({ color:0x454e54, roughness:0.5,  metalness:0.7 }),
+  brass:     new THREE.MeshStandardMaterial({ color:0xc8a24a, roughness:0.24, metalness:1.0, emissive:0x2a1e05, emissiveIntensity:0.4 }),
+  copper:    new THREE.MeshStandardMaterial({ color:0xb87333, roughness:0.3,  metalness:1.0 }),
+  steel:     new THREE.MeshStandardMaterial({ color:0x8a9096, roughness:0.28, metalness:0.95 }),
+  black:     new THREE.MeshStandardMaterial({ color:0x16171a, roughness:0.6,  metalness:0.4 }),
+  red:       new THREE.MeshStandardMaterial({ color:0x8c2418, roughness:0.55, metalness:0.25 }),
+  cream:     new THREE.MeshStandardMaterial({ color:0xe8dcc2, roughness:0.7,  metalness:0.0 }),
+  brick:     new THREE.MeshStandardMaterial({ map:brickTex, roughness:0.9, metalness:0.0 }),
+  floor:     new THREE.MeshStandardMaterial({ map:floorTex, roughness:0.95, metalness:0.05 }),
+  stone:     new THREE.MeshStandardMaterial({ map:stoneTex, roughness:0.85, metalness:0.0 }),
+  wood:      new THREE.MeshStandardMaterial({ color:0x5e4126, roughness:0.75, metalness:0.0 }),
+  woodDark:  new THREE.MeshStandardMaterial({ color:0x3e2a18, roughness:0.8,  metalness:0.0 }),
+  coal:      new THREE.MeshStandardMaterial({ color:0x0f0f11, roughness:0.35, metalness:0.6 }),
+  liveryTop: new THREE.MeshStandardMaterial({ color:0x122a1e, roughness:0.5,  metalness:0.15 }),
+  roofGrey:  new THREE.MeshStandardMaterial({ color:0x6f7476, roughness:0.55, metalness:0.35 }),
+  glassRoof: new THREE.MeshPhysicalMaterial({ color:0xcfe4e6, roughness:0.08, metalness:0.0, transparent:true, opacity:0.26, side:THREE.DoubleSide, depthWrite:false }),
+  glassWarm: new THREE.MeshStandardMaterial({ color:0x2a2016, roughness:0.2, emissive:0xffb866, emissiveIntensity:0.4 })
+};
+const liveryMatR = new THREE.MeshStandardMaterial({ map:liveryR, roughness:0.45, metalness:0.12 });
+const liveryMatL = new THREE.MeshStandardMaterial({ map:liveryL, roughness:0.45, metalness:0.12 });
+
+// ============================================================
+//  the train shed
+// ============================================================
+const shed = new THREE.Group(); scene.add(shed);
+
+function box(w,h,d,mat,x,y,z,parent,castShadow){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z);
+  if(castShadow){ m.castShadow = true; m.receiveShadow = true; }
+  (parent||shed).add(m); return m;
+}
+function cyl(rt,rb,h,mat,x,y,z,parent,seg,castShadow){
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,seg||14), mat);
+  m.position.set(x,y,z);
+  if(castShadow){ m.castShadow = true; }
+  (parent||shed).add(m); return m;
+}
+
+// floor
+{
+  const f = new THREE.Mesh(new THREE.PlaneGeometry(46, SHED_LEN+30), M.floor);
+  f.rotation.x = -Math.PI/2; f.position.set(0,0,(Z_MIN+Z_MAX)/2); f.receiveShadow = true; shed.add(f);
+}
+// ballast strips + sleepers + rails
+{
+  TRACKS.forEach(tx=>{
+    const b = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.12, Z_MAX-3.4 - Z_MIN), new THREE.MeshStandardMaterial({color:0x242326, roughness:1}));
+    b.position.set(tx, 0.06, (Z_MIN + (Z_MAX-3.4))/2); b.receiveShadow = true; shed.add(b);
+    [-0.75, 0.75].forEach(o=>{
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.16, Z_MAX-3.1 - Z_MIN), M.steel);
+      rail.position.set(tx+o, 0.2, (Z_MIN + (Z_MAX-3.1))/2); rail.receiveShadow = true; shed.add(rail);
+    });
+  });
+  const slGeo = new THREE.BoxGeometry(2.3, 0.1, 0.3);
+  const slMat = new THREE.MeshStandardMaterial({ color:0x33261a, roughness:0.95 });
+  const count = Math.floor((Z_MAX-3.4 - Z_MIN) / 0.72) * 3;
+  const sleepers = new THREE.InstancedMesh(slGeo, slMat, count);
+  const m4 = new THREE.Matrix4(); let idx = 0;
+  TRACKS.forEach(tx=>{
+    for(let z=Z_MIN; z<Z_MAX-3.4; z+=0.72){
+      if(idx>=count) break;
+      m4.setPosition(tx, 0.13, z); sleepers.setMatrixAt(idx++, m4);
+    }
+  });
+  sleepers.count = idx; sleepers.receiveShadow = true; shed.add(sleepers);
+}
+// platforms (two islands)
+PLAT_X.forEach(px=>{
+  const p = box(5.2, 1.05, SHED_LEN-6, M.stone, px, 0.525, (Z_MIN+Z_MAX)/2, shed, false);
+  p.receiveShadow = true;
+  // white safety line
+  box(0.16, 0.02, SHED_LEN-6, M.cream, px-2.35, 1.06, (Z_MIN+Z_MAX)/2, shed, false);
+  box(0.16, 0.02, SHED_LEN-6, M.cream, px+2.35, 1.06, (Z_MIN+Z_MAX)/2, shed, false);
+});
+
+// columns with ornate brackets
+const CAPITAL_Y = SPRING_Y;
+function makeColumn(x, z){
+  const g = new THREE.Group(); g.position.set(x, 1.05, z);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.42,0.72), M.ironGreen); base.position.y=0.21; g.add(base);
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.16,0.5), M.ironGreen); plinth.position.y=0.5; g.add(plinth);
+  const shaftH = CAPITAL_Y - 1.05 - 0.6;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.28,shaftH,12), M.ironGreen); shaft.position.y=0.6+shaftH/2; shaft.castShadow=true; g.add(shaft);
+  // brass rings
+  [1.0, shaftH-0.15].forEach(yy=>{
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.245,0.035,6,16), M.brass);
+    ring.rotation.x = Math.PI/2; ring.position.y = 0.6+yy; g.add(ring);
+  });
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,0.14,12), M.ironGreen); collar.position.y=0.6+shaftH+0.05; g.add(collar);
+  // flared capital (cone)
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.52,0.26,0.5,12), M.ironGreen); cap.position.y=0.6+shaftH+0.36; g.add(cap);
+  const capDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.56,0.56,0.1,12), M.ironGreen); capDisc.position.y=0.6+shaftH+0.62; g.add(capDisc);
+  // curved brackets (arc arcs) on both faces along the arch
+  [-1,1].forEach(s=>{
+    const br = new THREE.Mesh(new THREE.TorusGeometry(0.85,0.09,6,14,Math.PI/2), M.ironGreen);
+    br.position.set(0, 0.6+shaftH+0.62, s*0.55);
+    br.rotation.y = s>0 ? 0 : Math.PI/2;
+    br.rotation.x = 0; br.rotation.z = s>0 ? 0 : 0;
+    br.rotation.set(0, s>0 ? -Math.PI/2 : Math.PI, 0);
+    g.add(br);
+  });
+  // small gold finial
+  const fin = new THREE.Mesh(new THREE.SphereGeometry(0.09,8,8), M.brass); fin.position.y=0.6+shaftH+0.72; g.add(fin);
+  g.traverse(o=>{ if(o.isMesh){ o.castShadow = true; } });
+  shed.add(g);
+}
+for(let z=Z_MIN+4; z<Z_MAX-2; z+=8) COL_X.forEach(x=>makeColumn(x,z));
+
+// wall pilasters
+for(let z=Z_MIN+4; z<Z_MAX-2; z+=8){
+  [-1,1].forEach(s=>{ box(0.5, SPRING_Y, 1.1, M.brick, s*16.6, SPRING_Y/2, z, shed, true); });
+}
+
+// side walls (up to spring line)
+[-1,1].forEach(s=>{
+  const w = new THREE.Mesh(new THREE.BoxGeometry(0.7, SPRING_Y, SHED_LEN), M.brick);
+  w.position.set(s*17.15, SPRING_Y/2, (Z_MIN+Z_MAX)/2); w.receiveShadow = true; shed.add(w);
+});
+
+// roof glass — elliptical arch strip
+{
+  const seg = 64;
+  const pos = [], nor = [], uv = [], idx = [];
+  for(let i=0;i<=seg;i++){
+    const th = (i/seg)*Math.PI;
+    const x = RX*Math.cos(th), y = SPRING_Y + RISE*Math.sin(th);
+    [-SHED_LEN/2, SHED_LEN/2].forEach(zz=>{
+      pos.push(x,y,zz + (Z_MIN+Z_MAX)/2);
+      const n = new THREE.Vector3(RISE*Math.cos(th), RX*Math.sin(th), 0).normalize();
+      nor.push(n.x, n.y, 0);
+      uv.push(i/seg*8, zz>0?1:0);
+    });
+  }
+  for(let i=0;i<seg;i++){
+    const a=i*2, b=i*2+1, c=i*2+2, d=i*2+3;
+    idx.push(a,b,c, b,d,c);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor,3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv,2));
+  geo.setIndex(idx);
+  const glass = new THREE.Mesh(geo, M.glassRoof);
+  shed.add(glass);
+}
+// roof ribs (torus arcs, elliptical-scaled)
+const ribZ = [];
+for(let z=Z_MIN+4; z<=Z_MAX-2; z+=8){
+  const rib = new THREE.Mesh(new THREE.TorusGeometry(RX, 0.16, 6, 42, Math.PI), M.iron);
+  rib.scale.y = RISE/RX; rib.position.set(0, SPRING_Y, z); shed.add(rib); ribZ.push(z);
+}
+// purlins along the arch
+for(let i=1;i<12;i++){
+  const th = (i/12)*Math.PI;
+  const x = RX*Math.cos(th), y = SPRING_Y + RISE*Math.sin(th);
+  const p = new THREE.Mesh(new THREE.CylinderGeometry(0.085,0.085,SHED_LEN,6), M.iron);
+  p.rotation.x = Math.PI/2; p.position.set(x, y-0.05, (Z_MIN+Z_MAX)/2); shed.add(p);
+}
+// ridge beam
+{
+  const r = new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.16,SHED_LEN,8), M.iron);
+  r.rotation.x = Math.PI/2; r.position.set(0, SPRING_Y + RISE + 0.02, (Z_MIN+Z_MAX)/2); shed.add(r);
+}
+
+// end gable walls: buffered (z=+Z_MAX) and entrance (z=Z_MIN)
+function gableShape(){
+  const s = new THREE.Shape();
+  s.moveTo(-RX-0.4, 0); s.lineTo(RX+0.4, 0); s.lineTo(RX+0.4, SPRING_Y);
+  s.absellipse(0, SPRING_Y, RX+0.4, RISE+0.35, 0, Math.PI, false);
+  s.lineTo(-RX-0.4, SPRING_Y); s.lineTo(-RX-0.4, 0);
+  return s;
+}
+{
+  const gGeo = new THREE.ShapeGeometry(gableShape(), 40);
+  // buffer end (faces -z)
+  const g1 = new THREE.Mesh(gGeo, M.brick);
+  g1.position.set(0, 0, Z_MAX+0.3); g1.rotation.y = Math.PI; g1.receiveShadow = true; shed.add(g1);
+  // entrance end (faces +z)
+  const g2 = new THREE.Mesh(gGeo.clone(), M.brick);
+  g2.position.set(0, 0, Z_MIN-0.3); shed.add(g2);
+  // entrance tunnel mouths (three dark arches)
+  [-9,0,9].forEach(tx=>{
+    const a = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 9.4), new THREE.MeshBasicMaterial({ map:archDarkTex }));
+    a.position.set(tx, 3.6, Z_MIN+0.08); shed.add(a);
+  });
+  // buffer-end station house: arched window + clock + name boards
+  const win = new THREE.Mesh(new THREE.PlaneGeometry(9.5, 11), new THREE.MeshStandardMaterial({ map:archWindowTex, emissive:0xffca7a, emissiveMap:archWindowTex, emissiveIntensity:0.25, roughness:0.4 }));
+  win.position.set(0, 10.4, Z_MAX-0.05); win.rotation.y = Math.PI; shed.add(win);
+  shed.userData.endWindow = win;
+  const nameBoard = new THREE.Mesh(new THREE.PlaneGeometry(11, 1.7), new THREE.MeshBasicMaterial({ map:signTex, transparent:false }));
+  nameBoard.position.set(0, 4.6, Z_MAX-0.08); nameBoard.rotation.y = Math.PI; shed.add(nameBoard);
+  [-1,1].forEach(s=>{
+    const wo = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 1.1), new THREE.MeshStandardMaterial({ map:wayOutTex, emissive:0xffc06a, emissiveMap:wayOutTex, emissiveIntensity:0.6, roughness:0.6 }));
+    wo.position.set(s*12.5, 3.1, Z_MAX-0.08); wo.rotation.y = Math.PI; shed.add(wo);
+  });
+}
+// poster boards inside entrance wall
+[[-14.5, 4.2],[14.5, 4.2]].forEach(p=>{
+  const post = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 3.2), new THREE.MeshStandardMaterial({ map:posterTex, roughness:0.7 }));
+  post.position.set(p[0], p[1], Z_MIN+0.55); shed.add(post);
+});
+
+// buffer stops, one per track
+TRACKS.forEach(tx=>{
+  const g = new THREE.Group(); g.position.set(tx, 0, 3.0);
+  [-0.85, 0.85].forEach(o=>{
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 3.4), M.red);
+    beam.position.set(o, 0.95, 0); beam.rotation.x = 0.52; beam.castShadow = true; g.add(beam);
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.24, 1.7, 0.24), M.iron);
+    strut.position.set(o, 0.55, 1.15); g.add(strut);
+  });
+  const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 2.15, 12), M.red);
+  cross.rotation.z = Math.PI/2; cross.position.set(0, 1.62, -1.35); cross.castShadow = true; g.add(cross);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 16), M.cream);
+  disc.rotation.x = Math.PI/2; disc.position.set(0, 1.62, -1.62); g.add(disc);
+  shed.add(g);
+});
+
+// ============================================================
+//  clocks (wall + platform double-face)
+// ============================================================
+const clockHands = [];
+function buildClockFace(r){
+  const g = new THREE.Group();
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(r, r*0.12, 8, 32), M.iron);
+  g.add(rim);
+  const face = new THREE.Mesh(new THREE.CircleGeometry(r*0.96, 32), new THREE.MeshStandardMaterial({ map:clockTex, roughness:0.4, emissive:0xfff6d8, emissiveIntensity:0.12 }));
+  face.position.z = 0.012; g.add(face);
+  const hourGeo = new THREE.BoxGeometry(r*0.09, r*0.5, 0.02); hourGeo.translate(0, r*0.2, 0);
+  const minGeo  = new THREE.BoxGeometry(r*0.06, r*0.78, 0.02); minGeo.translate(0, r*0.32, 0);
+  const hour = new THREE.Mesh(hourGeo, M.black); hour.position.z = 0.03; g.add(hour);
+  const min  = new THREE.Mesh(minGeo,  M.black); min.position.z  = 0.045; g.add(min);
+  const pin  = new THREE.Mesh(new THREE.CylinderGeometry(r*0.07, r*0.07, 0.05, 12), M.brass);
+  pin.rotation.x = Math.PI/2; pin.position.z = 0.05; g.add(pin);
+  clockHands.push({hour, min});
+  return g;
+}
+// large wall clock over buffer end
+{
+  const wc = buildClockFace(1.95);
+  wc.position.set(0, 12.6, Z_MAX-0.35); wc.rotation.y = Math.PI; shed.add(wc);
+}
+// freestanding double-faced platform clock (iconic Victorian)
+{
+  const g = new THREE.Group(); g.position.set(-4.5, 1.05, 0.5);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 2.6, 10), M.ironGreen); post.position.y = 1.3; post.castShadow = true; g.add(post);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.3, 10), M.ironGreen); base.position.y = 0.15; g.add(base);
+  [-1,1].forEach(s=>{
+    const f = buildClockFace(0.55);
+    f.position.set(s*0.16, 2.75, 0); f.rotation.y = s>0 ? Math.PI/2 : -Math.PI/2;
+    g.add(f);
+  });
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.28, 10), M.ironGreen); cap.position.y = 3.5; g.add(cap);
+  shed.add(g);
+}
+
+// ============================================================
+//  benches, lamps, luggage, milk churns
+// ============================================================
+function makeBench(){
+  const g = new THREE.Group();
+  [-0.95, 0.95].forEach(x=>{
+    const end = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.5, 0.62), M.iron);
+    end.position.set(x, 0.28, 0); g.add(end);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.62, 0.12), M.iron);
+    back.position.set(x, 0.62, -0.27); back.rotation.x = -0.22; g.add(back);
+  });
+  for(let i=0;i<3;i++) box(2.0, 0.05, 0.16, M.wood, 0, 0.52, -0.2+i*0.2, g, true);
+  for(let i=0;i<2;i++){
+    const s = box(2.0, 0.14, 0.05, M.wood, 0, 0.78+i*0.24, -0.3-i*0.055, g, true);
+    s.rotation.x = -0.22;
+  }
+  return g;
+}
+[[-4.5,-30],[4.5,-18],[-4.5,-4],[4.5,8],[-4.5,20],[4.5,26],[-4.5,32]].forEach(p=>{
+  const b = makeBench(); b.position.set(p[0], 1.05, p[1]); b.rotation.y = p[0]<0 ? Math.PI/2 : -Math.PI/2; shed.add(b);
+});
+
+// hanging gas lamps
+const lampMantles = [], lampGlasses = [];
+function ellipseY(x){ const t = Math.acos(Math.min(1, Math.abs(x)/RX)); return SPRING_Y + RISE*Math.sin(t); }
+[-52,-36,-20,-4,12,28].forEach(z=>{
+  [-4.5, 4.5].forEach(x=>{
+    const yTop = ellipseY(x) - 0.15, lampY = yTop - 3.1;
+    const g = new THREE.Group(); g.position.set(x, 0, z);
+    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,yTop-lampY,5), M.iron);
+    chain.position.y = (yTop+lampY)/2; g.add(chain);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.34, 10), M.iron); cap.position.y = lampY+0.32; g.add(cap);
+    const glass = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), new THREE.MeshStandardMaterial({ color:0xffe6b8, transparent:true, opacity:0.55, emissive:0xffc06a, emissiveIntensity:0.5, roughness:0.15 }));
+    glass.position.y = lampY; g.add(glass);
+    const mantle = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), new THREE.MeshStandardMaterial({ color:0xfff4d8, emissive:0xffc978, emissiveIntensity:0.6 }));
+    mantle.position.y = lampY - 0.02; g.add(mantle);
+    const finial = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 8), M.iron); finial.rotation.x = Math.PI; finial.position.y = lampY-0.36; g.add(finial);
+    shed.add(g);
+    lampMantles.push(mantle); lampGlasses.push(glass);
+  });
+});
+// wall lamps flanking clock
+[-1,1].forEach(s=>{
+  const g = new THREE.Group(); g.position.set(s*7.5, 8.6, Z_MAX-0.6);
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,1.0,6), M.iron); arm.rotation.z = Math.PI/2.4; arm.position.set(-s*0.4, 0.2, 0); g.add(arm);
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.17,10,8), new THREE.MeshStandardMaterial({ color:0xfff4d8, emissive:0xffc978, emissiveIntensity:0.6 }));
+  m.position.set(-s*0.85, 0.55, 0); g.add(m);
+  shed.add(g); lampMantles.push(m);
+});
+
+// static trunk piles
+function trunk(parent,x,y,z,rot,scale,color){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.78*(scale||1),0.4*(scale||1),0.45*(scale||1)), new THREE.MeshStandardMaterial({color:color||0x4a3020, roughness:0.6}));
+  m.position.set(x,y,z); m.rotation.y = rot||0; m.castShadow = true; parent.add(m);
+  const strap = new THREE.Mesh(new THREE.BoxGeometry(0.8*(scale||1),0.06,0.46*(scale||1)), M.brass);
+  strap.position.copy(m.position); strap.position.y += 0.12*(scale||1); strap.rotation.y = rot||0; parent.add(strap);
+}
+[[-4.5,34,0.3],[4.6,30,2.4],[-4.6,-22,1.2]].forEach(p=>{
+  trunk(shed, p[0], 1.28, p[1], p[2], 1.0, 0x4a3020);
+  trunk(shed, p[0]+0.2, 1.66, p[1]+0.1, p[2]+0.4, 0.8, 0x27331f);
+  trunk(shed, p[0]-0.25, 1.22, p[1]-0.5, p[2]+2.0, 0.85, 0x3c2836);
+});
+// milk churns near entrance
+[[ -8.35, Z_MIN+3],[-8.85, Z_MIN+3.6],[8.5, Z_MIN+4]].forEach(p=>{
+  const c = cyl(0.19, 0.24, 0.72, M.steel, p[0], 0.36, p[1], shed, 10, true);
+  cyl(0.13, 0.15, 0.14, M.steel, p[0], 0.78, p[1], shed, 10, true);
+});
+
+// sun shafts (fake volumetric)
+const shafts = [];
+[[6.2,-30,0.9],[5.0,-12,1.1],[6.8,6,0.8],[4.6,22,1.0]].forEach(s=>{
+  const geo = new THREE.PlaneGeometry(3.6*s[2], 30);
+  const mat = new THREE.MeshBasicMaterial({ map:shaftTex, transparent:true, opacity:ATMO.afternoon.shaft, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide });
+  const m = new THREE.Mesh(geo, mat);
+  // orient along sun direction
+  const dir = new THREE.Vector3(-0.62, -0.78, -0.05).normalize();
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().negate());
+  m.position.set(s[0], 9.5, s[1]);
+  shed.add(m); shafts.push(m);
+});
+
+// ============================================================
+//  THE TRAIN
+// ============================================================
+const train = new THREE.Group(); train.position.set(0, 0.28, Z0); scene.add(train);
+const loco = new THREE.Group(); train.add(loco);
+
+function boxT(w,h,d,mat,x,y,z,parent,cast){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z); m.castShadow = cast!==false; (parent||train).add(m); return m;
+}
+function cylT(rt,rb,h,mat,x,y,z,parent,seg){
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,seg||16), mat);
+  m.position.set(x,y,z); m.castShadow = true; (parent||train).add(m); return m;
+}
+// wheel with painted spoke texture on caps
+const wheelGeoCache = {};
+function makeWheel(r, width){
+  const key = r.toFixed(2)+'_'+width.toFixed(2);
+  if(!wheelGeoCache[key]){
+    wheelGeoCache[key] = new THREE.CylinderGeometry(r, r, width, 22, 1, false);
+    wheelGeoCache[key].rotateZ(Math.PI/2); // axis → x
+  }
+  const mats = [ M.black, new THREE.MeshStandardMaterial({ map:wheelTex, roughness:0.5, metalness:0.45 }), new THREE.MeshStandardMaterial({ map:wheelTex, roughness:0.5, metalness:0.45 }) ];
+  const m = new THREE.Mesh(wheelGeoCache[key], mats);
+  m.castShadow = true; return m;
+}
+
+// === locomotive ===
+{
+  // frames
+  boxT(2.3, 0.4, 10.0, M.iron, 0, 1.12, 0, loco);
+  // boiler barrel
+  const boiler = cylT(1.02, 1.02, 4.1, M.ironGreen, 0, 2.1, 2.25, loco, 26); boiler.rotation.x = Math.PI/2;
+  // boiler bands (brass)
+  [0.95, 1.75, 3.3].forEach(z=>{
+    const band = new THREE.Mesh(new THREE.TorusGeometry(1.03, 0.035, 6, 28), M.brass);
+    band.position.set(0, 2.1, z); loco.add(band);
+  });
+  // smokebox
+  const sb = cylT(1.08, 1.08, 1.35, M.black, 0, 2.1, 4.6, loco, 26); sb.rotation.x = Math.PI/2;
+  // smokebox door + dart
+  const door = new THREE.Mesh(new THREE.CircleGeometry(1.0, 26), new THREE.MeshStandardMaterial({ color:0x232527, roughness:0.4, metalness:0.7 }));
+  door.position.set(0, 2.1, 5.28); loco.add(door);
+  const dart = cylT(0.05, 0.05, 0.42, M.steel, 0, 2.1, 5.34, loco, 8); dart.rotation.z = Math.PI/2;
+  cylT(0.09, 0.09, 0.1, M.steel, 0, 2.1, 5.36, loco, 8).rotation.x = Math.PI/2;
+  // number plate
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.48), new THREE.MeshStandardMaterial({ map:plateTex('1347'), emissive:0x332200, emissiveIntensity:0.5, roughness:0.4, metalness:0.6 }));
+  plate.position.set(0, 3.05, 5.29); loco.add(plate);
+  // chimney (lathe) with copper cap
+  const chimPts = [];
+  [[0.30,0],[0.34,0.28],[0.26,0.62],[0.24,0.92],[0.40,1.05],[0.44,1.16]].forEach(p=>chimPts.push(new THREE.Vector2(p[0], p[1])));
+  const chimney = new THREE.Mesh(new THREE.LatheGeometry(chimPts, 18), M.black);
+  chimney.position.set(0, 3.05, 4.6); chimney.castShadow = true; loco.add(chimney);
+  const chimCap = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.06, 8, 18), M.copper);
+  chimCap.rotation.x = Math.PI/2; chimCap.position.set(0, 4.21, 4.6); loco.add(chimCap);
+  // steam dome (brass) + safety dome
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.44, 16, 12, 0, Math.PI*2, 0, Math.PI/2), M.brass);
+  dome.position.set(0, 3.08, 2.35); dome.scale.y = 0.95; dome.castShadow = true; loco.add(dome);
+  const dome2 = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 10, 0, Math.PI*2, 0, Math.PI/2), M.brass);
+  dome2.position.set(0, 3.1, 1.05); loco.add(dome2);
+  // firebox + cab
+  boxT(2.02, 1.7, 1.5, M.ironGreen, 0, 2.0, -0.35, loco);
+  // cab
+  boxT(2.62, 0.16, 2.15, M.ironGreen, 0, 3.62, -2.0, loco);            // cab spectacle plate (top of walls replaced by roof)
+  // cab side walls with window openings (built from pillars)
+  [-1,1].forEach(s=>{
+    boxT(0.1, 1.85, 0.32, M.ironGreen, s*1.26, 2.75, -1.12, loco);       // front pillar
+    boxT(0.1, 1.85, 0.32, M.ironGreen, s*1.26, 2.75, -2.88, loco);       // rear pillar
+    boxT(0.1, 0.62, 1.44, M.ironGreen, s*1.26, 2.2, -2.0, loco);         // lower panel
+    boxT(0.1, 0.34, 1.44, M.ironGreen, s*1.26, 3.47, -2.0, loco);        // upper panel
+    // brass handrail
+    const rail = cylT(0.028, 0.028, 1.9, M.brass, s*1.36, 2.6, -2.0, loco, 6); rail.rotation.x = Math.PI/2;
+  });
+  // cab front (boiler backhead wall) with two round windows
+  boxT(2.62, 1.9, 0.12, M.ironGreen, 0, 2.75, -1.02, loco);
+  [-0.62, 0.62].forEach(x=>{
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.045, 6, 16), M.brass);
+    ring.position.set(x, 3.15, -0.94); loco.add(ring);
+    const glass = new THREE.Mesh(new THREE.CircleGeometry(0.19, 16), new THREE.MeshStandardMaterial({ color:0x1a2028, roughness:0.1, emissive:0x553311, emissiveIntensity:0.4 }));
+    glass.position.set(x, 3.15, -0.945); loco.add(glass);
+  });
+  // cab interior: bench seats + backhead gauges + lever
+  boxT(0.55, 0.08, 1.5, M.woodDark, -0.95, 2.0, -2.35, loco);
+  boxT(0.55, 0.08, 1.5, M.woodDark,  0.95, 2.0, -2.35, loco);
+  const backhead = cylT(0.78, 0.78, 0.12, M.black, 0, 2.35, -1.14, loco, 20); backhead.rotation.x = Math.PI/2;
+  [-0.3, 0.15, 0.55].forEach((x,i)=>{
+    const gg = new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,0.05,12), M.brass);
+    gg.rotation.x = Math.PI/2; gg.position.set(x, 2.75+(i%2)*0.28, -1.07); loco.add(gg);
+    const face = new THREE.Mesh(new THREE.CircleGeometry(0.07, 12), new THREE.MeshStandardMaterial({ color:0xf0ead0, emissive:0x332d18, emissiveIntensity:0.6 }));
+    face.position.set(x, 2.75+(i%2)*0.28, -1.04); loco.add(face);
+  });
+  const lever = cylT(0.035, 0.035, 0.85, M.steel, 0.62, 2.35, -1.6, loco, 6); lever.rotation.z = 0.5;
+  // cab roof (curved)
+  const cabRoof = new THREE.Mesh(new THREE.CylinderGeometry(1.42, 1.42, 2.3, 14, 1, false, Math.PI*0.12, Math.PI*0.76), M.roofGrey);
+  cabRoof.rotation.z = Math.PI/2; cabRoof.rotation.y = Math.PI/2;
+  cabRoof.scale.set(0.5, 1, 1); cabRoof.position.set(0, 3.95, -2.0); cabRoof.castShadow = true; loco.add(cabRoof);
+  boxT(2.7, 0.07, 2.35, M.roofGrey, 0, 4.18, -2.0, loco);
+  // whistle
+  [-0.09, 0.09].forEach(x=>cylT(0.035, 0.035, 0.34, M.brass, x, 3.36, 0.35, loco, 6));
+  // running boards + splashers over drivers
+  boxT(2.55, 0.07, 9.4, M.iron, 0, 1.5, 0.15, loco);
+  [2.1, 0.1, -1.9].forEach(z=>{ boxT(0.34, 0.42, 2.15, M.ironGreen, -1.16, 1.78, z, loco); boxT(0.34, 0.42, 2.15, M.ironGreen, 1.16, 1.78, z, loco); });
+  // cylinders (steam chests) at sides
+  [-1,1].forEach(s=>{ const c = cylT(0.44, 0.44, 1.55, M.iron, s*1.3, 1.12, 3.55, loco, 16); c.rotation.x = Math.PI/2; });
+  // guide bars + buffer beam
+  [-1,1].forEach(s=> boxT(0.14, 0.14, 2.1, M.steel, s*1.3, 1.12, 3.5, loco));
+  boxT(2.65, 0.42, 0.16, M.red, 0, 1.28, 5.32, loco);
+  [-0.85, 0.85].forEach(x=>{
+    const buf = cylT(0.13, 0.13, 0.34, M.iron, x, 1.3, 5.42, loco, 12); buf.rotation.x = Math.PI/2;
+    const face = cylT(0.2, 0.2, 0.07, M.steel, x, 1.3, 5.6, loco, 12); face.rotation.x = Math.PI/2;
+  });
+  // head lamp (brass, glows)
+  const hl = boxT(0.3, 0.34, 0.24, M.brass, 0, 1.78, 5.36, loco);
+  const hlFace = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.22), new THREE.MeshStandardMaterial({ color:0xfff2c0, emissive:0xffd870, emissiveIntensity:1.6 }));
+  hlFace.position.set(0, 1.78, 5.49); loco.add(hlFace);
+  // handrail along boiler
+  [-1,1].forEach(s=>{ const r = cylT(0.025, 0.025, 4.1, M.brass, s*1.03, 2.5, 2.25, loco, 6); r.rotation.x = Math.PI/2; });
+}
+// drivers (with crank pins as children of orbit groups)
+const DRIVER_Z = [2.1, 0.1, -1.9];
+const driverOrbits = [];
+const crankPins = [];
+[-1,1].forEach(side=>{
+  DRIVER_Z.forEach(z=>{
+    const orbit = new THREE.Group(); orbit.position.set(side*1.06, DRIVER_R, z); loco.add(orbit);
+    const wheel = makeWheel(DRIVER_R, 0.2); wheel.position.x = 0; orbit.add(wheel);
+    // crank pin (child of orbit, at phase offset)
+    const off = side>0 ? 0 : Math.PI/2; // quartering between sides
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.16, 10), M.brass);
+    pin.rotation.z = Math.PI/2;
+    pin.position.set(side*0.16, Math.cos(off)*0.45, Math.sin(off)*0.45);
+    orbit.add(pin);
+    driverOrbits.push({ orbit, z, side });
+    crankPins.push({ orbit, off, side, z });
+  });
+});
+// bogie (leading truck) + wheels
+const bogieWheels = [];
+{
+  const bg = new THREE.Group(); bg.position.set(0, 0, 3.85); loco.add(bg);
+  boxT(2.1, 0.22, 1.9, M.black, 0, 0.62, 0, bg);
+  [-0.42, 0.42].forEach(z=>{
+    const w = makeWheel(0.42, 1.9); w.position.set(0, 0.42, z); bg.add(w);
+    bogieWheels.push({ mesh:w, r:0.42 });
+  });
+}
+// rods & valve gear (children of loco, positioned per-frame)
+function makeRod(w,h,mat){
+  const geo = new THREE.BoxGeometry(w, h, 1);
+  const m = new THREE.Mesh(geo, mat || M.steel); m.castShadow = true; loco.add(m); return m;
+}
+const rods = [];
+[-1,1].forEach(side=>{
+  rods.push({ side, kind:'side',   mesh: makeRod(0.14, 0.19, M.steel) });
+  rods.push({ side, kind:'main',   mesh: makeRod(0.11, 0.15, M.steel) });
+  rods.push({ side, kind:'ecc',    mesh: makeRod(0.06, 0.09, M.brass) });
+  rods.push({ side, kind:'valve',  mesh: makeRod(0.05, 0.07, M.steel) });
+  rods.push({ side, kind:'drop',   mesh: makeRod(0.045,0.07, M.brass) });
+  // rocker (oscillating plate)
+  const rocker = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.0, 0.16), M.ironLight);
+  rocker.position.set(side*1.34, 2.15, 0.55); rocker.castShadow = true; loco.add(rocker);
+  rods.push({ side, kind:'rocker', mesh: rocker });
+  // crosshead + piston rod
+  const cross = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.3, 0.34), M.steel); loco.add(cross);
+  rods.push({ side, kind:'cross', mesh: cross });
+  const piston = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.15, 8), M.steel);
+  piston.rotation.x = Math.PI/2; loco.add(piston);
+  rods.push({ side, kind:'piston', mesh: piston });
+});
+function placeRod(mesh, ax,ay,az, bx,by,bz){
+  const dy = by-ay, dz = bz-az, len = Math.hypot(dy, dz);
+  mesh.position.set((ax+bx)/2, (ay+by)/2, (az+bz)/2);
+  mesh.scale.z = len;
+  mesh.rotation.set(-Math.atan2(dy, dz), 0, 0);
+}
+function updateValveGear(driverAngle){
+  [-1,1].forEach(side=>{
+    const x = side*1.06;
+    const phase = driverAngle + (side>0 ? 0 : Math.PI/2);
+    const cy = DRIVER_R, crankR = 0.45;
+    const py = cy + Math.cos(phase)*crankR, pz = DRIVER_Z[0] + Math.sin(phase)*crankR;
+    // side rod — the three pins share phase, so this is a pure translation
+    const midZ = (DRIVER_Z[0]+DRIVER_Z[2])/2;
+    const rSide = rods.find(r=>r.side===side && r.kind==='side');
+    rSide.mesh.position.set(x + side*0.14, cy + Math.cos(phase)*crankR, midZ + Math.sin(phase)*crankR);
+    rSide.mesh.scale.z = 4.9; rSide.mesh.rotation.set(0,0,0);
+    // main rod: front driver pin → crosshead (horizontal guide at y=1.12)
+    const gy = 1.12, L = 1.62;
+    const dz = Math.sqrt(Math.max(0.2, L*L - (py-gy)*(py-gy)));
+    const crossZ = pz + dz;
+    const rMain = rods.find(r=>r.side===side && r.kind==='main');
+    placeRod(rMain.mesh, x + side*0.14, py, pz, x + side*0.14, gy, crossZ);
+    const rCross = rods.find(r=>r.side===side && r.kind==='cross');
+    rCross.mesh.position.set(x + side*0.13, gy, crossZ);
+    const rPiston = rods.find(r=>r.side===side && r.kind==='piston');
+    rPiston.mesh.position.set(x + side*0.13, gy, crossZ + 0.62);
+    // valve gear: eccentric rod from rear driver eccentric → rocker
+    const eccPhase = phase + 2.25;
+    const epy = cy + Math.cos(eccPhase)*0.36, epz = DRIVER_Z[2] + Math.sin(eccPhase)*0.36;
+    const rockerPivot = { y: 2.3, z: 0.55 };
+    const rockerAng = 0.42*Math.sin(phase + 0.85);
+    const rEcc = rods.find(r=>r.side===side && r.kind==='ecc');
+    const rTopY = rockerPivot.y + Math.cos(rockerAng)*0.42, rTopZ = rockerPivot.z + Math.sin(rockerAng)*0.42;
+    placeRod(rEcc.mesh, x + side*0.13, epy, epz, x + side*0.13, rTopY, rTopZ);
+    // rocker plate oscillates
+    const rRocker = rods.find(r=>r.side===side && r.kind==='rocker');
+    rRocker.mesh.position.set(x + side*0.16, rockerPivot.y, rockerPivot.z);
+    rRocker.mesh.rotation.x = rockerAng;
+    // valve rod from rocker top forward to valve chest above cylinder
+    const rValve = rods.find(r=>r.side===side && r.kind==='valve');
+    placeRod(rValve.mesh, x + side*0.16, rTopY, rTopZ, x + side*0.16, 2.05, 3.0);
+    // drop link from rocker bottom down to expansion-link trunnion
+    const rBotY = rockerPivot.y - Math.cos(rockerAng)*0.42, rBotZ = rockerPivot.z - Math.sin(rockerAng)*0.42;
+    const rDrop = rods.find(r=>r.side===side && r.kind==='drop');
+    placeRod(rDrop.mesh, x + side*0.16, rBotY, rBotZ, x + side*0.16, 1.62, 1.15 + 0.18*Math.sin(phase+1.6));
+  });
+}
+
+// === tender ===
+const tender = new THREE.Group(); tender.position.set(0, 0, -10.35); train.add(tender);
+const tenderWheels = [];
+{
+  boxT(2.45, 0.28, 5.3, M.iron, 0, 1.0, 0, tender);
+  // riveted tank sides
+  boxT(2.5, 1.35, 5.15, M.ironGreen, 0, 1.95, 0, tender);
+  boxT(2.62, 0.14, 5.3, M.ironGreen, 0, 2.68, 0, tender);
+  // coal heap (displaced icosahedron)
+  const coalGeo = new THREE.IcosahedronGeometry(1.15, 1);
+  const posAttr = coalGeo.attributes.position;
+  const crand = mulberry32(777);
+  for(let i=0;i<posAttr.count;i++){
+    const v = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+    v.multiplyScalar(1 + (crand()-0.5)*0.42); posAttr.setXYZ(i, v.x, v.y*0.42, v.z);
+  }
+  coalGeo.computeVertexNormals();
+  const coal = new THREE.Mesh(coalGeo, M.coal); coal.position.set(0, 2.78, -0.2); coal.castShadow = true; tender.add(coal);
+  // brass G.N. plates
+  [-1,1].forEach(s=>{
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.55), new THREE.MeshStandardMaterial({ map:plateTex('G · N'), emissive:0x2a1e05, emissiveIntensity:0.6, metalness:0.6, roughness:0.35 }));
+    p.position.set(s*1.26, 1.95, 0); p.rotation.y = s>0 ? Math.PI/2 : -Math.PI/2; tender.add(p);
+  });
+  [-1.7, 1.7].forEach(z=>{ const w = makeWheel(TENDER_R, 2.0); w.position.set(0, TENDER_R, z); tender.add(w); tenderWheels.push({ mesh:w, r:TENDER_R }); });
+  // rear lamp
+  boxT(0.16, 0.22, 0.12, M.brass, 0, 2.2, -2.62, tender);
+}
+
+// === coaches (5) ===
+const coachGroups = [];
+const coachWheels = [];
+const doors = [];       // { pivot, side, glow }
+const COACH_LEN = 8.8, COACH_SPACING = 9.4, COACH_FIRST = -17.55;
+const coachZLocal = [];
+for(let i=0;i<5;i++) coachZLocal.push(COACH_FIRST - i*COACH_SPACING);
+
+function makeCoach(index){
+  const g = new THREE.Group();
+  const zc = coachZLocal[index];
+  g.position.set(0, 0, zc); train.add(g); coachGroups.push(g);
+  const sideMats = [liveryMatR, liveryMatL];
+  const bodyMats = [sideMats[0], sideMats[1], M.liveryTop, M.liveryTop, M.liveryTop, M.liveryTop];
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.55, 1.95, COACH_LEN), bodyMats);
+  body.position.y = 2.62; body.castShadow = true; body.receiveShadow = true; g.add(body);
+  // roof: barrel arc + clerestory
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(1.34, 1.34, COACH_LEN-0.15, 18, 1, false, 0, Math.PI), M.roofGrey);
+  roof.rotation.z = Math.PI/2; roof.rotation.y = Math.PI/2;
+  roof.scale.set(0.42, 1, 1); roof.position.y = 3.58; roof.castShadow = true; g.add(roof);
+  const cler = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.3, COACH_LEN-1.1), M.roofGrey); cler.position.y = 4.05; g.add(cler);
+  const clerRoof = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, COACH_LEN-1.1, 12, 1, false, 0, Math.PI), M.roofGrey);
+  clerRoof.rotation.z = Math.PI/2; clerRoof.rotation.y = Math.PI/2; clerRoof.scale.set(0.42,1,1); clerRoof.position.y = 4.18; g.add(clerRoof);
+  // gangway bellows
+  [-1,1].forEach(s=>{ const dg = new THREE.Mesh(new THREE.BoxGeometry(1.25, 1.6, 0.22), M.black); dg.position.set(0, 2.5, s*(COACH_LEN/2+0.08)); g.add(dg);
+    [-0.75, 0.75].forEach(x=>{ const buf2 = new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,0.3,8), M.iron); buf2.rotation.x = Math.PI/2; buf2.position.set(x, 1.35, s*(COACH_LEN/2+0.12)); g.add(buf2); });
+  });
+  // bogies
+  [-2.85, 2.85].forEach(bz=>{
+    const bg = new THREE.Group(); bg.position.set(0, 0, bz); g.add(bg);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.22, 2.0), M.black); frame.position.y = 0.68; bg.add(frame);
+    [-0.72, 0.72].forEach(wz=>{ const w = makeWheel(COACH_R, 2.0); w.position.set(0, COACH_R, wz); bg.add(w); coachWheels.push({ mesh:w, r:COACH_R }); });
+  });
+  // doors (2 per side) + interior glow + steps + step plates
+  [-1,1].forEach(side=>{
+    [-2.35, 2.35].forEach(doz=>{
+      const hinge = new THREE.Group();
+      hinge.position.set(side*1.28, 2.42, zc + doz + 0.38); // hinge at front edge of doorway
+      train.add(hinge);
+      const door = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.56, 0.76), new THREE.MeshStandardMaterial({ color:0x14291d, roughness:0.5, metalness:0.2 }));
+      door.position.set(0, 0, -0.38); door.castShadow = true; hinge.add(door);
+      const dwin = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.42), new THREE.MeshStandardMaterial({ color:0x10151c, roughness:0.15, emissive:0xffd9a0, emissiveIntensity:0.0 }));
+      dwin.position.set(side*0.045, 0.28, -0.38); dwin.rotation.y = side>0 ? Math.PI/2 : -Math.PI/2; hinge.add(dwin);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), M.brass); knob.position.set(side*0.06, -0.12, -0.66); hinge.add(knob);
+      // warm interior glow revealed when open
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 1.45), new THREE.MeshBasicMaterial({ color:0xffd9a0, transparent:true, opacity:0, side:THREE.DoubleSide, depthWrite:false }));
+      glow.position.set(side*1.28, 2.42, zc + doz); glow.rotation.y = side>0 ? Math.PI/2 : -Math.PI/2; train.add(glow);
+      doors.push({ pivot:hinge, side, glow, win:dwin });
+      // steps
+      boxT(0.42, 0.08, 0.3, M.iron, side*1.34, 1.28, zc+doz, train);
+      boxT(0.42, 0.08, 0.3, M.iron, side*1.34, 0.78, zc+doz, train);
+      // step plate bridging the gap to the platform
+      boxT(0.75, 0.05, 1.1, M.ironLight, side*1.6, 1.6, zc+doz, train);
+    });
+  });
+  return g;
+}
+for(let i=0;i<5;i++) makeCoach(i);
+
+// door world positions (for passengers)
+const doorWorldLocal = [];
+doors.forEach(d=>{ doorWorldLocal.push({ side:d.side, zLocal:d.pivot.position.z - 0.38 }); });
+
+// ============================================================
+//  passengers (46) & porters with luggage carts (3)
+// ============================================================
+const SKIN = [0xe8c39e, 0xd9a878, 0xc78e63, 0x8a5a3b];
+const COAT_M = [0x2b2b33, 0x3a2f2a, 0x24303e, 0x33241f, 0x1f2a24, 0x402e34];
+const SKIRT_W = [0x3d2b33, 0x2c2c3c, 0x402e28, 0x242e2a];
+const passengerGroup = new THREE.Group(); scene.add(passengerGroup);
+const passengers = [];
+
+function makeFigure(isWoman, coatColor, skinColor, hatColor){
+  const g = new THREE.Group();
+  const skinMat = new THREE.MeshStandardMaterial({ color:skinColor, roughness:0.65 });
+  const coatMat = new THREE.MeshStandardMaterial({ color:coatColor, roughness:0.75 });
+  const hatMat  = new THREE.MeshStandardMaterial({ color:hatColor, roughness:0.5 });
+  // legs (origin at hip)
+  const legGeo = new THREE.CylinderGeometry(0.062, 0.055, 0.36, 7); legGeo.translate(0, -0.18, 0);
+  const legL = new THREE.Mesh(legGeo, new THREE.MeshStandardMaterial({ color:0x1a1a20, roughness:0.8 })); legL.position.set(-0.1, 0.36, 0); g.add(legL);
+  const legR = new THREE.Mesh(legGeo, legL.material); legR.position.set(0.1, 0.36, 0); g.add(legR);
+  // torso / coat
+  let coat;
+  if(isWoman){
+    coat = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.34, 0.85, 9), coatMat); coat.position.y = 0.78;
+  } else {
+    coat = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.235, 0.78, 9), coatMat); coat.position.y = 0.75;
+  }
+  coat.castShadow = true; g.add(coat);
+  // shoulders
+  const sh = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 7), coatMat); sh.scale.set(1.15, 0.6, 0.9); sh.position.y = 1.12; g.add(sh);
+  // arms (origin at shoulder)
+  const armGeo = new THREE.CylinderGeometry(0.05, 0.045, 0.58, 7); armGeo.translate(0, -0.27, 0);
+  const armL = new THREE.Mesh(armGeo, coatMat); armL.position.set(-0.235, 1.1, 0); g.add(armL);
+  const armR = new THREE.Mesh(armGeo, coatMat); armR.position.set(0.235, 1.1, 0); g.add(armR);
+  // head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.125, 10, 9), skinMat); head.position.y = 1.27; head.castShadow = true; g.add(head);
+  // hat
+  if(isWoman){
+    const bonnet = new THREE.Mesh(new THREE.SphereGeometry(0.145, 9, 7, 0, Math.PI*2, 0, Math.PI*0.55), hatMat);
+    bonnet.position.y = 1.31; bonnet.scale.set(1.05, 0.8, 1.05); g.add(bonnet);
+    const brim = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.028, 6, 12), hatMat);
+    brim.rotation.x = Math.PI/2; brim.position.y = 1.29; g.add(brim);
+  } else if(hatColor === 0x111111){ // top hat
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.095, 0.17, 10), hatMat); crown.position.y = 1.42; g.add(crown);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 0.025, 12), hatMat); brim.position.y = 1.335; g.add(brim);
+  } else { // bowler
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(0.105, 9, 7, 0, Math.PI*2, 0, Math.PI*0.55), hatMat);
+    crown.position.y = 1.33; crown.scale.y = 0.85; g.add(crown);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.145, 0.145, 0.022, 12), hatMat); brim.position.y = 1.33; g.add(brim);
+  }
+  return { g, legL, legR, armL, armR };
+}
+
+function initPassengers(){
+  const pas = mulberry32(987654);
+  for(let i=0;i<46;i++){
+    const isWoman = pas() < 0.38;
+    const coat = isWoman ? SKIRT_W[(pas()*SKIRT_W.length)|0] : COAT_M[(pas()*COAT_M.length)|0];
+    const skin = SKIN[(pas()*SKIN.length)|0];
+    const hatCol = pas()<0.4 ? 0x111111 : (pas()<0.5 ? 0x3a2a1a : 0x22262c);
+    const fig = makeFigure(isWoman, coat, skin, hatCol);
+    const s = 0.9 + pas()*0.16; fig.g.scale.set(s,s,s);
+    fig.g.visible = false; passengerGroup.add(fig.g);
+    // assignment: coach & door & side
+    const coach = i % 5;
+    const side = (i % 2 === 0) ? 1 : -1;
+    const doorIdx = (i % 4 < 2) ? 0 : 1;
+    const doz = doorIdx === 0 ? -2.35 : 2.35;
+    const doorLocalZ = coachZLocal[coach] + doz;
+    passengers.push({
+      i, fig, side, coach, isWoman,
+      doorLocalZ,
+      exitT: OPEN_T + 0.45 + i*0.062 + pas()*0.06,
+      walkSpeed: 1.15 + pas()*0.4,
+      jitter: (pas()-0.5)*2.4,
+      phase: pas()*Math.PI*2,
+      alighted: false
+    });
+  }
+}
+initPassengers();
+
+// porters + carts
+const porters = [];
+function makeCart(){
+  const g = new THREE.Group();
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.16, 2.15), M.wood); bed.position.y = 0.62; bed.castShadow = true; g.add(bed);
+  const rail1 = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.24, 2.15), M.woodDark); rail1.position.set(-0.54, 0.78, 0); g.add(rail1);
+  const rail2 = rail1.clone(); rail2.position.x = 0.54; g.add(rail2);
+  const wheelGeo = new THREE.CylinderGeometry(0.31, 0.31, 0.09, 12); wheelGeo.rotateZ(Math.PI/2);
+  const wheelMat = new THREE.MeshStandardMaterial({ color:0x2a2a2e, roughness:0.5, metalness:0.6 });
+  const wheels = [];
+  [[-0.52,-0.68],[0.52,-0.68],[-0.52,0.68],[0.52,0.68]].forEach(p=>{
+    const w = new THREE.Mesh(wheelGeo, wheelMat); w.position.set(p[0], 0.31, p[1]); g.add(w); wheels.push(w);
+  });
+  // handle
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.5, 6), M.woodDark);
+  handle.rotation.x = 1.05; handle.position.set(0, 0.62, 1.55); g.add(handle);
+  // cargo trunks
+  const t1 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 0.9), new THREE.MeshStandardMaterial({ color:0x4a3020, roughness:0.6 }));
+  t1.position.set(0, 0.9, -0.3); t1.castShadow = true; g.add(t1);
+  const t2 = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.32, 0.6), new THREE.MeshStandardMaterial({ color:0x27331f, roughness:0.6 }));
+  t2.position.set(0.1, 1.25, -0.3); t2.castShadow = true; g.add(t2);
+  return { g, wheels };
+}
+function initPorters(){
+  const cfg = [
+    { side:-4.5, phase:0.0 },
+    { side: 4.5, phase:0.36 },
+    { side:-4.5, phase:0.68 }
+  ];
+  cfg.forEach(c=>{
+    const cart = makeCart(); scene.add(cart.g);
+    const fig = makeFigure(false, 0x1c2436, SKIN[1], 0x14161c); // navy uniform
+    fig.g.scale.set(0.98,0.98,0.98); scene.add(fig.g);
+    porters.push({ cart, fig, side:c.side, phase:c.phase, prevZ:0, initialized:false });
+  });
+}
+initPorters();
+
+// ============================================================
+//  steam & smoke particle system (11,000 pooled)
+// ============================================================
+const STEAM_MAX = 11000;
+const steamPos = new Float32Array(STEAM_MAX*3);
+const steamVel = new Float32Array(STEAM_MAX*3);
+const steamLife = new Float32Array(STEAM_MAX).fill(-1);
+const steamMaxLife = new Float32Array(STEAM_MAX);
+const steamSize = new Float32Array(STEAM_MAX);
+const steamAlpha = new Float32Array(STEAM_MAX);
+const steamColor = new Float32Array(STEAM_MAX*3);
+const steamBaseSize = new Float32Array(STEAM_MAX);
+let steamAlive = 0, steamCursor = 0;
+
+const steamGeo = new THREE.BufferGeometry();
+steamGeo.setAttribute('position', new THREE.BufferAttribute(steamPos, 3).setUsage(THREE.DynamicDrawUsage));
+const steamSizeAttr = new THREE.BufferAttribute(steamSize, 1).setUsage(THREE.DynamicDrawUsage);
+const steamAlphaAttr = new THREE.BufferAttribute(steamAlpha, 1).setUsage(THREE.DynamicDrawUsage);
+const steamColorAttr = new THREE.BufferAttribute(steamColor, 3).setUsage(THREE.DynamicDrawUsage);
+steamGeo.setAttribute('aSize', steamSizeAttr);
+steamGeo.setAttribute('aAlpha', steamAlphaAttr);
+steamGeo.setAttribute('aColor', steamColorAttr);
+const steamMat = new THREE.ShaderMaterial({
+  uniforms:{},
+  vertexShader:[
+    'attribute float aSize; attribute float aAlpha; attribute vec3 aColor;',
+    'varying float vA; varying vec3 vC;',
+    'void main(){ vA = aAlpha; vC = aColor;',
+    '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+    '  gl_PointSize = aSize * (330.0 / max(1.0, -mv.z));',
+    '  gl_Position = projectionMatrix * mv; }'
+  ].join('\n'),
+  fragmentShader:[
+    'varying float vA; varying vec3 vC;',
+    'void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);',
+    '  float a = smoothstep(0.5, 0.07, d) * vA;',
+    '  if(a < 0.012) discard;',
+    '  gl_FragColor = vec4(vC, a); }'
+  ].join('\n'),
+  transparent:true, depthWrite:false, blending:THREE.NormalBlending
+});
+const steamPoints = new THREE.Points(steamGeo, steamMat);
+steamPoints.frustumCulled = false; scene.add(steamPoints);
+
+function spawnSteam(x,y,z, vx,vy,vz, life, size, shade, tint){
+  const i = steamCursor; steamCursor = (steamCursor+1) % STEAM_MAX;
+  if(steamLife[i] >= 0) steamAlive--;
+  steamPos[i*3]=x; steamPos[i*3+1]=y; steamPos[i*3+2]=z;
+  steamVel[i*3]=vx; steamVel[i*3+1]=vy; steamVel[i*3+2]=vz;
+  steamLife[i]=0; steamMaxLife[i]=life; steamBaseSize[i]=size;
+  steamColor[i*3]=shade*tint.r; steamColor[i*3+1]=shade*tint.g; steamColor[i*3+2]=shade*tint.b;
+  steamAlive++;
+}
+function roofCapY(x){
+  const t = Math.acos(Math.min(1, Math.abs(x)/RX));
+  return SPRING_Y + RISE*Math.sin(t) - 0.55;
+}
+const TINT_WHITE = {r:0.94,g:0.95,b:0.96}, TINT_SMOKE = {r:0.36,g:0.35,b:0.35}, TINT_CYL = {r:0.88,g:0.90,b:0.94};
+function updateSteam(dt){
+  for(let i=0;i<STEAM_MAX;i++){
+    if(steamLife[i] < 0){ steamAlpha[i]=0; steamSize[i]=0; continue; }
+    steamLife[i] += dt;
+    if(steamLife[i] >= steamMaxLife[i]){ steamLife[i] = -1; steamAlive--; steamAlpha[i]=0; steamSize[i]=0; continue; }
+    const i3 = i*3;
+    let vx=steamVel[i3], vy=steamVel[i3+1], vz=steamVel[i3+2];
+    // buoyant rise + drag
+    vy += 1.55*dt;
+    const drag = 1 - 0.55*dt;
+    vx*=drag; vy*=drag; vz*=drag;
+    let x=steamPos[i3]+vx*dt, y=steamPos[i3+1]+vy*dt, z=steamPos[i3+2]+vz*dt;
+    // pool under the glass roof
+    const cap = roofCapY(x);
+    if(y > cap){
+      y = cap;
+      vy = Math.abs(vy) > 0.4 ? vy * -0.18 : 0;
+      vx += (x >= 0 ? 1 : -1) * 1.35*dt + (rng()-0.5)*0.8*dt;
+      vz += (rng()-0.5)*0.9*dt;
+    }
+    if(y < 0.15){ y = 0.15; vy = Math.abs(vy)*0.2; }
+    const age = steamLife[i]/steamMaxLife[i];
+    steamPos[i3]=x; steamPos[i3+1]=y; steamPos[i3+2]=z;
+    steamVel[i3]=vx; steamVel[i3+1]=vy; steamVel[i3+2]=vz;
+    steamSize[i] = steamBaseSize[i]*(0.55 + age*2.6);
+    steamAlpha[i] = (age<0.12 ? age/0.12 : 1-(age-0.12)/0.88) * 0.52;
+  }
+  steamGeo.attributes.position.needsUpdate = true;
+  steamSizeAttr.needsUpdate = true; steamAlphaAttr.needsUpdate = true; steamColorAttr.needsUpdate = true;
+}
+
+// ============================================================
+//  sparks (brake & wheel-slip)
+// ============================================================
+const SPARK_MAX = 320;
+const sparkPos = new Float32Array(SPARK_MAX*3);
+const sparkVel = new Float32Array(SPARK_MAX*3);
+const sparkLife = new Float32Array(SPARK_MAX).fill(-1);
+const sparkMaxLife = new Float32Array(SPARK_MAX);
+const sparkSize = new Float32Array(SPARK_MAX);
+const sparkAlpha = new Float32Array(SPARK_MAX);
+let sparkCursor = 0;
+const sparkGeo = new THREE.BufferGeometry();
+sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3).setUsage(THREE.DynamicDrawUsage));
+const sparkSizeAttr = new THREE.BufferAttribute(sparkSize, 1).setUsage(THREE.DynamicDrawUsage);
+const sparkAlphaAttr = new THREE.BufferAttribute(sparkAlpha, 1).setUsage(THREE.DynamicDrawUsage);
+sparkGeo.setAttribute('aSize', sparkSizeAttr);
+sparkGeo.setAttribute('aAlpha', sparkAlphaAttr);
+const sparkMat = new THREE.ShaderMaterial({
+  vertexShader:[
+    'attribute float aSize; attribute float aAlpha; varying float vA;',
+    'void main(){ vA = aAlpha; vec4 mv = modelViewMatrix * vec4(position,1.0);',
+    '  gl_PointSize = aSize * (300.0 / max(1.0,-mv.z)); gl_Position = projectionMatrix * mv; }'
+  ].join('\n'),
+  fragmentShader:[
+    'varying float vA;',
+    'void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);',
+    '  if(d > 0.5) discard;',
+    '  vec3 col = mix(vec3(1.0,0.35,0.05), vec3(1.0,0.9,0.5), smoothstep(0.5,0.0,d));',
+    '  gl_FragColor = vec4(col, vA * smoothstep(0.5,0.05,d)); }'
+  ].join('\n'),
+  transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+});
+const sparkPoints = new THREE.Points(sparkGeo, sparkMat);
+sparkPoints.frustumCulled = false; scene.add(sparkPoints);
+
+function spawnSpark(x,y,z, vx,vy,vz){
+  const i = sparkCursor; sparkCursor = (sparkCursor+1)%SPARK_MAX;
+  sparkPos[i*3]=x; sparkPos[i*3+1]=y; sparkPos[i*3+2]=z;
+  sparkVel[i*3]=vx; sparkVel[i*3+1]=vy; sparkVel[i*3+2]=vz;
+  sparkLife[i]=0; sparkMaxLife[i]=0.45+rng()*0.55; sparkSize[i]=0.10+rng()*0.14;
+}
+function updateSparks(dt){
+  for(let i=0;i<SPARK_MAX;i++){
+    if(sparkLife[i]<0){ sparkAlpha[i]=0; sparkSize[i]=0; continue; }
+    sparkLife[i]+=dt;
+    if(sparkLife[i]>=sparkMaxLife[i]){ sparkLife[i]=-1; sparkAlpha[i]=0; sparkSize[i]=0; continue; }
+    const i3=i*3;
+    sparkVel[i3+1] -= 12.5*dt;
+    let x=sparkPos[i3]+sparkVel[i3]*dt, y=sparkPos[i3+1]+sparkVel[i3+1]*dt, z=sparkPos[i3+2]+sparkVel[i3+2]*dt;
+    if(y<0.16){ y=0.16; sparkVel[i3+1]*=-0.35; sparkVel[i3]*=0.6; sparkVel[i3+2]*=0.6; }
+    sparkPos[i3]=x; sparkPos[i3+1]=y; sparkPos[i3+2]=z;
+    const age=sparkLife[i]/sparkMaxLife[i];
+    sparkAlpha[i]=1-age;
+  }
+  sparkGeo.attributes.position.needsUpdate = true;
+  sparkSizeAttr.needsUpdate = true; sparkAlphaAttr.needsUpdate = true;
+}
+
+// ============================================================
+//  simulation state
+// ============================================================
+const sim = {
+  z: Z0, prevZ: Z0, v: V0,
+  driverAngle: 0, tenderRot: 0, coachRot: 0,
+  chimAcc: 0, cylAcc: 0, sparkAcc: 0,
+  dispatched: false, dispatchTime: -1,
+  userDispatch: false, dispatchArmed: false, dispatchArmedAt: Infinity,
+  passOut: 0
+};
+let simTime = 0;
+let scriptDispatchAt = Infinity;
+let alightedCount = 0;
+
+function doorOpenAmount(t, dispatchTime){
+  const RAMP = 0.7, CRAMP = 0.55;
+  let a;
+  if(t < OPEN_T) a = 0; else a = Math.min(1, (t-OPEN_T)/RAMP);
+  const closeT = (dispatchTime >= 0) ? dispatchTime + 0.1 : Infinity;
+  if(t > closeT) a *= Math.max(0, 1 - (t-closeT)/CRAMP);
+  a = a*a*(3-2*a);
+  return a;
+}
+function updateTrainTransforms(dz){
+  train.position.z = sim.z;
+  // wheel spin for non-driven axles
+  sim.tenderRot += dz / TENDER_R;
+  sim.coachRot  += dz / COACH_R;
+  tenderWheels.forEach(w=>{ w.mesh.rotation.x = sim.tenderRot; });
+  coachWheels.forEach(w=>{ w.mesh.rotation.x = sim.coachRot; });
+  bogieWheels.forEach(w=>{ w.mesh.rotation.x = sim.coachRot * (COACH_R/w.r); });
+  driverOrbits.forEach(d=>{ d.orbit.rotation.x = sim.driverAngle; });
+  updateValveGear(sim.driverAngle);
+}
+function resetParticles(){
+  steamLife.fill(-1); steamAlpha.fill(0); steamSize.fill(0); steamAlive = 0; steamCursor = 0;
+  sparkLife.fill(-1); sparkAlpha.fill(0);
+  steamGeo.attributes.position.needsUpdate = true;
+  steamSizeAttr.needsUpdate = true; steamAlphaAttr.needsUpdate = true;
+  sparkSizeAttr.needsUpdate = true; sparkAlphaAttr.needsUpdate = true;
+}
+function resetSim(dispatchAt){
+  rng = mulberry32(20240607);
+  simTime = 0;
+  sim.z = Z0; sim.prevZ = Z0; sim.v = V0;
+  sim.driverAngle = 0; sim.tenderRot = 0; sim.coachRot = 0;
+  sim.chimAcc = 0; sim.cylAcc = 0; sim.sparkAcc = 0;
+  sim.dispatched = false; sim.dispatchTime = -1;
+  sim.userDispatch = false; sim.dispatchArmed = false; sim.dispatchArmedAt = Infinity;
+  sim.passOut = 0; alightedCount = 0;
+  scriptDispatchAt = (dispatchAt === undefined ? Infinity : dispatchAt);
+  resetParticles();
+  passengers.forEach(p=>{ p.fig.g.visible = false; });
+  porters.forEach(p=>{ p.initialized = false; });
+  updateTrainTransforms(0);
+  applyDoorsAndPassengers(0);
+}
+function easeIO(k){ return k*k*(3-2*k); }
+
+function applyDoorsAndPassengers(t){
+  const open = doorOpenAmount(t, sim.dispatchTime);
+  doors.forEach(d=>{
+    d.pivot.rotation.y = -d.side * open * 1.72;
+    d.glow.material.opacity = open * 0.85;
+    if(d.win && d.win.material.emissiveIntensity !== undefined){
+      d.win.material.emissiveIntensity = open * 1.4;
+    }
+  });
+  // passengers
+  alightedCount = 0;
+  passengers.forEach(p=>{
+    const tau = t - p.exitT;
+    const g = p.fig.g;
+    if(tau <= 0){ g.visible = false; return; }
+    g.visible = true;
+    const side = p.side;
+    const sillX = side*1.5, sillY = 1.66, sillZ = sim.z + p.doorLocalZ;
+    const platX = side*4.5 + p.jitter*0.4, platDrop = { x: side*2.7, y: 1.06 };
+    if(tau < 0.75){
+      // step down: sill → platform edge
+      const k = easeIO(tau/0.75);
+      const x = sillX + (platDrop.x - sillX)*k;
+      const y = sillY + (platDrop.y - sillY)*k - Math.sin(k*Math.PI)*0.05;
+      g.position.set(x, y, sillZ);
+      g.rotation.y = side>0 ? Math.PI/2 : -Math.PI/2;
+      p.fig.legL.rotation.x = Math.sin(k*Math.PI)*0.9;
+      p.fig.legR.rotation.x = -Math.sin(k*Math.PI)*0.9;
+      alightedCount += 0; // still stepping
+      return;
+    }
+    alightedCount++;
+    const tw = tau - 0.75;
+    // walk along platform toward the Way Out (buffer end), slight sway
+    const dist = p.walkSpeed * tw;
+    const x = side*(2.7 + Math.min(1, dist/1.6)*(Math.abs(platX)-2.7)) + Math.sin(tw*1.25 + p.phase)*0.14;
+    const z = sillZ + dist*0.62;
+    const bob = Math.abs(Math.sin(tw*5.4 + p.phase))*0.05;
+    if(z > 32.6){ g.visible = false; return; }
+    g.position.set(x, 1.06 + bob, z);
+    g.rotation.y = 0; // face +z (toward the booking hall)
+    const sw = Math.sin(tw*5.4 + p.phase);
+    p.fig.legL.rotation.x = sw*0.72; p.fig.legR.rotation.x = -sw*0.72;
+    p.fig.armL.rotation.x = -sw*0.55; p.fig.armR.rotation.x = sw*0.55;
+  });
+}
+
+function stepSim(dt){
+  simTime += dt;
+  const s = sim;
+
+  // ---------- longitudinal physics ----------
+  if(!s.dispatched){
+    if(s.v > 0){
+      s.v = Math.max(0, s.v - BRAKE*dt);
+      const nz = Math.min(Z_STOP, s.z + s.v*dt);
+      s.z = nz;
+      if(s.v === 0 || s.z >= Z_STOP){ s.z = Z_STOP; s.v = 0; }
+    }
+    // dispatch trigger
+    if(s.v === 0){
+      if(s.userDispatch && !s.dispatchArmed){
+        s.dispatchArmed = true;
+        s.dispatchArmedAt = simTime + 1.5;
+      }
+      if(s.dispatchArmed && simTime >= s.dispatchArmedAt){
+        s.dispatched = true; s.dispatchTime = simTime; s.userDispatch = false; s.dispatchArmed = false;
+      } else if(simTime >= scriptDispatchAt){
+        s.dispatched = true; s.dispatchTime = simTime;
+      }
+    }
+  }
+  let slip = 0;
+  if(s.dispatched){
+    const D = s.dispatchTime;
+    const u = (simTime - D) / 1.15;
+    if(u >= 0 && u <= 1){ slip = Math.sin(u*Math.PI); s.v = 0; }
+    else if(u > 1){
+      const tA = simTime - (D + 1.15);
+      s.v = -Math.min(8.5, 1.25 + 1.5*tA + 0.42*tA*tA);
+    }
+    s.z = Math.max(-72, s.z + s.v*dt);
+  }
+  const dz = s.z - s.prevZ; s.prevZ = s.z;
+
+  // ---------- wheels ----------
+  s.driverAngle += (s.v / DRIVER_R)*dt + slip*9.2*dt;
+  updateTrainTransforms(dz);
+
+  // ---------- steam emission ----------
+  let chimRate = 46;
+  if(!s.dispatched && s.v > 0.5) chimRate += 34;
+  if(s.dispatched){
+    const u = simTime - s.dispatchTime;
+    if(u < 2.2) chimRate += 950*Math.exp(-u*1.35);
+    if(s.v < -0.4) chimRate += 150;
+  }
+  let cylRate = 8;
+  if(slip > 0.1) cylRate += 520*slip;
+  else if(s.dispatched && s.v < -0.4) cylRate += 130;
+  s.chimAcc += chimRate*dt;
+  s.cylAcc  += cylRate*dt;
+  const trainZ = s.z;
+  while(s.chimAcc >= 1){
+    s.chimAcc -= 1;
+    const burst = s.dispatched && (simTime - s.dispatchTime) < 1.4;
+    const up = 5.6 + rng()*3.2 + (burst ? 4.2 : 0);
+    const dark = rng() < (burst ? 0.5 : 0.3);
+    spawnSteam(
+      (rng()-0.5)*0.34, 4.25 + rng()*0.3, trainZ + 4.6 + (rng()-0.5)*0.3,
+      (rng()-0.5)*1.3 + s.v*0.18, up, (rng()-0.5)*1.3 + s.v*0.82,
+      2.6 + rng()*2.4, 1.35 + rng()*1.3 + (burst?0.9:0),
+      dark ? 0.30+rng()*0.15 : 0.88+rng()*0.09, dark ? TINT_SMOKE : TINT_WHITE);
+  }
+  while(s.cylAcc >= 1){
+    s.cylAcc -= 1;
+    const side = rng() < 0.5 ? -1 : 1;
+    spawnSteam(
+      side*1.32 + (rng()-0.5)*0.2, 1.1 + rng()*0.3, trainZ + 3.5 + (rng()-0.5)*1.4,
+      side*(2.6 + rng()*2.4), 0.6 + rng()*1.4, -1.5 - rng()*2.0 + s.v*0.4,
+      1.5 + rng()*1.6, 0.95 + rng()*0.85,
+      0.86+rng()*0.1, TINT_CYL);
+  }
+  updateSteam(dt);
+
+  // ---------- sparks ----------
+  let sparkRate = 0;
+  if(!s.dispatched && s.v > 0.6) sparkRate = 120 + s.v*3.2;
+  else if(slip > 0.15) sparkRate = 95*slip;
+  s.sparkAcc += sparkRate*dt;
+  while(s.sparkAcc >= 1){
+    s.sparkAcc -= 1;
+    const side = rng()<0.5 ? -1 : 1;
+    spawnSpark(
+      side*(0.9+rng()*0.35), 0.32+rng()*0.15, trainZ + DRIVER_Z[(rng()*3)|0] + (rng()-0.5)*0.5,
+      (rng()-0.5)*1.6 - s.v*0.22, 1.6+rng()*2.6, -2.2 - rng()*3.4 - s.v*0.35);
+  }
+  updateSparks(dt);
+
+  // ---------- doors & passengers ----------
+  applyDoorsAndPassengers(simTime);
+
+  // ---------- porters & carts (ping-pong, analytic) ----------
+  porters.forEach(p=>{
+    const P = 21, u = ((simTime/P) + p.phase) % 1;
+    const tri = u < 0.5 ? u*2 : (1-u)*2;
+    const k = easeIO(tri);
+    const z = -14 + (30 - (-14))*k; // toward Way Out and back
+    const dir = (u < 0.5) ? 1 : -1;
+    if(!p.initialized){ p.prevZ = z; p.initialized = true; }
+    const ddz = z - p.prevZ; p.prevZ = z;
+    p.cart.g.position.set(p.side, 1.05, z);
+    p.cart.g.rotation.y = dir > 0 ? 0 : Math.PI;
+    p.cart.wheels.forEach(w=>{ w.rotation.x += ddz / 0.31; });
+    // porter walks behind the cart
+    const pz = z - dir*1.55;
+    const walk = simTime*5.2 + p.phase*7;
+    p.fig.g.position.set(p.side, 1.05 + Math.abs(Math.sin(walk))*0.045, pz);
+    p.fig.g.rotation.y = dir > 0 ? 0 : Math.PI;
+    p.fig.legL.rotation.x = Math.sin(walk)*0.75; p.fig.legR.rotation.x = -Math.sin(walk)*0.75;
+    p.fig.armL.rotation.x = -1.05 + Math.sin(walk)*0.12; // hands on handle
+    p.fig.armR.rotation.x = -1.05 - Math.sin(walk)*0.12;
+  });
+
+  // ---------- clocks ----------
+  const minutes = 4*60 + 38 + simTime/60; // 4:38 and drifting
+  const hourAng = ((minutes/60) % 12)/12 * Math.PI*2;
+  const minAng  = (minutes % 60)/60 * Math.PI*2;
+  clockHands.forEach(c=>{ c.hour.rotation.z = -hourAng; c.min.rotation.z = -minAng; });
+
+  // ---------- lamp flicker (deterministic) ----------
+  if(timeMode === 'evening'){
+    const f = 0.86 + 0.14*Math.sin(simTime*23.7) * Math.sin(simTime*7.3+1.7) + 0.06*Math.sin(simTime*41.1+0.4);
+    eveningLights.forEach((pl,i)=>{ pl.intensity = ATMO.evening.lampLight * (0.85 + 0.3*Math.abs(Math.sin(simTime*17.3 + i*2.1))); });
+    lampMantles.forEach((m,i)=>{ m.material.emissiveIntensity = ATMO.evening.lampGlow * (0.82 + 0.36*Math.abs(Math.sin(simTime*19.7 + i*1.7)) * f); });
+  }
+}
+
+// ============================================================
+//  time of day
+// ============================================================
+const modeTag = document.getElementById('modeTag');
+function applyTimeOfDay(mode){
+  timeMode = mode;
+  const A = ATMO[mode];
+  scene.background = A.bg.clone();
+  scene.fog.color.copy(A.bg); scene.fog.near = A.fogNear; scene.fog.far = A.fogFar;
+  sun.intensity = A.sun; sun.color.copy(A.sunCol);
+  hemi.color.copy(A.hemiSky); hemi.groundColor.copy(A.hemiGround); hemi.intensity = A.hemi;
+  renderer.toneMappingExposure = A.exposure;
+  M.glassRoof.color.copy(A.glassTint);
+  lampMantles.forEach(m=>{ m.material.emissiveIntensity = A.lampGlow; });
+  lampGlasses.forEach(g=>{ g.material.emissiveIntensity = A.lampGlow*0.55; });
+  eveningLights.forEach(pl=>{ pl.intensity = A.lampLight; });
+  shafts.forEach(s=>{ s.material.opacity = A.shaft; });
+  bloom.strength = A.bloom;
+  if(shed.userData.endWindow){ shed.userData.endWindow.material.emissiveIntensity = A.windowGlow; }
+  modeTag.textContent = (mode === 'afternoon') ? 'Afternoon · Sun' : 'Evening · Gaslight';
+}
+
+// ============================================================
+//  input & camera modes
+// ============================================================
+let cabMode = false;
+const savedCam = { pos: camera.position.clone(), tgt: controls.target.clone() };
+const CAB_LOCAL_CAM = new THREE.Vector3(0.68, 3.05, -2.35);
+const CAB_LOCAL_LOOK = new THREE.Vector3(0.15, 2.15, 6.0);
+
+function setCabMode(on){
+  cabMode = on;
+  document.getElementById('cabTag').style.display = on ? 'block' : 'none';
+  if(on){
+    savedCam.pos.copy(camera.position); savedCam.tgt.copy(controls.target);
+    controls.enabled = false;
+  } else {
+    controls.enabled = true;
+    camera.position.copy(savedCam.pos); controls.target.copy(savedCam.tgt);
+    controls.update();
+  }
+}
+function pressDispatch(){
+  const s = sim;
+  if(s.dispatched || s.dispatchArmed) return;
+  if(s.v > 0){ s.userDispatch = true; return; }   // fires the moment it stops
+  s.userDispatch = true; // armed in stepSim → 1.5 s later the word is given
+}
+window.addEventListener('keydown', e=>{
+  if(e.code === 'Space'){ e.preventDefault(); pressDispatch(); }
+  else if(e.code === 'KeyC'){ setCabMode(!cabMode); }
+  else if(e.code === 'KeyT'){ applyTimeOfDay(timeMode === 'afternoon' ? 'evening' : 'afternoon'); }
+});
+document.getElementById('chipDispatch').addEventListener('click', pressDispatch);
+document.getElementById('chipCab').addEventListener('click', ()=>setCabMode(!cabMode));
+document.getElementById('chipTime').addEventListener('click', ()=>{
+  applyTimeOfDay(timeMode === 'afternoon' ? 'evening' : 'afternoon');
+  document.getElementById('chipTime').textContent = timeMode === 'afternoon' ? 'Evening Gaslight (T)' : 'Afternoon Sun (T)';
+});
+
+// ============================================================
+//  showcase — 12 s scripted camera & events
+// ============================================================
+const SHOWCASE_KEYS = [
+  { t: 0.0, pos:[ 10.6, 4.4,  6.5], tgt:[ 0, 2.3, -46] },
+  { t: 2.2, pos:[  9.2, 3.6, -1.5], tgt:[ 0, 2.1, -12] },
+  { t: 3.4, pos:[  4.4, 2.0,  4.6], tgt:[ 0, 1.5,   1.5] },
+  { t: 4.6, pos:[  6.6, 2.3, -6.5], tgt:[ 1.6, 1.6, -11.5] },
+  { t: 6.2, pos:[  5.4, 2.5, -13.5],tgt:[ 3.4, 1.35, -14.5] },
+  { t: 7.3, pos:[  8.8, 3.4, -2.5], tgt:[ 0, 2.2, -1.5] },
+  { t: 8.6, pos:[  7.3, 2.6,  3.1], tgt:[ 0, 2.0,  1.0] },
+  { t: 9.6, pos:[  9.4, 3.1,  0.5], tgt:[ 0, 2.1,  0.0] },
+  { t: 10.8,pos:[ 12.2, 5.2, 11.5], tgt:[ 0, 2.5, -3.5] },
+  { t: 12.0,pos:[ 13.2, 6.4, 17.5], tgt:[ 0, 2.7, -4.0] }
+];
+const _vA = new THREE.Vector3(), _vB = new THREE.Vector3(), _tA = new THREE.Vector3(), _tB = new THREE.Vector3();
+function showcaseCamera(t){
+  let i = 0;
+  while(i < SHOWCASE_KEYS.length-2 && t > SHOWCASE_KEYS[i+1].t) i++;
+  const a = SHOWCASE_KEYS[i], b = SHOWCASE_KEYS[i+1];
+  const span = Math.max(0.0001, b.t - a.t);
+  let u = THREE.MathUtils.clamp((t - a.t)/span, 0, 1);
+  u = u*u*(3-2*u);
+  _vA.fromArray(a.pos); _vB.fromArray(b.pos);
+  _tA.fromArray(a.tgt); _tB.fromArray(b.tgt);
+  camera.position.lerpVectors(_vA, _vB, u);
+  controls.target.lerpVectors(_tA, _tB, u);
+  // deterministic handheld micro-sway
+  const amp = 0.05 + 0.03*Math.sin(t*0.9);
+  camera.position.x += Math.sin(t*13.7)*amp;
+  camera.position.y += Math.sin(t*17.3+1.7)*amp*0.8;
+  camera.position.z += Math.sin(t*11.1+0.6)*amp;
+  camera.lookAt(controls.target);
+}
+function renderScene(){
+  if(cabMode){
+    train.updateMatrixWorld(true);
+    _vA.copy(CAB_LOCAL_CAM); train.localToWorld(_vA);
+    _vB.copy(CAB_LOCAL_LOOK); train.localToWorld(_vB);
+    const bob = Math.sin(simTime*22)*0.008*Math.min(1, Math.abs(sim.v));
+    camera.position.set(_vA.x, _vA.y + bob, _vA.z);
+    camera.lookAt(_vB);
+  }
+  composer.render();
+  updateBench();
+}
+function seek(t){
+  t = THREE.MathUtils.clamp(t, 0, SHOWCASE_DURATION);
+  const wasCab = cabMode; cabMode = false; // showcase drives the camera itself
+  resetSim(SHOWCASE_DISPATCH);
+  const steps = Math.floor(t / FIXED_DT);
+  for(let i=0;i<steps;i++) stepSim(FIXED_DT);
+  const rem = t - steps*FIXED_DT;
+  if(rem > 1e-6) stepSim(rem);
+  const savedControls = controls.enabled; controls.enabled = false;
+  showcaseCamera(simTime);
+  composer.render();
+  updateBench();
+  controls.enabled = savedControls; cabMode = wasCab;
+}
+const SHOWCASE_DURATION = 12;
+let showcasePlaying = false;
+
+// Record button
+const recordBtn = document.getElementById('recordBtn');
+recordBtn.addEventListener('click', ()=>{
+  if(showcasePlaying) return;
+  showcasePlaying = true;
+  recordBtn.disabled = true; recordBtn.textContent = '● Recording…';
+  const wasCab = cabMode; if(cabMode) setCabMode(false);
+  const stream = renderer.domElement.captureStream(60);
+  let mime = 'video/webm;codecs=vp9';
+  if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+  const rec = new MediaRecorder(stream, { mimeType:mime, videoBitsPerSecond: 14000000 });
+  const chunks = [];
+  rec.ondataavailable = e=>{ if(e.data.size) chunks.push(e.data); };
+  rec.onstop = ()=>{
+    const blob = new Blob(chunks, { type:'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'kingsbridge-terminus-showcase.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    recordBtn.disabled = false; recordBtn.textContent = '● Record Video';
+    showcasePlaying = false;
+    resetSim(Infinity);      // hand the live scene back, freshly arrived
+    if(wasCab) setCabMode(true);
+  };
+  resetSim(SHOWCASE_DISPATCH);
+  rec.start(100);
+  const t0 = performance.now();
+  function frame(){
+    const t = (performance.now() - t0) / 1000;
+    if(t >= SHOWCASE_DURATION){
+      seek(SHOWCASE_DURATION);
+      rec.stop();
+      return;
+    }
+    seek(t);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+});
+
+window.showcase = { duration: SHOWCASE_DURATION, seek };
+
+// ============================================================
+//  bench + main loop
+// ============================================================
+window.__bench = { trainSpeed: 0, steamParticles: 0, passengers: 0, wheelAngle: 0 };
+function updateBench(){
+  window.__bench.trainSpeed = sim.v;
+  window.__bench.steamParticles = steamAlive;
+  window.__bench.passengers = alightedCount;
+  window.__bench.wheelAngle = sim.driverAngle;
+}
+
+let lastReal = performance.now();
+let acc = 0;
+resetSim(Infinity);
+applyTimeOfDay('afternoon');
+
+function loop(){
+  requestAnimationFrame(loop);
+  const now = performance.now();
+  let dtReal = (now - lastReal)/1000; lastReal = now;
+  dtReal = Math.min(dtReal, 0.1);
+  if(!showcasePlaying){
+    acc += dtReal;
+    let guard = 0;
+    while(acc >= FIXED_DT && guard < 6){ stepSim(FIXED_DT); acc -= FIXED_DT; guard++; }
+  }
+  controls.enabled = !cabMode;
+  if(!cabMode) controls.update();
+  renderScene();
+}
+loop();
+
+// ============================================================
+//  resize
+// ============================================================
+window.addEventListener('resize', ()=>{
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  bloom.setSize(w, h);
+});
+</script>
+</body>
+</html>

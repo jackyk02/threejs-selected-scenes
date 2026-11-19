@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Komorebi — Misty Bamboo Forest</title>
+<style>
+  html, body { margin:0; padding:0; overflow:hidden; background:#0d1410; height:100%;
+    font-family:"Avenir Next","Segoe UI",system-ui,sans-serif; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  .vignette { position:fixed; inset:0; pointer-events:none; z-index:5;
+    background:radial-gradient(ellipse at 50% 42%, rgba(0,0,0,0) 46%, rgba(10,18,12,0.38) 82%, rgba(4,9,6,0.72) 100%); }
+
+  .panel { position:fixed; z-index:10; color:#e9f0e4; text-shadow:0 1px 4px rgba(0,0,0,.55); user-select:none; }
+  #title { top:22px; left:26px; pointer-events:none; }
+  #title h1 { margin:0; font-size:24px; font-weight:600; letter-spacing:.12em; color:#f2f6ea; }
+  #title h1 .jp { font-weight:300; color:#cfe0c6; font-size:15px; letter-spacing:.28em; margin-left:10px; }
+  #title p { margin:5px 0 0 2px; font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:#b9cfae; opacity:.9; }
+
+  #hints { bottom:20px; left:26px; font-size:12px; letter-spacing:.06em; color:#d5e2cb;
+    background:rgba(14,24,16,.45); border:1px solid rgba(210,235,200,.18); border-radius:10px;
+    padding:9px 14px; backdrop-filter:blur(6px); }
+  #hints b { color:#ffe9a8; font-weight:600; }
+
+  #recordBtn { position:fixed; z-index:11; top:20px; right:22px; cursor:pointer;
+    font:600 13px/1 "Avenir Next","Segoe UI",sans-serif; letter-spacing:.1em; color:#1c241a;
+    background:linear-gradient(180deg,#ffe9a8,#e8c96a); border:none; border-radius:10px;
+    padding:13px 20px 12px; box-shadow:0 4px 18px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.7);
+    transition:transform .15s, box-shadow .15s; }
+  #recordBtn:hover { transform:translateY(-2px); box-shadow:0 8px 26px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.8); }
+  #recordBtn:disabled { opacity:.6; cursor:default; transform:none; }
+  #recordBtn .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#c0392b; margin-right:8px; }
+
+  #crosshair { position:fixed; z-index:9; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px;
+    border-radius:50%; background:rgba(255,255,255,.85); box-shadow:0 0 6px rgba(0,0,0,.7); display:none; pointer-events:none; }
+  #walkTag { position:fixed; z-index:9; bottom:22px; left:50%; transform:translateX(-50%); display:none;
+    font-size:11px; letter-spacing:.25em; color:#ffe9a8; background:rgba(10,18,12,.55); border:1px solid rgba(255,233,168,.35);
+    padding:8px 18px; border-radius:8px; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="vignette"></div>
+
+<div class="panel" id="title">
+  <h1>KOMOREBI<span class="jp">木漏れ日 · bamboo light</span></h1>
+  <p>Misty Bamboo Forest &nbsp;·&nbsp; wind, stone &amp; shadow</p>
+</div>
+
+<div class="panel" id="hints">
+  <b>Drag</b> orbit &nbsp;·&nbsp; <b>Scroll</b> zoom &nbsp;·&nbsp; <b>F</b> walk &nbsp;·&nbsp; <b>WASD</b> move &nbsp;·&nbsp; <b>G</b> gust &nbsp;·&nbsp; <b>Click</b> stalk to push
+</div>
+
+<button id="recordBtn"><span class="dot"></span>RECORD SHOWCASE .WEBM</button>
+<div id="crosshair"></div>
+<div id="walkTag">WALK MODE — F TO EXIT</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+/* ============================================================================
+   KOMOREBI — a misty bamboo forest in the wind
+   All geometry, textures and simulation built procedurally in this file.
+   ========================================================================== */
+'use strict';
+
+/* ---------------- deterministic RNG ---------------- */
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const rng = mulberry32(20240913);
+
+/* ---------------- winding path definition ---------------- */
+function pathX(z){ return 4.2*Math.sin(z*0.075) + 1.9*Math.sin(z*0.021 + 1.7); }
+
+/* ============================================================
+   RENDERER / SCENE / CAMERA
+   ============================================================ */
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.18;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const MIST = new THREE.Color(0xb7c9b3);
+scene.fog = new THREE.FogExp2(MIST, 0.026);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 420);
+camera.position.set(17, 11, 43);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(pathX(8), 2.5, 8);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.maxPolarAngle = Math.PI * 0.52;
+controls.minDistance = 2.5;
+controls.maxDistance = 70;
+
+/* ---------------- lights ---------------- */
+const hemi = new THREE.HemisphereLight(0xe6efe0, 0x2c382a, 0.85);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff0d2, 1.75);
+sun.position.set(30, 44, 16);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.left = -42; sun.shadow.camera.right = 42;
+sun.shadow.camera.top = 42;   sun.shadow.camera.bottom = -42;
+sun.shadow.camera.near = 4;   sun.shadow.camera.far = 110;
+sun.shadow.bias = -0.00035;
+sun.shadow.radius = 4;
+scene.add(sun);
+scene.add(sun.target);
+
+const fill = new THREE.DirectionalLight(0xcfe0d8, 0.32);
+fill.position.set(-25, 18, -30);
+scene.add(fill);
+
+/* ============================================================
+   PROCEDURAL CANVAS TEXTURES
+   ============================================================ */
+function makeCanvas(w, h, draw){
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 8;
+  return t;
+}
+
+/* soft radial sprite (dust motes / glow) */
+const softTex = makeCanvas(64, 64, (g) => {
+  const r = g.createRadialGradient(32,32,0, 32,32,32);
+  r.addColorStop(0, 'rgba(255,250,225,1)');
+  r.addColorStop(0.4, 'rgba(255,248,215,0.55)');
+  r.addColorStop(1, 'rgba(255,248,215,0)');
+  g.fillStyle = r; g.fillRect(0,0,64,64);
+});
+
+/* light-shaft gradient: bright top -> fade bottom, soft horizontal edges */
+const shaftTex = makeCanvas(128, 256, (g) => {
+  const img = g.createImageData(128, 256);
+  for (let y=0; y<256; y++){
+    const v = Math.pow(1 - y/256, 1.7) * 0.95 + 0.05;
+    for (let x=0; x<128; x++){
+      const u = x/128;
+      const edge = Math.pow(Math.sin(Math.PI*u), 2.4);
+      const a = Math.max(0, Math.min(1, v*edge));
+      const i = (y*128 + x)*4;
+      img.data[i]=255; img.data[i+1]=246; img.data[i+2]=214; img.data[i+3]=a*235;
+    }
+  }
+  g.putImageData(img, 0, 0);
+});
+shaftTex.wrapS = shaftTex.wrapT = THREE.ClampToEdgeWrapping;
+
+/* mossy ground */
+const groundTex = makeCanvas(512, 512, (g) => {
+  g.fillStyle = '#4c5840'; g.fillRect(0,0,512,512);
+  for (let i=0;i<2600;i++){
+    const x=rng()*512, y=rng()*512, r=2+rng()*16;
+    const l = rng();
+    g.fillStyle = l<0.4 ? 'rgba(52,66,40,0.5)' : (l<0.75 ? 'rgba(96,112,72,0.45)' : 'rgba(140,158,105,0.35)');
+    g.beginPath(); g.ellipse(x,y,r,r*(0.5+rng()*0.8),rng()*Math.PI,0,Math.PI*2); g.fill();
+  }
+  for (let i=0;i<160;i++){ // tiny pale flecks
+    g.fillStyle = 'rgba(190,205,160,0.28)';
+    g.fillRect(rng()*512, rng()*512, 1+rng()*2, 1+rng()*2);
+  }
+});
+groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+groundTex.repeat.set(9,9);
+groundTex.encoding = THREE.sRGBEncoding;
+
+/* flagstone: grey rock with moss dusting */
+const stoneTex = makeCanvas(256, 256, (g) => {
+  g.fillStyle = '#8e8e85'; g.fillRect(0,0,256,256);
+  for (let i=0;i<900;i++){
+    const v = 110 + rng()*90;
+    g.fillStyle = `rgba(${v},${v},${v-8},${0.25+rng()*0.3})`;
+    g.beginPath(); g.ellipse(rng()*256, rng()*256, 2+rng()*22, 2+rng()*14, rng()*Math.PI, 0, Math.PI*2); g.fill();
+  }
+  for (let i=0;i<70;i++){ // moss patches on top of stone
+    g.fillStyle = `rgba(${60+rng()*40},${95+rng()*45},${45+rng()*30},${0.3+rng()*0.35})`;
+    g.beginPath(); g.ellipse(rng()*256, rng()*256, 3+rng()*18, 2+rng()*10, rng()*Math.PI, 0, Math.PI*2); g.fill();
+  }
+  g.strokeStyle = 'rgba(60,60,56,0.5)'; g.lineWidth = 2;
+  for (let i=0;i<7;i++){ // cracks
+    g.beginPath(); let x=rng()*256, y=rng()*256; g.moveTo(x,y);
+    for (let s=0;s<6;s++){ x += (rng()-0.5)*90; y += (rng()-0.5)*90; g.lineTo(x,y); }
+    g.stroke();
+  }
+});
+stoneTex.encoding = THREE.sRGBEncoding;
+
+/* sky dome gradient (pale mist above the green haze) */
+const skyTex = makeCanvas(16, 512, (g) => {
+  const gr = g.createLinearGradient(0,0,0,512);
+  gr.addColorStop(0.00, '#eef3e8');
+  gr.addColorStop(0.30, '#dde7d2');
+  gr.addColorStop(0.52, '#c3d2b8');
+  gr.addColorStop(0.70, '#a9bca2');
+  gr.addColorStop(1.00, '#8fa48b');
+  g.fillStyle = gr; g.fillRect(0,0,16,512);
+});
+skyTex.encoding = THREE.sRGBEncoding;
+
+/* ============================================================
+   SKY DOME + GROUND
+   ============================================================ */
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(280, 24, 16),
+  new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false })
+);
+scene.add(sky);
+
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(90, 48),
+  new THREE.MeshStandardMaterial({ map: groundTex, color: 0xa8b795, roughness: 1.0, metalness: 0 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* low mossy mounds scattered in the forest */
+{
+  const moundGeo = new THREE.SphereGeometry(1, 10, 6);
+  moundGeo.scale(1, 0.32, 1);
+  const moundMat = new THREE.MeshStandardMaterial({ color: 0x46543a, roughness: 1 });
+  const mounds = new THREE.InstancedMesh(moundGeo, moundMat, 46);
+  const d = new THREE.Object3D();
+  for (let i=0;i<46;i++){
+    const a = rng()*Math.PI*2, r = 6 + rng()*38;
+    d.position.set(Math.cos(a)*r, 0.02, Math.sin(a)*r - 4);
+    const s = 0.5 + rng()*1.6;
+    d.scale.set(s*(0.8+rng()*0.8), s*0.6, s*(0.8+rng()*0.8));
+    d.rotation.y = rng()*Math.PI*2;
+    d.updateMatrix();
+    mounds.setMatrixAt(i, d.matrix);
+  }
+  mounds.receiveShadow = true;
+  scene.add(mounds);
+}
+
+/* ============================================================
+   BAMBOO — stalk geometry (lathe with node rings, tapered)
+   ============================================================ */
+const STALK_COUNT = 1750;
+const STALK_H = 10; // unit height, scaled per instance
+
+function buildStalkGeometry(){
+  const pts = [];
+  const ROWS = 46;
+  for (let i=0;i<=ROWS;i++){
+    const y = (i/ROWS) * STALK_H;
+    const yn = y / STALK_H;
+    let r = 0.118 * (1 - 0.60 * yn);                 // taper
+    r *= 1 + 0.55 * Math.exp(-y * 1.6);              // base flare
+    r *= 1 + 0.035 * Math.sin(y * 1.15 + 0.8);       // subtle waviness
+    const node = y / 1.42;                           // node spacing ~1.4 m
+    const f = Math.abs(node - Math.round(node));
+    r += Math.exp(-(f*f) / 0.0035) * 0.030 * (1 - yn*0.55);  // node ring bump
+    pts.push(new THREE.Vector2(Math.max(r, 0.018), y));
+  }
+  const geo = new THREE.LatheGeometry(pts, 9);
+  geo.computeVertexNormals();
+  return geo;
+}
+const stalkGeo = buildStalkGeometry();
+const stalkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.06 });
+const stalkMesh = new THREE.InstancedMesh(stalkGeo, stalkMat, STALK_COUNT);
+stalkMesh.castShadow = true;
+stalkMesh.receiveShadow = false;
+stalkMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+scene.add(stalkMesh);
+
+/* ---------------- per-stalk data ---------------- */
+const sBaseX = new Float32Array(STALK_COUNT);
+const sBaseZ = new Float32Array(STALK_COUNT);
+const sHeight = new Float32Array(STALK_COUNT);
+const sRad = new Float32Array(STALK_COUNT);
+const sYaw = new Float32Array(STALK_COUNT);
+const sFlex = new Float32Array(STALK_COUNT);
+const sPhase = new Float32Array(STALK_COUNT);
+const sLeafScale = new Float32Array(STALK_COUNT);
+const sLeafPhase = new Float32Array(STALK_COUNT);
+const leanX = new Float32Array(STALK_COUNT);
+const leanZ = new Float32Array(STALK_COUNT);
+const velX = new Float32Array(STALK_COUNT);
+const velZ = new Float32Array(STALK_COUNT);
+
+let placed = 0, guard = 0;
+while (placed < STALK_COUNT && guard++ < 40000){
+  const a = rng()*Math.PI*2;
+  const r = Math.pow(rng(), 0.72) * 47;         // denser toward middle
+  const x = Math.cos(a)*r, z = Math.sin(a)*r - 3;
+  if (Math.abs(x - pathX(z)) < 2.1) continue;   // keep the path clear
+  const lx = pathX(-9) + 2.1, lz = -9;
+  if (Math.hypot(x-lx, z-lz) < 2.3) continue;   // lantern clearing
+  if (Math.abs(z - (-15)) < 2.4 && Math.abs(x - pathX(-15)) < 3.0) continue; // gate clearing
+  sBaseX[placed] = x; sBaseZ[placed] = z;
+  sHeight[placed] = 8 + rng()*7;                // 8–15 m
+  sRad[placed] = 0.8 + rng()*0.55;
+  sYaw[placed] = rng()*Math.PI*2;
+  const hn = (sHeight[placed]-8)/7;
+  sFlex[placed] = 0.5 + 0.6*hn;                 // taller stalks flex more
+  sPhase[placed] = rng()*Math.PI*2;
+  sLeafScale[placed] = 0.75 + rng()*0.6 + hn*0.25;
+  sLeafPhase[placed] = rng()*Math.PI*2;
+  placed++;
+}
+/* instance colors: green → yellow-green range */
+{
+  const col = new THREE.Color();
+  for (let i=0;i<STALK_COUNT;i++){
+    const t = rng();
+    if (t < 0.16)      col.setHSL(0.155 + rng()*0.03, 0.52 + rng()*0.15, 0.34 + rng()*0.12); // yellow-green
+    else if (t < 0.55) col.setHSL(0.245 + rng()*0.035, 0.42 + rng()*0.22, 0.26 + rng()*0.12); // mid green
+    else               col.setHSL(0.315 + rng()*0.03, 0.38 + rng()*0.18, 0.20 + rng()*0.10); // deep green
+    stalkMesh.setColorAt(i, col);
+  }
+  stalkMesh.instanceColor.needsUpdate = true;
+}
+
+/* ============================================================
+   LEAF CLUSTERS — merged arching blades, instanced per stalk
+   ============================================================ */
+function buildBlade(len, wid, arch, droop){
+  const SEGS = 6;
+  const pos = [], idx = [];
+  for (let i=0;i<=SEGS;i++){
+    const t = i/SEGS;
+    const x = t*len;
+    const y = Math.sin(t*Math.PI*0.62)*arch*len - t*t*droop*len;
+    const halfW = wid * Math.sin(Math.PI*Math.pow(Math.max(t,0.02), 0.72)) * (1 - 0.3*t) * 0.5 + 0.001;
+    pos.push(x, y, -halfW,  x, y, halfW);
+  }
+  for (let i=0;i<SEGS;i++){
+    const a = i*2, b = i*2+1, c = i*2+2, d = i*2+3;
+    idx.push(a,b,c, b,d,c);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+function mergeParts(parts){ // parts: [{geo, matrix}]
+  const pos = [], nor = [];
+  for (const p of parts){
+    const g = (p.geo.index ? p.geo.toNonIndexed() : p.geo.clone());
+    g.applyMatrix4(p.matrix);
+    pos.push(...g.attributes.position.array);
+    nor.push(...g.attributes.normal.array);
+    g.dispose();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  return geo;
+}
+function buildLeafCluster(){
+  const parts = [];
+  const bladeBase = buildBlade(1.6, 0.34, 0.32, 0.42);
+  for (let k=0;k<9;k++){
+    const yaw = (k/9)*Math.PI*2 + rng()*0.7;
+    const tilt = (k%3 === 0) ? (0.12 + rng()*0.25) : (-0.12 - rng()*0.5); // a few reach upward
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, tilt, 'YZX'));
+    const s = 0.72 + rng()*0.62;
+    m.compose(new THREE.Vector3(0, -0.08 - rng()*0.25, 0), q, new THREE.Vector3(s,s,s));
+    parts.push({ geo: bladeBase, matrix: m });
+  }
+  /* a couple of long drooping blades */
+  for (let k=0;k<3;k++){
+    const yaw = rng()*Math.PI*2;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, -0.75 - rng()*0.35, 'YZX'));
+    m.compose(new THREE.Vector3(0, 0.05, 0), q, new THREE.Vector3(1.35, 1.0, 1.0));
+    parts.push({ geo: bladeBase, matrix: m });
+  }
+  return mergeParts(parts);
+}
+const leafGeo = buildLeafCluster();
+const leafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
+const leafMesh = new THREE.InstancedMesh(leafGeo, leafMat, STALK_COUNT);
+leafMesh.castShadow = false;
+leafMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+scene.add(leafMesh);
+{
+  const col = new THREE.Color();
+  for (let i=0;i<STALK_COUNT;i++){
+    col.setHSL(0.26 + rng()*0.09, 0.42 + rng()*0.25, 0.20 + rng()*0.16);
+    leafMesh.setColorAt(i, col);
+  }
+  leafMesh.instanceColor.needsUpdate = true;
+}
+
+/* ============================================================
+   WIND + SPRING SIMULATION  (spring-loaded cantilever)
+   ============================================================ */
+const K_SPRING = 38;          // ω ≈ 6.2 rad/s  (≈1 Hz sway)
+const C_DAMP = 1.85;          // underdamped → overshoot & spring-back
+
+const gustEvents = [];        // {t0, dx, dz, amp, speed}
+let simTime = 0;
+let stepCounter = 0;
+const FIXED_DT = 1/60;
+
+function windAccel(x, z, t){
+  let ax = 0, az = 0;
+  /* prevailing breeze, slowly breathing */
+  const d1x = 0.86, d1z = 0.51;
+  const breeze = 0.9 + 0.65*Math.sin(t*0.4 + 1.2) + 0.35*Math.sin(t*1.13 + 0.3);
+  ax += d1x*breeze; az += d1z*breeze;
+  /* long traveling swell — neighbours sway in sequence */
+  const dot1 = x*d1x + z*d1z;
+  const w1 = 3.1 * Math.sin(dot1*0.42 - t*1.9) * (0.6 + 0.4*Math.sin(t*0.23 + 2.0));
+  ax += d1x*w1; az += d1z*w1;
+  /* cross-chop ripple */
+  const d2x = -0.42, d2z = 0.91;
+  const dot2 = x*d2x + z*d2z;
+  const w2 = 2.1 * Math.sin(dot2*0.78 - t*2.65 + 1.0);
+  ax += d2x*w2; az += d2z*w2;
+  /* gust packets racing through the forest */
+  for (let i=0;i<gustEvents.length;i++){
+    const g = gustEvents[i];
+    const age = t - g.t0;
+    if (age < 0) continue;
+    const front = -58 + g.speed * age;
+    const proj = x*g.dx + z*g.dz;
+    const dd = proj - front;
+    let env = Math.exp(-(dd*dd) / (2*5.6*5.6));
+    env *= Math.min(1, age/0.28 + 0.15);
+    const a = g.amp * env;
+    ax += g.dx*a; az += g.dz*a;
+  }
+  return { x: ax, z: az };
+}
+
+function stepSim(dt){
+  simTime += dt;
+  for (let i=0;i<STALK_COUNT;i++){
+    const w = windAccel(sBaseX[i], sBaseZ[i], simTime + sPhase[i]*0.0);
+    const fx = sFlex[i];
+    let ax = w.x*fx - K_SPRING*leanX[i] - C_DAMP*velX[i];
+    let az = w.z*fx - K_SPRING*leanZ[i] - C_DAMP*velZ[i];
+    velX[i] += ax*dt; velZ[i] += az*dt;
+    leanX[i] += velX[i]*dt; leanZ[i] += velZ[i]*dt;
+    /* soft stop at 0.62 rad */
+    const m = Math.hypot(leanX[i], leanZ[i]);
+    if (m > 0.62){ const s = 0.62/m; leanX[i]*=s; leanZ[i]*=s; velX[i]*=0.4; velZ[i]*=0.4; }
+  }
+  /* prune finished gusts (keep list tiny, deterministic) */
+  for (let i=gustEvents.length-1;i>=0;i--){
+    if (simTime - gustEvents[i].t0 > 7.5) gustEvents.splice(i,1);
+  }
+}
+
+function spawnGust(strength, dirAngle, t0){
+  const a = (dirAngle === undefined) ? (-0.45 + rng()*0.5) : dirAngle;
+  gustEvents.push({ t0: (t0===undefined ? simTime : t0), dx: Math.cos(a), dz: Math.sin(a), amp: 15.5*strength, speed: 23 });
+}
+
+function currentGustMetric(){
+  let m = 0;
+  const probeX = camera ? camera.position.x : 0, probeZ = camera ? camera.position.z : 0;
+  const pc = probeX*0.86 + probeZ*0.51;
+  for (const g of gustEvents){
+    const age = simTime - g.t0; if (age < 0) continue;
+    const front = -58 + g.speed*age;
+    const dd = pc - front;
+    m = Math.max(m, Math.min(1, Math.exp(-(dd*dd)/(2*5.6*5.6)) * (g.amp/16)));
+  }
+  m += 0.06 + 0.05*(0.5 + 0.5*Math.sin(simTime*0.4 + 1.2));
+  return Math.max(0, Math.min(1, m));
+}
+
+/* reset entire simulation to t=0 (used by showcase seek) */
+function resetSim(){
+  leanX.fill(0); leanZ.fill(0); velX.fill(0); velZ.fill(0);
+  gustEvents.length = 0;
+  simTime = 0; stepCounter = 0;
+}
+
+/* ============================================================
+   FLAGSTONE PATH — irregular mossy slabs along the winding curve
+   ============================================================ */
+{
+  const slabGeo = new THREE.CylinderGeometry(1, 1.06, 0.16, 9, 1);
+  const slabMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.95, metalness: 0.0 });
+  const rows = [];
+  for (let z = 45; z > -38; z -= 0.92){
+    const cx = pathX(z);
+    const two = rng() > 0.3;
+    if (two){ rows.push([cx - 0.58 + (rng()-0.5)*0.3, z]); rows.push([cx + 0.58 + (rng()-0.5)*0.3, z + (rng()-0.5)*0.4]); }
+    else rows.push([cx + (rng()-0.5)*0.5, z]);
+  }
+  const slabs = new THREE.InstancedMesh(slabGeo, slabMat, rows.length);
+  slabs.castShadow = true; slabs.receiveShadow = true;
+  const d = new THREE.Object3D(); const col = new THREE.Color();
+  for (let i=0;i<rows.length;i++){
+    d.position.set(rows[i][0], 0.045 + rng()*0.03, rows[i][1]);
+    d.rotation.y = rng()*Math.PI*2;
+    d.scale.set(0.52+rng()*0.32, 0.8+rng()*0.5, 0.42+rng()*0.3);
+    d.updateMatrix();
+    slabs.setMatrixAt(i, d.matrix);
+    const moss = rng();
+    col.setHSL(moss < 0.45 ? 0.24 : 0.13, moss < 0.45 ? 0.28+rng()*0.2 : 0.05+rng()*0.06, 0.42+rng()*0.22);
+    slabs.setColorAt(i, col);
+  }
+  slabs.instanceColor.needsUpdate = true;
+  scene.add(slabs);
+}
+
+/* ============================================================
+   STONE LANTERN  (carved from primitives, warm emissive firebox)
+   ============================================================ */
+const lanternPos = new THREE.Vector3(pathX(-9) + 2.1, 0, -9);
+const lanternMat = new THREE.MeshStandardMaterial({ color: 0x8f938b, roughness: 0.9 });
+const lanternMoss = new THREE.MeshStandardMaterial({ color: 0x5c6b47, roughness: 1 });
+const fireMat = new THREE.MeshStandardMaterial({ color: 0x3a2a12, emissive: 0xffa843, emissiveIntensity: 1.6, roughness: 0.7 });
+let lanternLight = null;
+{
+  const L = new THREE.Group();
+  const add = (geo, mat, x, y, z, castShadow=true) => {
+    const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = castShadow; m.receiveShadow = true; L.add(m); return m;
+  };
+  add(new THREE.BoxGeometry(1.15, 0.22, 1.15), lanternMat, 0, 0.11, 0);                    // base slab
+  add(new THREE.BoxGeometry(0.82, 0.16, 0.82), lanternMoss, 0, 0.30, 0);                   // mossy foot
+  add(new THREE.CylinderGeometry(0.21, 0.27, 0.78, 8), lanternMat, 0, 0.76, 0);            // shaft
+  add(new THREE.CylinderGeometry(0.34, 0.34, 0.12, 8), lanternMat, 0, 1.19, 0);            // collar
+  add(new THREE.BoxGeometry(0.62, 0.52, 0.62), lanternMat, 0, 1.52, 0);                    // firebox shell
+  /* glowing window panels */
+  const winGeo = new THREE.PlaneGeometry(0.30, 0.34);
+  [[0,0,0.315,0],[0,0,-0.315,Math.PI],[0.315,0,0,Math.PI/2],[-0.315,0,0,-Math.PI/2]].forEach(([x,y,z,ry]) => {
+    const w = new THREE.Mesh(winGeo, fireMat); w.position.set(x, 1.52+y, z); w.rotation.y = ry; L.add(w);
+  });
+  add(new THREE.CylinderGeometry(0.52, 0.30, 0.26, 4), lanternMoss, 0, 1.90, 0).rotation.y = Math.PI/4; // pyramid roof
+  add(new THREE.SphereGeometry(0.13, 10, 8), lanternMat, 0, 2.12, 0);                       // jewel
+  L.position.copy(lanternPos);
+  L.rotation.y = 0.5;
+  scene.add(L);
+  lanternLight = new THREE.PointLight(0xffa04a, 1.35, 9, 2);
+  lanternLight.position.set(lanternPos.x, 1.6, lanternPos.z);
+  scene.add(lanternLight);
+}
+
+/* ============================================================
+   WOODEN GATE  (simple sanmon-style, across the path)
+   ============================================================ */
+const gatePos = new THREE.Vector3(pathX(-15), 0, -15);
+{
+  const wood = new THREE.MeshStandardMaterial({ color: 0x4a3323, roughness: 0.85 });
+  const woodDark = new THREE.MeshStandardMaterial({ color: 0x38271b, roughness: 0.9 });
+  const G = new THREE.Group();
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); m.castShadow = true; m.receiveShadow = true; G.add(m); return m; };
+  /* posts */
+  const postGeo = new THREE.CylinderGeometry(0.21, 0.24, 3.6, 10);
+  add(postGeo, wood, -1.75, 1.8, 0);
+  add(postGeo, wood,  1.75, 1.8, 0);
+  add(new THREE.BoxGeometry(0.62, 0.28, 0.62), woodDark, -1.75, 0.14, 0);
+  add(new THREE.BoxGeometry(0.62, 0.28, 0.62), woodDark,  1.75, 0.14, 0);
+  /* lower lintel (nuki) passes through posts */
+  add(new THREE.BoxGeometry(4.6, 0.26, 0.30), woodDark, 0, 1.55, 0);
+  /* upper beam & curved cap (kasagi, faked with two angled slabs) */
+  add(new THREE.BoxGeometry(4.9, 0.30, 0.34), wood, 0, 3.28, 0);
+  const capL = add(new THREE.BoxGeometry(1.7, 0.20, 0.44), woodDark, -1.75, 3.52, 0); capL.rotation.z =  0.10;
+  const capC = add(new THREE.BoxGeometry(2.1, 0.20, 0.44), woodDark,  0.0,  3.60, 0);
+  const capR = add(new THREE.BoxGeometry(1.7, 0.20, 0.44), woodDark,  1.75, 3.52, 0); capR.rotation.z = -0.10;
+  G.position.copy(gatePos);
+  G.rotation.y = Math.atan(4.2*0.075*Math.cos(-15*0.075) + 1.9*0.021*Math.cos(-15*0.021+1.7)); // align to path tangent
+  scene.add(G);
+}
+
+/* ============================================================
+   FALLEN BAMBOO LEAVES along the path edges
+   ============================================================ */
+{
+  const s = new THREE.Shape();
+  s.moveTo(0, -0.105);
+  s.bezierCurveTo(0.055, -0.05, 0.062, 0.05, 0, 0.135);
+  s.bezierCurveTo(-0.062, 0.05, -0.055, -0.05, 0, -0.105);
+  const leafGeo = new THREE.ShapeGeometry(s, 5);
+  leafGeo.rotateX(-Math.PI/2);
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, side: THREE.DoubleSide });
+  const N = 720;
+  const fallen = new THREE.InstancedMesh(leafGeo, leafMat, N);
+  fallen.receiveShadow = true;
+  const d = new THREE.Object3D(); const col = new THREE.Color();
+  for (let i=0;i<N;i++){
+    const z = 46 - rng()*84;
+    const side = rng() < 0.5 ? -1 : 1;
+    const off = 1.1 + Math.pow(rng(), 1.6)*4.2;
+    d.position.set(pathX(z) + side*off + (rng()-0.5)*0.7, 0.02 + rng()*0.02, z + (rng()-0.5)*0.9);
+    d.rotation.y = rng()*Math.PI*2;
+    d.scale.set(0.8+rng()*1.5, 0.8+rng()*0.8, 0.8+rng()*1.5);
+    d.updateMatrix();
+    fallen.setMatrixAt(i, d.matrix);
+    const t = rng();
+    if (t < 0.4) col.setHSL(0.10 + rng()*0.05, 0.55+rng()*0.2, 0.32+rng()*0.18);   // ochre
+    else if (t < 0.72) col.setHSL(0.16 + rng()*0.05, 0.5+rng()*0.2, 0.30+rng()*0.15); // faded gold
+    else col.setHSL(0.23 + rng()*0.08, 0.38+rng()*0.2, 0.24+rng()*0.12);             // stale green
+    fallen.setColorAt(i, col);
+  }
+  fallen.instanceColor.needsUpdate = true;
+  scene.add(fallen);
+}
+
+/* ============================================================
+   GOD RAYS — volumetric-ish light shafts through canopy gaps
+   ============================================================ */
+const shafts = [];
+{
+  const sunDir = new THREE.Vector3(30, 44, 16).normalize(); // from origin toward sun
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), sunDir);
+  const shaftDefs = [
+    { x:-3.5, z: 17.0, w: 3.6, o: 0.55 },
+    { x: 4.0, z:  7.5, w: 2.6, o: 0.48 },
+    { x:-5.5, z: -2.0, w: 4.4, o: 0.62 },
+    { x: 2.2, z:-12.5, w: 3.1, o: 0.55 },
+    { x: 7.5, z: 23.0, w: 2.4, o: 0.42 },
+    { x:-0.8, z: 28.5, w: 2.9, o: 0.46 }
+  ];
+  for (const def of shaftDefs){
+    const geo = new THREE.PlaneGeometry(def.w, 15.5);
+    const mat = new THREE.MeshBasicMaterial({
+      map: shaftTex, transparent: true, opacity: def.o,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+      side: THREE.DoubleSide, fog: false
+    });
+    for (const roll of [0, Math.PI/2]){   // crossed planes read from any yaw
+      const m = new THREE.Mesh(geo, mat.clone());
+      m.quaternion.copy(q);
+      const spin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), roll + def.z*0.13);
+      m.quaternion.multiply(spin);
+      m.position.set(def.x + sunDir.x*5.5, 5.6, def.z + sunDir.z*5.5);
+      m.renderOrder = 20;
+      scene.add(m);
+      shafts.push({ mesh: m, base: def.o, phase: def.z*0.7 });
+    }
+  }
+}
+
+/* ============================================================
+   DUST MOTES drifting inside the shafts
+   ============================================================ */
+const MOTES = 340;
+const moteGeo = new THREE.BufferGeometry();
+const motePos = new Float32Array(MOTES*3);
+const moteSeed = new Float32Array(MOTES*4);
+for (let i=0;i<MOTES;i++){
+  moteSeed[i*4+0] = rng();            // shaft selector
+  moteSeed[i*4+1] = rng();            // x offset
+  moteSeed[i*4+2] = rng();            // z offset
+  moteSeed[i*4+3] = 0.12 + rng()*0.25; // fall speed
+}
+moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+const moteMat = new THREE.PointsMaterial({
+  map: softTex, size: 0.16, transparent: true, opacity: 0.85,
+  blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true, color: 0xfff3c8
+});
+const motes = new THREE.Points(moteGeo, moteMat);
+motes.renderOrder = 21;
+scene.add(motes);
+
+const shaftAnchors = [[-3.5,17],[4.0,7.5],[-5.5,-2],[2.2,-12.5],[7.5,23],[-0.8,28.5]];
+function updateMotes(t){
+  for (let i=0;i<MOTES;i++){
+    const si = Math.floor(moteSeed[i*4]*shaftAnchors.length) % shaftAnchors.length;
+    const ax = shaftAnchors[si][0], az = shaftAnchors[si][1];
+    const fall = (moteSeed[i*4+3]*t + moteSeed[i*4+1]*11) % 10.5;
+    const y = 10.6 - fall;
+    const sway = Math.sin(t*0.5 + i*1.7)*0.45;
+    motePos[i*3]   = ax + (moteSeed[i*4+1]-0.5)*3.4 + sway + (10.6-y)*0.38;
+    motePos[i*3+1] = y;
+    motePos[i*3+2] = az + (moteSeed[i*4+2]-0.5)*2.2 + (10.6-y)*0.18;
+  }
+  moteGeo.attributes.position.needsUpdate = true;
+}
+
+/* ============================================================
+   POST: bloom for glowing sources
+   ============================================================ */
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.75, 0.82);
+composer.addPass(bloom);
+
+/* ============================================================
+   INSTANCE MATRIX UPDATE (stalks + leaf clusters)
+   ============================================================ */
+const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
+const _qB = new THREE.Quaternion(), _qY = new THREE.Quaternion(), _qF = new THREE.Quaternion(), _qT = new THREE.Quaternion();
+const _axis = new THREE.Vector3(), _top = new THREE.Vector3(), _up = new THREE.Vector3(0,1,0), _zAxis = new THREE.Vector3(0,0,1);
+
+function updateForestMatrices(){
+  const gustNow = currentGustMetric();
+  for (let i=0;i<STALK_COUNT;i++){
+    const lx = leanX[i], lz = leanZ[i];
+    const ang = Math.hypot(lx, lz);
+    if (ang > 1e-5) _axis.set(lz/ang, 0, -lx/ang); else _axis.set(0,0,1);
+    _qB.setFromAxisAngle(_axis, Math.min(ang, 0.62));
+    _qY.setFromAxisAngle(_up, sYaw[i]);
+    _qT.copy(_qB).multiply(_qY);
+    _p.set(sBaseX[i], 0, sBaseZ[i]);
+    const rs = sRad[i], hs = sHeight[i]/STALK_H;
+    _s.set(rs, hs, rs);
+    _m.compose(_p, _qT, _s);
+    stalkMesh.setMatrixAt(i, _m);
+    /* leaf cluster rides the bend, flutters on top */
+    _top.set(0, sHeight[i], 0).applyQuaternion(_qB).add(_p);
+    const flutterAmp = 0.055 + 0.16*Math.min(1, ang*2.2 + gustNow*0.75);
+    const fl = Math.sin(simTime*6.4 + sLeafPhase[i]) * flutterAmp;
+    const roll = Math.cos(simTime*8.1 + sLeafPhase[i]*1.7) * flutterAmp * 0.7;
+    _qF.setFromAxisAngle(_zAxis, fl);
+    _qT.multiply(_qF);
+    _qF.setFromAxisAngle(new THREE.Vector3(1,0,0), roll);
+    _qT.multiply(_qF);
+    const ls = sLeafScale[i];
+    _s.set(ls, ls, ls);
+    _m.compose(_top, _qT, _s);
+    leafMesh.setMatrixAt(i, _m);
+  }
+  stalkMesh.instanceMatrix.needsUpdate = true;
+  leafMesh.instanceMatrix.needsUpdate = true;
+}
+
+/* ============================================================
+   INTERACTION — walk mode, gusts, click-to-push
+   ============================================================ */
+const crosshair = document.getElementById('crosshair');
+const walkTag = document.getElementById('walkTag');
+let walking = false;
+let yaw = 0, pitch = 0, bobPhase = 0;
+const keysDown = new Set();
+
+function toggleWalk(force){
+  const target = (force !== undefined) ? force : !walking;
+  if (target === walking) return;
+  walking = target;
+  controls.enabled = !walking;
+  crosshair.style.display = walking ? 'block' : 'none';
+  walkTag.style.display = walking ? 'block' : 'none';
+  if (walking){
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    yaw = Math.atan2(-dir.x, -dir.z);
+    pitch = Math.asin(Math.max(-1, Math.min(1, dir.y)));
+    camera.rotation.order = 'YXZ';
+    renderer.domElement.requestPointerLock && renderer.domElement.requestPointerLock();
+  } else {
+    document.exitPointerLock && document.exitPointerLock();
+    /* hand control back smoothly */
+    controls.target.copy(camera.position).add(new THREE.Vector3(Math.sin(yaw)*-4, -1.2, Math.cos(yaw)*-4));
+  }
+}
+document.addEventListener('pointerlockchange', () => {
+  if (!document.pointerLockElement && walking) toggleWalk(false);
+});
+document.addEventListener('mousemove', (e) => {
+  if (!walking || !document.pointerLockElement) return;
+  yaw -= e.movementX * 0.0023;
+  pitch -= e.movementY * 0.0021;
+  pitch = Math.max(-1.35, Math.min(1.35, pitch));
+});
+window.addEventListener('keydown', (e) => {
+  keysDown.add(e.code);
+  if (e.code === 'KeyF') toggleWalk();
+  if (e.code === 'KeyG') spawnGust(1.15 + Math.random()*0.25, -0.45 + Math.random()*0.9);
+  if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', (e) => keysDown.delete(e.code));
+
+const obstacles = [
+  { x: lanternPos.x, z: lanternPos.z, r: 0.85 },
+  { x: gatePos.x - 1.75, z: gatePos.z, r: 0.42 },
+  { x: gatePos.x + 1.75, z: gatePos.z, r: 0.42 }
+];
+function walkStep(dt){
+  const speed = (keysDown.has('ShiftLeft') || keysDown.has('ShiftRight')) ? 6.0 : 3.4;
+  let mx = 0, mz = 0;
+  if (keysDown.has('KeyW') || keysDown.has('ArrowUp')) mz -= 1;
+  if (keysDown.has('KeyS') || keysDown.has('ArrowDown')) mz += 1;
+  if (keysDown.has('KeyA') || keysDown.has('ArrowLeft')) mx -= 1;
+  if (keysDown.has('KeyD') || keysDown.has('ArrowRight')) mx += 1;
+  const moving = (mx !== 0 || mz !== 0);
+  if (moving){
+    const inv = 1/Math.hypot(mx, mz); mx *= inv; mz *= inv;
+    const sin = Math.sin(yaw), cos = Math.cos(yaw);
+    const wx = (mx*cos - mz*sin), wz = (mz*cos + mx*sin);
+    let nx = camera.position.x + wx*speed*dt;
+    let nz = camera.position.z + wz*speed*dt;
+    /* collision vs stalks */
+    for (let i=0;i<STALK_COUNT;i++){
+      const dx = nx - sBaseX[i], dz = nz - sBaseZ[i];
+      const d2 = dx*dx + dz*dz, rr = 0.46;
+      if (d2 < rr*rr && d2 > 1e-6){
+        const d = Math.sqrt(d2);
+        nx = sBaseX[i] + (dx/d)*rr;
+        nz = sBaseZ[i] + (dz/d)*rr;
+      }
+    }
+    for (const o of obstacles){
+      const dx = nx - o.x, dz = nz - o.z, rr = o.r + 0.32;
+      const d2 = dx*dx + dz*dz;
+      if (d2 < rr*rr && d2 > 1e-6){ const d = Math.sqrt(d2); nx = o.x + (dx/d)*rr; nz = o.z + (dz/d)*rr; }
+    }
+    const rr2 = nx*nx + (nz+3)*(nz+3);
+    if (rr2 > 52*52){ const d = Math.sqrt(rr2); nx *= 52/d; nz = (nz+3)*(52/d) - 3; }
+    camera.position.x = nx; camera.position.z = nz;
+    bobPhase += speed*dt;
+    camera.position.y = 1.7 + Math.sin(bobPhase*2.1)*0.035;
+  } else {
+    camera.position.y += (1.7 - camera.position.y)*0.08;
+  }
+  camera.rotation.set(pitch, yaw, 0);
+}
+
+/* click (not drag) → push the stalk */
+const raycaster = new THREE.Raycaster();
+let downX = 0, downY = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;   // it was a drag
+  const ndc = new THREE.Vector2((e.clientX/window.innerWidth)*2 - 1, -(e.clientY/window.innerHeight)*2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObject(stalkMesh);
+  if (hits.length && hits[0].instanceId !== undefined){
+    const id = hits[0].instanceId;
+    const dir = new THREE.Vector3().subVectors(hits[0].point, camera.position); dir.y = 0; dir.normalize();
+    velX[id] += dir.x * 2.6;
+    velZ[id] += dir.z * 2.6;
+  }
+});
+
+/* ============================================================
+   SHOWCASE — scripted 12 s camera move, deterministic seek(t)
+   ============================================================ */
+const SHOW_DURATION = 12;
+const SHOW_GUSTS = [ { t0: 3.0, dx: 0.94, dz: 0.34, amp: 17.5, speed: 24 },
+                     { t0: 8.9, dx: 0.90, dz: 0.43, amp: 15.0, speed: 26 } ];
+/* one stalk near the path at z≈-5 gets shoved on camera at t=8.25 */
+let pushStalkId = 0;
+{
+  let best = Infinity;
+  const tx = pathX(-5) + 1.6, tz = -5.0;
+  for (let i=0;i<STALK_COUNT;i++){
+    const d = Math.hypot(sBaseX[i]-tx, sBaseZ[i]-tz);
+    if (d < best){ best = d; pushStalkId = i; }
+  }
+}
+const SHOW_IMPULSES = [ { t: 8.25, id: pushStalkId, dx: 0.85, dz: 0.53, mag: 2.7 } ];
+const showcaseImpulsesApplied = new Array(SHOW_IMPULSES.length).fill(false);
+
+function resetShowcaseSim(){
+  resetSim();
+  for (const g of SHOW_GUSTS) gustEvents.push({ ...g });
+  showcaseImpulsesApplied.fill(false);
+}
+function fixedStepTo(t){
+  const targetSteps = Math.floor(t / FIXED_DT + 1e-6);
+  while (stepCounter < targetSteps){
+    const tStep = stepCounter * FIXED_DT;
+    for (let j=0;j<SHOW_IMPULSES.length;j++){
+      const ev = SHOW_IMPULSES[j];
+      if (!showcaseImpulsesApplied[j] && tStep + FIXED_DT > ev.t){
+        velX[ev.id] += ev.dx * ev.mag;
+        velZ[ev.id] += ev.dz * ev.mag;
+        showcaseImpulsesApplied[j] = true;
+      }
+    }
+    stepSim(FIXED_DT);
+    stepCounter++;
+  }
+}
+
+/* camera path keys */
+const P = pathX;
+const posKeys = [
+  [0.0,  17.0, 11.0, 43.0],
+  [1.8,   9.5,  5.6, 33.0],
+  [3.6,   4.6,  2.7, 24.5],
+  [5.4,   P(15)+0.6, 2.05, 15.0],
+  [7.2,   P(4)+0.35, 2.0,   4.5],
+  [8.8,   P(-6)+0.5, 1.95, -6.2],
+  [10.2,  P(-11)+1.5, 2.7, -11.0],
+  [11.2,  7.0,  6.1, -13.0],
+  [12.0,  8.6,  8.2, -15.5]
+];
+const lookKeys = [
+  [0.0,  P(18), 3.6, 19.0],
+  [1.8,  P(10), 3.2, 10.0],
+  [3.6,  P(2),  2.8,  1.0],
+  [5.4,  P(-5), 2.3, -5.0],
+  [7.2,  P(-10.5), 2.2, -9.8],
+  [8.8,  lanternPos.x, 1.35, lanternPos.z],
+  [10.2, gatePos.x, 3.0, gatePos.z],
+  [11.2, P(24), 2.2, 24.0],
+  [12.0, P(28), 1.6, 28.0]
+];
+function sampleKeys(keys, t, out){
+  if (t <= keys[0][0]) return out.set(keys[0][1], keys[0][2], keys[0][3]);
+  for (let i=0;i<keys.length-1;i++){
+    const a = keys[i], b = keys[i+1];
+    if (t <= b[0]){
+      let u = (t - a[0]) / (b[0] - a[0]);
+      u = u*u*(3 - 2*u);   // smoothstep easing between keys
+      return out.set(
+        a[1] + (b[1]-a[1])*u,
+        a[2] + (b[2]-a[2])*u,
+        a[3] + (b[3]-a[3])*u
+      );
+    }
+  }
+  const l = keys[keys.length-1];
+  return out.set(l[1], l[2], l[3]);
+}
+const _showPos = new THREE.Vector3(), _showLook = new THREE.Vector3();
+function applyShowcasePose(t){
+  sampleKeys(posKeys, t, _showPos);
+  sampleKeys(lookKeys, t, _showLook);
+  camera.position.copy(_showPos);
+  camera.lookAt(_showLook);
+}
+
+function updateShaftsAndLantern(){
+  for (const s of shafts){
+    s.mesh.material.opacity = s.base * (0.82 + 0.28*Math.sin(simTime*0.65 + s.phase) + 0.12*Math.sin(simTime*1.7 + s.phase*2.3));
+  }
+  const flick = 1 + 0.22*Math.sin(simTime*11.0) + 0.14*Math.sin(simTime*23.0 + 1.3) + 0.08*Math.sin(simTime*37.0 + 4.1);
+  if (lanternLight) lanternLight.intensity = 1.35 * flick;
+  fireMat.emissiveIntensity = 1.6 * flick;
+}
+
+function renderSceneFrame(){
+  updateForestMatrices();
+  updateMotes(simTime);
+  updateShaftsAndLantern();
+  composer.render();
+}
+
+window.showcase = {
+  duration: SHOW_DURATION,
+  seek: function(t){
+    t = Math.max(0, Math.min(SHOW_DURATION, t));
+    const wasWalking = walking;
+    if (walking) toggleWalk(false);
+    resetShowcaseSim();
+    fixedStepTo(t);
+    applyShowcasePose(t);
+    renderSceneFrame();
+    if (wasWalking) toggleWalk(true);
+  }
+};
+
+/* ---------------- Record button ---------------- */
+const recordBtn = document.getElementById('recordBtn');
+let showcasePlaying = false;
+
+function playShowcaseAndRecord(){
+  if (showcasePlaying) return;
+  showcasePlaying = true;
+  recordBtn.disabled = true;
+  recordBtn.innerHTML = '<span class="dot"></span>RECORDING SHOWCASE…';
+
+  const restoreSize = { w: window.innerWidth, h: window.innerHeight };
+  const wasWalking = walking;
+  if (walking) toggleWalk(false);
+  controls.enabled = false;
+
+  /* record at 1080p for a clean artifact */
+  renderer.setSize(1920, 1080, false);
+  composer.setSize(1920, 1080);
+  camera.aspect = 1920/1080;
+  camera.updateProjectionMatrix();
+
+  let recorder = null, chunks = [];
+  try {
+    const stream = renderer.domElement.captureStream(60);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
+               : (MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '');
+    recorder = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 12_000_000 } : undefined);
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'komorebi-showcase.webm'; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      /* restore */
+      renderer.setSize(restoreSize.w, restoreSize.h);
+      composer.setSize(restoreSize.w, restoreSize.h);
+      camera.aspect = restoreSize.w / restoreSize.h;
+      camera.updateProjectionMatrix();
+      controls.enabled = !wasWalking;
+      if (wasWalking) toggleWalk(true);
+      recordBtn.disabled = false;
+      recordBtn.innerHTML = '<span class="dot"></span>RECORD SHOWCASE .WEBM';
+      showcasePlaying = false;
+    };
+    recorder.start(250);
+  } catch (err) {
+    console.warn('MediaRecorder unavailable, playing without capture:', err);
+  }
+
+  /* deterministic replay: reset, then advance fixed steps in real time */
+  resetShowcaseSim();
+  const startWall = performance.now();
+  function showcaseFrame(){
+    const el = (performance.now() - startWall) / 1000;
+    const t = Math.min(el, SHOW_DURATION);
+    fixedStepTo(t);                 // advances sim in the same fixed order as seek(t)
+    applyShowcasePose(t);
+    renderSceneFrame();
+    if (el < SHOW_DURATION){
+      requestAnimationFrame(showcaseFrame);
+    } else {
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      else {
+        renderer.setSize(restoreSize.w, restoreSize.h);
+        composer.setSize(restoreSize.w, restoreSize.h);
+        camera.aspect = restoreSize.w / restoreSize.h; camera.updateProjectionMatrix();
+        controls.enabled = !wasWalking; if (wasWalking) toggleWalk(true);
+        recordBtn.disabled = false;
+        recordBtn.innerHTML = '<span class="dot"></span>RECORD SHOWCASE .WEBM';
+        showcasePlaying = false;
+      }
+    }
+  }
+  requestAnimationFrame(showcaseFrame);
+}
+recordBtn.addEventListener('click', playShowcaseAndRecord);
+
+/* ============================================================
+   MAIN LOOP
+   ============================================================ */
+window.__bench = { stalks: STALK_COUNT, gust: 0, walking: false };
+
+let lastNow = performance.now();
+function animate(){
+  requestAnimationFrame(animate);
+  if (showcasePlaying) return;      // the showcase drives its own frames
+  const now = performance.now();
+  let dt = (now - lastNow) / 1000;
+  lastNow = now;
+  dt = Math.min(dt, 0.05);
+
+  stepSim(dt);
+  if (walking){
+    walkStep(dt);
+  } else {
+    controls.update();
+  }
+  renderSceneFrame();
+  window.__bench.stalks = STALK_COUNT;
+  window.__bench.gust = currentGustMetric();
+  window.__bench.walking = walking;
+}
+
+/* initial placement of matrices before first frame */
+resetSim();
+updateForestMatrices();
+updateMotes(0);
+animate();
+
+/* ---------------- resize ---------------- */
+window.addEventListener('resize', () => {
+  if (showcasePlaying) return;
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

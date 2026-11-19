@@ -1,0 +1,1548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Automatic Pianoforte — Für Elise</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#141010;font-family:Georgia,'Times New Roman',serif;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;}
+  .plate{
+    position:fixed;z-index:10;color:#e8cf9a;pointer-events:none;
+    text-shadow:0 2px 8px #000, 0 0 22px rgba(0,0,0,.7);
+  }
+  #title{top:18px;left:26px;}
+  #title h1{margin:0;font-size:21px;letter-spacing:.28em;font-weight:normal;text-transform:uppercase;color:#f0d9a0;}
+  #title h2{margin:4px 0 0 2px;font-size:12px;letter-spacing:.18em;font-style:italic;color:#c8a96e;font-weight:normal;}
+  #title .rule{width:210px;height:1px;margin-top:8px;background:linear-gradient(90deg,#c8a96e,rgba(200,169,110,0));}
+  #help{bottom:16px;left:26px;font-size:11.5px;letter-spacing:.08em;color:#bfa87c;line-height:1.75;background:rgba(20,12,8,.45);border:1px solid rgba(200,169,110,.28);border-radius:6px;padding:8px 14px;backdrop-filter:blur(3px);}
+  #help b{color:#ecd9a4;font-weight:normal;border:1px solid rgba(236,217,164,.35);border-radius:3px;padding:0 5px;margin:0 2px;font-size:10.5px;}
+  #status{top:18px;right:250px;font-size:11px;letter-spacing:.14em;color:#d8bd85;text-align:right;line-height:1.8;}
+  #ui{position:fixed;top:16px;right:20px;z-index:20;display:flex;gap:10px;}
+  .vbtn{
+    cursor:pointer;font-family:Georgia,serif;letter-spacing:.16em;text-transform:uppercase;font-size:11.5px;
+    color:#f2dda6;background:linear-gradient(180deg,rgba(64,40,22,.92),rgba(38,22,12,.92));
+    border:1px solid #c8a96e;border-radius:4px;padding:10px 16px;
+    box-shadow:0 0 0 2px rgba(0,0,0,.55), 0 4px 18px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,230,160,.25);
+    transition:all .18s ease;
+  }
+  .vbtn:hover{color:#fff3cd;border-color:#ecd9a4;box-shadow:0 0 0 2px rgba(0,0,0,.55),0 0 18px rgba(236,217,164,.35), inset 0 1px 0 rgba(255,230,160,.35);transform:translateY(-1px);}
+  .vbtn:active{transform:translateY(1px);}
+  .vbtn.recording{border-color:#ff9a5a;color:#ffd2ae;box-shadow:0 0 22px rgba(255,110,60,.45), inset 0 0 12px rgba(255,110,60,.3);animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{box-shadow:0 0 14px rgba(255,110,60,.35);}50%{box-shadow:0 0 26px rgba(255,140,70,.6);}}
+  #vignette{position:fixed;inset:0;z-index:5;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 42%, rgba(0,0,0,0) 52%, rgba(8,4,2,.38) 82%, rgba(4,2,1,.72) 100%);}
+  #pedalHint{position:fixed;bottom:16px;right:26px;z-index:10;font-size:10.5px;letter-spacing:.2em;color:#a9895c;text-transform:uppercase;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="vignette"></div>
+<div class="plate" id="title">
+  <h1>The Automatic Pianoforte</h1>
+  <h2>Für Elise · WoO 59 — the panel removed, the music revealed</h2>
+  <div class="rule"></div>
+</div>
+<div class="plate" id="help">
+  <b>Space</b> play / pause &nbsp; <b>↑</b><b>↓</b> tempo &nbsp; <b>A</b>–<b>K</b> play the keyboard &nbsp; <b>click</b> the keys<br>
+  &nbsp;A&nbsp;C4 &nbsp;B&nbsp;C♯4 &nbsp;C&nbsp;D4 &nbsp;D&nbsp;D♯4 &nbsp;E&nbsp;E4 &nbsp;F&nbsp;F4 &nbsp;G&nbsp;F♯4 &nbsp;H&nbsp;G4 &nbsp;I&nbsp;G♯4 &nbsp;J&nbsp;A4 &nbsp;K&nbsp;A♯4
+</div>
+<div class="plate" id="status">— the pianola plays itself —<br><span id="tempoReadout">tempo ♩ = 96</span></div>
+<div id="ui">
+  <button class="vbtn" id="showcaseBtn">▶ &nbsp;Showcase</button>
+  <button class="vbtn" id="recordBtn">⬤ &nbsp;Record video</button>
+</div>
+<div id="pedalHint">sustain pedal · automatic</div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+/* ============================================================
+   THE AUTOMATIC PIANOFORTE — a self-playing upright, panel off
+   Built entirely in code. No external assets.
+   ============================================================ */
+'use strict';
+
+// ---------- deterministic RNG (for scatter & books) ----------
+function mulberry32(seed){ return function(){ let t = seed += 0x6D2B79F5; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const smoothstep = (a,b,x)=>{ const t = clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); };
+const mtof = m => 440 * Math.pow(2,(m-69)/12);
+const isBlack = m => [1,3,6,8,10].includes(((m%12)+12)%12);
+
+/* ============================================================
+   RENDERER / SCENE / CAMERA  (top-level, as required)
+   ============================================================ */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x161010);
+scene.fog = new THREE.Fog(0x161010, 10.5, 17.5);
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.05, 60);
+camera.position.set(2.55, 1.72, 2.05);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;          // soft 4K shadows
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.92, -1.5);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 0.55;
+controls.maxDistance = 7.5;
+controls.maxPolarAngle = Math.PI * 0.55;
+controls.update();
+
+/* ============================================================
+   PROCEDURAL CANVAS TEXTURES
+   ============================================================ */
+function canvasTex(w,h,draw,opts){
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.encoding = THREE.sRGBEncoding;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  if(opts && opts.repeat){ t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(opts.repeat[0], opts.repeat[1]); }
+  return t;
+}
+function grain(g,w,h,base,dark,light,planks){
+  g.fillStyle = base; g.fillRect(0,0,w,h);
+  const rnd = mulberry32(777);
+  for(let i=0;i<w*1.4;i++){
+    const y = rnd()*h, len = 30+rnd()*w*0.5, x = rnd()*w;
+    g.strokeStyle = rnd()<0.5 ? dark : light;
+    g.globalAlpha = 0.05+rnd()*0.10;
+    g.lineWidth = 0.6+rnd()*1.8;
+    g.beginPath(); g.moveTo(x,y);
+    g.bezierCurveTo(x+len*0.3, y+(rnd()-0.5)*6, x+len*0.7, y+(rnd()-0.5)*6, x+len, y+(rnd()-0.5)*9); g.stroke();
+  }
+  g.globalAlpha = 1;
+}
+
+const woodTex = canvasTex(512,512,(g,w,h)=>{
+  grain(g,w,h,'#4a2617','#2c130a','#7a4a2c');
+  g.globalAlpha=0.25; g.fillStyle='#2a120a';
+  for(let i=0;i<6;i++){ g.fillRect(0, i*97 + 20, w, 3); }
+  g.globalAlpha=1;
+});
+const woodDarkTex = canvasTex(512,512,(g,w,h)=>{
+  grain(g,w,h,'#2e1a10','#180c06','#553623');
+});
+const floorTex = canvasTex(1024,1024,(g,w,h)=>{
+  grain(g,w,h,'#5f4026','#3a2412','#84603c');
+  const rows = 6;
+  for(let r=0;r<rows;r++){
+    const y = r*h/rows;
+    g.fillStyle='rgba(20,10,4,0.85)'; g.fillRect(0,y,w,4);
+    const off = (r*397)%w;
+    g.fillRect((off+300)%w, y, 4, h/rows);
+    g.fillStyle='rgba(255,225,170,0.05)'; g.fillRect(0,y+4,w,6);
+  }
+},{repeat:[3,3]});
+const wallpaperTex = canvasTex(512,512,(g,w,h)=>{
+  g.fillStyle='#43302a'; g.fillRect(0,0,w,h);
+  g.fillStyle='rgba(255,235,190,0.045)';
+  for(let x=0;x<w;x+=84) g.fillRect(x,0,26,h);
+  // damask lattice
+  g.strokeStyle='rgba(214,178,110,0.16)'; g.lineWidth=2;
+  for(let y=-h;y<h*2;y+=72){
+    g.beginPath();
+    for(let x=-w;x<w*2;x+=144){
+      g.moveTo(x, y); g.quadraticCurveTo(x+36,y-34,x+72,y); g.quadraticCurveTo(x+108,y+34,x+144,y);
+    }
+    g.stroke();
+  }
+  const rnd=mulberry32(4242);
+  for(let i=0;i<220;i++){
+    const x=rnd()*w, y=rnd()*h;
+    g.fillStyle='rgba(232,201,120,0.20)';
+    g.save(); g.translate(x,y); g.rotate(Math.PI/4); g.fillRect(-3.4,-3.4,6.8,6.8); g.restore();
+  }
+},{repeat:[4,2]});
+const rugTex = canvasTex(1024,768,(g,w,h)=>{
+  g.fillStyle='#5e1d18'; g.fillRect(0,0,w,h);                 // madder field
+  // outer navy border + gold guards
+  g.fillStyle='#232848'; g.fillRect(0,0,w,58); g.fillRect(0,h-58,w,58); g.fillRect(0,0,58,h); g.fillRect(w-58,0,58,h);
+  g.fillStyle='#c9a227'; g.fillRect(58,58,w-116,5); g.fillRect(58,h-63,w-116,5); g.fillRect(58,58,5,h-116); g.fillRect(w-63,58,5,h-116);
+  g.fillStyle='#8a6a1d'; g.fillRect(70,70,w-140,3); g.fillRect(70,h-73,w-140,3); g.fillRect(70,70,3,h-140); g.fillRect(w-73,70,3,h-140);
+  // greek-key-ish dashes on border
+  g.fillStyle='#d8b84a';
+  for(let x=90;x<w-90;x+=46){ g.fillRect(x,20,22,10); g.fillRect(x,h-30,22,10); }
+  for(let y=90;y<h-90;y+=46){ g.fillRect(20,y,10,22); g.fillRect(w-30,y,10,22); }
+  // central medallion
+  const cx=w/2, cy=h/2;
+  const med=(rx,ry,col)=>{ g.fillStyle=col; g.beginPath(); g.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); g.fill(); };
+  med(300,210,'#232848'); med(268,182,'#c9a227'); med(238,158,'#5e1d18'); med(160,100,'#232848'); med(120,74,'#c9a227'); med(84,52,'#5e1d18');
+  g.fillStyle='#e8cf9a'; g.beginPath(); g.ellipse(cx,cy,30,20,0,0,Math.PI*2); g.fill();
+  // corner quarter medallions
+  const corner=(px,py,sx,sy)=>{
+    g.save(); g.translate(px,py); g.scale(sx,sy);
+    g.fillStyle='#232848'; g.beginPath(); g.moveTo(0,0); g.quadraticCurveTo(190,10,210,190); g.lineTo(0,190); g.closePath(); g.fill();
+    g.fillStyle='#c9a227'; g.beginPath(); g.moveTo(18,18); g.quadraticCurveTo(165,26,184,172); g.lineTo(18,172); g.closePath(); g.fill();
+    g.fillStyle='#5e1d18'; g.beginPath(); g.moveTo(34,34); g.quadraticCurveTo(140,42,156,148); g.lineTo(34,148); g.closePath(); g.fill();
+    g.restore();
+  };
+  corner(58,58,1,1); corner(w-58,58,-1,1); corner(58,h-58,1,-1); corner(w-58,h-58,-1,-1);
+  // lattice dots in field
+  const rnd=mulberry32(999);
+  for(let i=0;i<340;i++){
+    g.fillStyle = rnd()<0.5 ? 'rgba(216,184,74,0.28)' : 'rgba(35,40,72,0.5)';
+    g.save(); g.translate(90+rnd()*(w-180), 90+rnd()*(h-180)); g.rotate(Math.PI/4); g.fillRect(-4,-4,8,8); g.restore();
+  }
+  // wear
+  for(let i=0;i<900;i++){ g.fillStyle='rgba(240,225,190,'+(rnd()*0.05)+')'; g.fillRect(rnd()*w, rnd()*h, 2+rnd()*3, 2+rnd()*3); }
+});
+const soundboardTex = canvasTex(1024,512,(g,w,h)=>{
+  const gr = g.createLinearGradient(0,0,w,0);
+  gr.addColorStop(0,'#8a5a32'); gr.addColorStop(0.35,'#a5743e'); gr.addColorStop(0.55,'#7c4f28'); gr.addColorStop(1,'#96683a');
+  g.fillStyle=gr; g.fillRect(0,0,w,h);
+  const rnd=mulberry32(31337);
+  for(let i=0;i<260;i++){
+    const x=rnd()*w; g.strokeStyle='rgba(60,32,12,'+(0.12+rnd()*0.25)+')'; g.lineWidth=0.5+rnd()*1.6;
+    g.beginPath(); g.moveTo(x,0); g.bezierCurveTo(x+(rnd()-0.5)*30,h*0.33, x+(rnd()-0.5)*30,h*0.66, x+(rnd()-0.5)*14,h); g.stroke();
+  }
+  // horizontal rib shadows
+  for(let i=1;i<5;i++){ g.fillStyle='rgba(40,20,8,0.30)'; g.fillRect(0, i*h/5 + 18, w, 5); g.fillStyle='rgba(255,220,160,0.10)'; g.fillRect(0, i*h/5+23, w, 2); }
+  // upper panel — pinblock, darkened with gold arch
+  g.fillStyle='rgba(28,10,10,0.55)'; g.fillRect(0,0,w,86);
+  g.strokeStyle='#d8b84a'; g.lineWidth=3; g.globalAlpha=0.85;
+  g.beginPath(); g.moveTo(70,84); g.quadraticCurveTo(w/2,10,w-70,84); g.stroke();
+  g.globalAlpha=1;
+  // pin dots
+  for(let x=60;x<w-60;x+=16){ g.fillStyle='#1c0f08'; g.beginPath(); g.arc(x,34+Math.sin(x*0.013)*6,3.4,0,7); g.fill(); g.fillStyle='rgba(255,230,170,0.5)'; g.beginPath(); g.arc(x-1,33+Math.sin(x*0.013)*6,1.1,0,7); g.fill(); }
+  // gold filigree center
+  g.strokeStyle='#d8b84a'; g.lineWidth=2; g.globalAlpha=0.7;
+  g.beginPath(); g.moveTo(w/2-90,86); g.quadraticCurveTo(w/2,60,w/2+90,86); g.stroke();
+  g.globalAlpha=1;
+});
+const portraitTex = canvasTex(512,640,(g,w,h)=>{
+  const bg=g.createLinearGradient(0,0,0,h); bg.addColorStop(0,'#2b2333'); bg.addColorStop(1,'#120d18'); g.fillStyle=bg; g.fillRect(0,0,w,h);
+  g.fillStyle='#3d3040'; g.beginPath(); g.ellipse(w/2,h*0.30,86,104,0,0,7); g.fill();        // head shadow mass
+  g.fillStyle='#c9a582'; g.beginPath(); g.ellipse(w/2,h*0.295,58,76,0,0,7); g.fill();         // face
+  g.fillStyle='#8a6a4e'; g.fillRect(w/2-14,h*0.36,28,34);                                     // neck
+  g.fillStyle='#1c1620'; g.beginPath(); g.moveTo(w*0.16,h); g.quadraticCurveTo(w*0.5,h*0.42,w*0.84,h); g.closePath(); g.fill(); // coat
+  g.fillStyle='#e8e2d2'; g.beginPath(); g.moveTo(w/2-34,h*0.47); g.lineTo(w/2,h*0.62); g.lineTo(w/2+34,h*0.47); g.closePath(); g.fill(); // cravat
+  g.fillStyle='#241207'; g.beginPath(); g.ellipse(w/2,h*0.215,62,26,0,Math.PI,0); g.fill();    // hair
+  g.globalAlpha=0.35; g.fillStyle='#ffe9c0'; g.beginPath(); g.ellipse(w*0.42,h*0.27,16,22,0.3,0,7); g.fill(); g.globalAlpha=1;
+});
+const landscapeTex = canvasTex(640,448,(g,w,h)=>{
+  const sky=g.createLinearGradient(0,0,0,h*0.62); sky.addColorStop(0,'#f4b96a'); sky.addColorStop(0.55,'#d97e4a'); sky.addColorStop(1,'#5e3a3a'); g.fillStyle=sky; g.fillRect(0,0,w,h*0.62);
+  g.fillStyle='#ffe9b0'; g.beginPath(); g.arc(w*0.62,h*0.42,34,0,7); g.fill();
+  g.fillStyle='#3a3040'; g.beginPath(); g.moveTo(0,h*0.58); g.lineTo(w*0.22,h*0.30); g.lineTo(w*0.42,h*0.58); g.closePath(); g.fill();
+  g.fillStyle='#241f2c'; g.beginPath(); g.moveTo(w*0.28,h*0.58); g.lineTo(w*0.52,h*0.34); g.lineTo(w*0.74,h*0.58); g.closePath(); g.fill();
+  const gr=g.createLinearGradient(0,h*0.58,0,h); gr.addColorStop(0,'#31392e'); gr.addColorStop(1,'#10160e'); g.fillStyle=gr; g.fillRect(0,h*0.58,w,h*0.42);
+  g.fillStyle='rgba(255,220,150,0.35)'; g.beginPath(); g.moveTo(w*0.55,h*0.58); g.lineTo(w*0.70,h*0.58); g.lineTo(w*0.80,h); g.lineTo(w*0.46,h); g.closePath(); g.fill();
+});
+const nightTex = canvasTex(512,640,(g,w,h)=>{
+  const sky=g.createLinearGradient(0,0,0,h); sky.addColorStop(0,'#0a1230'); sky.addColorStop(0.6,'#1c2a52'); sky.addColorStop(1,'#33284a'); g.fillStyle=sky; g.fillRect(0,0,w,h);
+  const rnd=mulberry32(808);
+  for(let i=0;i<150;i++){ g.fillStyle='rgba(255,255,255,'+(0.3+rnd()*0.7)+')'; g.fillRect(rnd()*w, rnd()*h*0.6, rnd()<0.15?2:1, rnd()<0.15?2:1); }
+  g.fillStyle='#f4ead2'; g.beginPath(); g.arc(w*0.68,h*0.26,52,0,7); g.fill();
+  g.fillStyle='#0a1230'; g.beginPath(); g.arc(w*0.655,h*0.245,44,0,7); g.fill();
+  g.fillStyle='#0d1322'; g.beginPath(); g.moveTo(0,h); g.lineTo(0,h*0.72); g.lineTo(w*0.14,h*0.72); g.lineTo(w*0.14,h*0.62); g.lineTo(w*0.30,h*0.62); g.lineTo(w*0.30,h*0.78); g.lineTo(w*0.55,h*0.78); g.lineTo(w*0.55,h*0.55); g.lineTo(w*0.72,h*0.55); g.lineTo(w*0.72,h*0.8); g.lineTo(w,h*0.8); g.lineTo(w,h); g.closePath(); g.fill();
+});
+const marbleTex = canvasTex(512,256,(g,w,h)=>{
+  g.fillStyle='#cfc8bd'; g.fillRect(0,0,w,h);
+  const rnd=mulberry32(5150);
+  for(let i=0;i<26;i++){
+    g.strokeStyle='rgba(90,84,78,'+(0.25+rnd()*0.4)+')'; g.lineWidth=0.6+rnd()*2.2;
+    let x=rnd()*w, y=0; g.beginPath(); g.moveTo(x,y);
+    while(y<h){ y+=14+rnd()*22; x+=(rnd()-0.5)*60; g.lineTo(x,y); }
+    g.stroke();
+  }
+});
+const tuftTex = canvasTex(512,256,(g,w,h)=>{
+  g.fillStyle='#571d1d'; g.fillRect(0,0,w,h);
+  for(let y=32;y<h;y+=64){
+    for(let x=32;x<w;x+=64){
+      const off = (y%128===32)?32:0;
+      const x2 = x+off;
+      const rg = g.createRadialGradient(x2,y,2,x2,y,26);
+      rg.addColorStop(0,'#2a0d0d'); rg.addColorStop(0.5,'#6e2a24'); rg.addColorStop(1,'#571d1d');
+      g.fillStyle=rg; g.beginPath(); g.arc(x2,y,24,0,7); g.fill();
+      g.fillStyle='rgba(255,215,150,0.35)'; g.beginPath(); g.arc(x2-4,y-4,3,0,7); g.fill();
+    }
+  }
+},{repeat:[2,1]});
+const shadeTex = canvasTex(512,256,(g,w,h)=>{
+  const gr=g.createLinearGradient(0,0,0,h);
+  gr.addColorStop(0,'#f6dfae'); gr.addColorStop(0.45,'#ecc77e'); gr.addColorStop(0.85,'#c89a52'); gr.addColorStop(1,'#8a5f2c');
+  g.fillStyle=gr; g.fillRect(0,0,w,h);
+  g.fillStyle='rgba(120,70,20,0.35)';
+  for(let x=0;x<w;x+=42){ g.beginPath(); g.moveTo(x,0); g.lineTo(x+18,h); g.lineTo(x+26,h); g.lineTo(x+8,0); g.closePath(); g.fill(); }
+  g.fillStyle='#5e3410'; g.fillRect(0,h-26,w,26);
+  g.fillStyle='#e8c878';
+  for(let x=8;x<w;x+=22){ g.beginPath(); g.moveTo(x,h-26); g.lineTo(x+9,h-4); g.lineTo(x+18,h-26); g.closePath(); g.fill(); }
+});
+const fireTex = canvasTex(256,128,(g,w,h)=>{
+  g.fillStyle='#120604'; g.fillRect(0,0,w,h);
+  const rnd=mulberry32(1234);
+  for(let i=0;i<40;i++){
+    const x=rnd()*w, y=h*0.55+rnd()*h*0.4, r=6+rnd()*22;
+    const rg=g.createRadialGradient(x,y,1,x,y,r);
+    rg.addColorStop(0,'#ffd23e'); rg.addColorStop(0.45,'#ff7a1e'); rg.addColorStop(1,'rgba(80,10,0,0)');
+    g.fillStyle=rg; g.beginPath(); g.arc(x,y,r,0,7); g.fill();
+  }
+});
+const clockFaceTex = canvasTex(256,256,(g,w,h)=>{
+  g.fillStyle='#efe6d0'; g.beginPath(); g.arc(w/2,h/2,120,0,7); g.fill();
+  g.strokeStyle='#2a2018'; g.lineWidth=6; g.beginPath(); g.arc(w/2,h/2,112,0,7); g.stroke();
+  g.fillStyle='#2a2018';
+  for(let i=0;i<12;i++){ const a=i/12*Math.PI*2; g.save(); g.translate(w/2,h/2); g.rotate(a); g.fillRect(-3,-102,6,22); g.restore(); }
+  g.lineWidth=5; g.beginPath(); g.moveTo(w/2,h/2); g.lineTo(w/2+44,h/2-38); g.stroke();
+  g.lineWidth=8; g.beginPath(); g.moveTo(w/2,h/2); g.lineTo(w/2-12,h/2-66); g.stroke();
+  g.beginPath(); g.arc(w/2,h/2,8,0,7); g.fill();
+});
+const nameplateTex = canvasTex(1024,128,(g,w,h)=>{
+  const gr=g.createLinearGradient(0,0,0,h); gr.addColorStop(0,'#8a6a1d'); gr.addColorStop(0.35,'#e8cf7a'); gr.addColorStop(0.55,'#a87f2e'); gr.addColorStop(0.75,'#f4e2a0'); gr.addColorStop(1,'#6e5212');
+  g.fillStyle=gr; g.fillRect(0,0,w,h);
+  g.fillStyle='#3a2a08'; g.font='bold 44px Georgia'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText('T H E   A U T O M A T I C   P I A N O F O R T E', w/2, h/2+2);
+});
+
+/* ============================================================
+   MATERIALS
+   ============================================================ */
+const M = {
+  lacquer:  new THREE.MeshPhysicalMaterial({ map:woodTex, color:0xb0785a, roughness:0.34, metalness:0.12, clearcoat:0.75, clearcoatRoughness:0.22 }),
+  lacquerDark: new THREE.MeshPhysicalMaterial({ map:woodDarkTex, color:0x8a5a40, roughness:0.4, metalness:0.1, clearcoat:0.6, clearcoatRoughness:0.3 }),
+  woodMid:  new THREE.MeshStandardMaterial({ map:woodTex, color:0xc09070, roughness:0.55, metalness:0.05 }),
+  woodDark: new THREE.MeshStandardMaterial({ map:woodDarkTex, color:0x9a7260, roughness:0.6 }),
+  interior: new THREE.MeshStandardMaterial({ color:0x2a160c, roughness:0.85 }),
+  soundboard: new THREE.MeshStandardMaterial({ map:soundboardTex, roughness:0.62, metalness:0.05 }),
+  brass:    new THREE.MeshStandardMaterial({ color:0xc9a227, roughness:0.32, metalness:0.92, emissive:0x241a05, emissiveIntensity:0.6 }),
+  brassDark:new THREE.MeshStandardMaterial({ color:0x8a6a1a, roughness:0.45, metalness:0.9 }),
+  ironPlate:new THREE.MeshStandardMaterial({ color:0x3f3833, roughness:0.5, metalness:0.85 }),
+  string:   new THREE.MeshStandardMaterial({ color:0xd9d9e0, roughness:0.3, metalness:0.95 }),
+  stringWound: new THREE.MeshStandardMaterial({ color:0xb5863f, roughness:0.55, metalness:0.8, emissive:0x1e1204, emissiveIntensity:0.5 }),
+  felt:     new THREE.MeshStandardMaterial({ color:0xe9dcc2, roughness:0.95 }),
+  damperFelt:new THREE.MeshStandardMaterial({ color:0xc9b490, roughness:0.95 }),
+  hammerCore:new THREE.MeshStandardMaterial({ color:0x6e4a26, roughness:0.7 }),
+  keyWhite: new THREE.MeshStandardMaterial({ color:0xf3ecd8, roughness:0.32, metalness:0.02 }),
+  keyBlack: new THREE.MeshStandardMaterial({ color:0x17110d, roughness:0.22, metalness:0.15 }),
+  pedalBrass: new THREE.MeshStandardMaterial({ color:0xd4af37, roughness:0.25, metalness:0.95, emissive:0x2a1e06, emissiveIntensity:0.7 }),
+  wall:     new THREE.MeshStandardMaterial({ map:wallpaperTex, roughness:0.9 }),
+  wainscot: new THREE.MeshStandardMaterial({ map:woodDarkTex, color:0x7a5546, roughness:0.6, metalness:0.05 }),
+  ceiling:  new THREE.MeshStandardMaterial({ color:0x2c2320, roughness:0.95 }),
+  marble:   new THREE.MeshStandardMaterial({ map:marbleTex, roughness:0.35, metalness:0.05 }),
+  rug:      new THREE.MeshStandardMaterial({ map:rugTex, roughness:0.92 }),
+  floor:    new THREE.MeshStandardMaterial({ map:floorTex, roughness:0.5, metalness:0.05 }),
+  bookA:    new THREE.MeshStandardMaterial({ color:0x5e2626, roughness:0.7 }),
+  flame1:   new THREE.MeshBasicMaterial({ color:0xffb03a, transparent:true, opacity:0.95 }),
+  flame2:   new THREE.MeshBasicMaterial({ color:0xffe98a, transparent:true, opacity:0.95 }),
+  ember:    new THREE.MeshBasicMaterial({ map:fireTex }),
+  nightGlow:new THREE.MeshBasicMaterial({ map:nightTex }),
+  shade:    new THREE.MeshStandardMaterial({ map:shadeTex, roughness:0.85, side:THREE.DoubleSide, emissive:0xffc06a, emissiveIntensity:0.55, emissiveMap:shadeTex }),
+  bulb:     new THREE.MeshStandardMaterial({ color:0xfff3cf, emissive:0xffe6a8, emissiveIntensity:2.4 }),
+  tuft:     new THREE.MeshStandardMaterial({ map:tuftTex, roughness:0.8 }),
+  curtain:  new THREE.MeshStandardMaterial({ map:wallpaperTex, color:0x8a4a3a, roughness:0.9, side:THREE.DoubleSide }),
+  leaf:     new THREE.MeshStandardMaterial({ color:0x2e4a26, roughness:0.75, side:THREE.DoubleSide }),
+};
+
+/* ============================================================
+   ROOM — Victorian parlour
+   ============================================================ */
+const room = new THREE.Group();
+scene.add(room);
+const PIANO_Z = -1.55;
+
+function box(w,h,d,mat,x,y,z,parent,shadow){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z);
+  if(shadow!==false){ m.castShadow = true; m.receiveShadow = true; }
+  (parent||room).add(m); return m;
+}
+function plane(w,h,mat,x,y,z,rx,ry,parent){
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), mat);
+  m.position.set(x,y,z); if(rx) m.rotation.x = rx; if(ry) m.rotation.y = ry;
+  m.receiveShadow = true;
+  (parent||room).add(m); return m;
+}
+
+// Floor & ceiling
+const floor = plane(7.6, 7.4, M.floor, 0, 0, 0.6, -Math.PI/2);
+// Rug
+const rug = plane(4.6, 3.5, M.rug, 0, 0.008, -0.35, -Math.PI/2); rug.receiveShadow = true;
+// Ceiling
+plane(7.6, 7.4, M.ceiling, 0, 3.35, 0.6, Math.PI/2);
+
+// Back wall (z = -2.35), left (x=-3.8), right (x=+3.8)
+plane(7.6, 3.35, M.wall, 0, 1.675, -2.35);
+const wallL = plane(7.4, 3.35, M.wall, -3.8, 1.675, 0.6, 0, Math.PI/2);
+const wallR = plane(7.4, 3.35, M.wall,  3.8, 1.675, 0.6, 0, -Math.PI/2);
+
+// Wainscoting + chair rail + baseboard + crown, three walls
+function wainscotRun(len, x, z, ry){
+  const g = new THREE.Group(); g.position.set(x,0,z); g.rotation.y = ry; room.add(g);
+  box(len, 1.02, 0.035, M.wainscot, 0, 0.51, 0, g);
+  box(len+0.02, 0.055, 0.06, M.woodDark, 0, 1.03, 0, g);   // chair rail
+  box(len+0.02, 0.16, 0.06, M.woodDark, 0, 0.08, 0, g);    // baseboard
+  box(len+0.02, 0.14, 0.09, M.woodDark, 0, 3.28, 0, g);    // crown
+  // panel stiles
+  const n = Math.floor(len/0.9);
+  for(let i=0;i<=n;i++){
+    box(0.09, 0.82, 0.012, M.woodMid, -len/2 + 0.2 + i*(len-0.4)/Math.max(n,1), 0.51, 0.02, g, false);
+  }
+}
+wainscotRun(7.6, 0, -2.33, 0);
+wainscotRun(7.35, -3.78, 0.6, Math.PI/2);
+wainscotRun(7.35,  3.78, 0.6, -Math.PI/2);
+
+/* ---------- fireplace (right wall) ---------- */
+const hearth = new THREE.Group(); hearth.position.set(3.55, 0, -0.45); hearth.rotation.y = -Math.PI/2; room.add(hearth);
+box(2.0, 0.09, 0.6, M.marble, 0, 0.045, 0.28, hearth);            // hearth stone
+box(0.34, 1.02, 0.3, M.marble, -0.62, 0.60, 0.02, hearth);        // jamb L
+box(0.34, 1.02, 0.3, M.marble,  0.62, 0.60, 0.02, hearth);        // jamb R
+box(1.6, 0.3, 0.3, M.marble, 0, 1.17, 0.02, hearth);              // frieze
+box(1.9, 0.08, 0.45, M.marble, 0, 1.36, 0.05, hearth);            // mantel shelf
+box(0.92, 0.78, 0.05, new THREE.MeshStandardMaterial({color:0x0c0605, roughness:1}), 0, 0.48, -0.10, hearth, false); // firebox void
+const ember = plane(0.72, 0.3, M.ember, 0, 0.22, -0.075, 0, 0, hearth); ember.material.side = THREE.DoubleSide;
+// logs
+for(let i=0;i<3;i++){
+  const log = new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.05,0.62,10), M.woodDark);
+  log.rotation.z = Math.PI/2; log.rotation.y = (i-1)*0.35; log.position.set((i-1)*0.06, 0.14+i*0.05, -0.03+i*0.02);
+  log.castShadow = true; hearth.add(log);
+}
+// flames (animated)
+const flames = [];
+const flameCols = [M.flame1, M.flame2, M.flame1];
+for(let i=0;i<3;i++){
+  const f = new THREE.Mesh(new THREE.ConeGeometry(0.075 - i*0.018, 0.34 - i*0.07, 8), flameCols[i]);
+  f.position.set((i-1)*0.09, 0.34, -0.03); hearth.add(f); flames.push(f);
+}
+// mantel clock + candlesticks
+const clockBody = box(0.2, 0.24, 0.09, M.woodDark, 0, 1.52, 0.05, hearth);
+const clockFace = plane(0.14, 0.14, new THREE.MeshStandardMaterial({map:clockFaceTex, roughness:0.4}), 0, 1.53, 0.096, 0, 0, hearth);
+for(const sx of [-0.62, 0.62]){
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.016,0.035,0.22,10), M.brass);
+  stick.position.set(sx, 1.50, 0.05); hearth.add(stick);
+  const cflame = new THREE.Mesh(new THREE.ConeGeometry(0.012,0.05,6), M.flame2);
+  cflame.position.set(sx, 1.645, 0.05); hearth.add(cflame); flames.push(cflame);
+}
+
+/* ---------- side table + fringed Victorian lamp (left) ---------- */
+const lampGroup = new THREE.Group(); lampGroup.position.set(-2.25, 0, -1.05); room.add(lampGroup);
+{
+  const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.34,0.035,28), M.lacquerDark);
+  tableTop.position.y = 0.70; tableTop.castShadow = true; tableTop.receiveShadow = true; lampGroup.add(tableTop);
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.075,0.66,14), M.lacquerDark);
+  column.position.y = 0.35; column.castShadow = true; lampGroup.add(column);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.28,0.05,20), M.lacquerDark);
+  base.position.y = 0.03; lampGroup.add(base);
+  for(let i=0;i<3;i++){
+    const a = i/3*Math.PI*2 + 0.5;
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.045,10,8), M.brassDark);
+    foot.position.set(Math.cos(a)*0.22, 0.035, Math.sin(a)*0.22); lampGroup.add(foot);
+  }
+  // lamp base
+  const lb1 = new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.105,0.09,16), M.brass); lb1.position.y = 0.765; lampGroup.add(lb1);
+  const lb2 = new THREE.Mesh(new THREE.SphereGeometry(0.062,16,12), M.brass); lb2.position.y = 0.845; lampGroup.add(lb2);
+  const lb3 = new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.05,0.1,12), M.brass); lb3.position.y = 0.925; lampGroup.add(lb3);
+  // glowing bulb
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.045,14,10), M.bulb); bulb.position.y = 1.02; lampGroup.add(bulb);
+  // shade (open cone)
+  const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.235, 0.24, 26, 1, true), M.shade);
+  shade.position.y = 1.115; lampGroup.add(shade);
+  // fringe — strands of beads around the lower rim
+  const fringeMat = new THREE.MeshStandardMaterial({ color:0xd8b060, roughness:0.5, metalness:0.6, emissive:0x3a2a08, emissiveIntensity:0.6 });
+  const strandGeo = new THREE.CylinderGeometry(0.0035,0.0035,0.055,5);
+  const beadGeo = new THREE.SphereGeometry(0.0075,8,6);
+  for(let i=0;i<30;i++){
+    const a = i/30*Math.PI*2;
+    const fx = Math.cos(a)*0.228, fz = Math.sin(a)*0.228;
+    const strand = new THREE.Mesh(strandGeo, fringeMat); strand.position.set(fx, 0.965, fz); lampGroup.add(strand);
+    const bead = new THREE.Mesh(beadGeo, fringeMat); bead.position.set(fx, 0.933, fz); lampGroup.add(bead);
+  }
+  const finial = new THREE.Mesh(new THREE.SphereGeometry(0.018,10,8), M.brass); finial.position.y = 1.245; lampGroup.add(finial);
+}
+const lampLight = new THREE.PointLight(0xffc27a, 1.18, 6.5, 2);
+lampLight.position.set(-2.25, 1.08, -1.05); scene.add(lampLight);
+
+/* ---------- bookshelf (back-right) ---------- */
+const shelf = new THREE.Group(); shelf.position.set(2.6, 0, -2.14); room.add(shelf);
+{
+  box(1.25, 2.25, 0.05, M.lacquerDark, 0, 1.125, -0.14, shelf);
+  box(0.06, 2.25, 0.3, M.lacquerDark, -0.62, 1.125, 0, shelf);
+  box(0.06, 2.25, 0.3, M.lacquerDark,  0.62, 1.125, 0, shelf);
+  box(1.3, 0.07, 0.34, M.lacquerDark, 0, 2.28, 0, shelf);
+  box(1.3, 0.07, 0.34, M.lacquerDark, 0, 0.035, 0, shelf);
+  const rnd = mulberry32(20240);
+  const bookCols = [0x5e2626,0x274026,0x23284a,0x4a3a14,0x3a1f33,0x6e4a1a,0x1f3a3a];
+  for(let s=0;s<4;s++){
+    const sy = 0.42 + s*0.52;
+    box(1.16, 0.045, 0.28, M.woodMid, 0, sy-0.11, 0, shelf);
+    let x = -0.52;
+    while(x < 0.44){
+      const bw = 0.035 + rnd()*0.05, bh = 0.22 + rnd()*0.17;
+      const col = bookCols[Math.floor(rnd()*bookCols.length)];
+      const b = box(bw, bh, 0.2, new THREE.MeshStandardMaterial({color:col, roughness:0.7}), x+bw/2, sy+bh/2-0.11, 0, shelf);
+      if(rnd()<0.18) b.rotation.z = 0.16;
+      // gold band on some spines
+      if(rnd()<0.5){ const band = box(bw*0.9, 0.02, 0.205, M.brass, x+bw/2, sy+bh*0.55-0.11, 0, shelf, false); }
+      x += bw + 0.008 + (rnd()<0.12 ? 0.05 : 0);
+    }
+  }
+}
+
+/* ---------- window with moonlight + curtains (left wall) ---------- */
+const winGroup = new THREE.Group(); winGroup.position.set(-3.77, 0, 0.35); winGroup.rotation.y = Math.PI/2; room.add(winGroup);
+{
+  box(1.7, 2.15, 0.1, M.woodDark, 0, 1.8, 0, winGroup);
+  const pane = plane(1.4, 1.85, M.nightGlow, 0, 1.8, 0.06, 0, 0, winGroup);
+  // mullions
+  box(0.06, 1.85, 0.03, M.woodDark, 0, 1.8, 0.07, winGroup, false);
+  box(1.4, 0.06, 0.03, M.woodDark, 0, 1.8, 0.07, winGroup, false);
+  box(1.86, 0.09, 0.16, M.woodDark, 0, 0.68, 0.05, winGroup);   // sill
+  // curtains — gently rippled planes
+  const curtainGeo = new THREE.PlaneGeometry(0.62, 2.5, 22, 1);
+  const pos = curtainGeo.attributes.position;
+  for(let i=0;i<pos.count;i++){ pos.setZ(i, Math.sin(pos.getX(i)*9.5)*0.075); }
+  curtainGeo.computeVertexNormals();
+  for(const sx of [-1.02, 1.02]){
+    const cur = new THREE.Mesh(curtainGeo, M.curtain);
+    cur.position.set(sx, 1.78, 0.16); cur.castShadow = true; winGroup.add(cur);
+  }
+  box(2.6, 0.09, 0.12, M.woodDark, 0, 3.08, 0.16, winGroup);    // pelmet
+  for(let i=0;i<9;i++){
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.045,10,8), M.woodDark);
+    orb.position.set(-1.04+i*0.26, 3.02, 0.16); winGroup.add(orb);
+  }
+}
+
+/* ---------- paintings ---------- */
+function painting(w, h, tex, x, y, z, ry){
+  const g = new THREE.Group(); g.position.set(x,y,z); g.rotation.y = ry||0; room.add(g);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(w+0.14, h+0.14, 0.06), M.brassDark);
+  frame.castShadow = true; g.add(frame);
+  const inner = new THREE.Mesh(new THREE.BoxGeometry(w+0.06, h+0.06, 0.062), M.woodDark); g.add(inner);
+  const art = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map:tex, roughness:0.35 }));
+  art.position.z = 0.036; g.add(art);
+  return g;
+}
+painting(1.15, 0.82, landscapeTex,  0, 2.62, -2.32, 0);       // above piano
+painting(0.72, 0.92, portraitTex,  -2.45, 2.0, -2.32, 0);
+painting(0.72, 0.92, portraitTex.clone(), 2.45, 2.0, -2.32, 0);
+
+/* ---------- Victorian palm, back-left corner ---------- */
+{
+  const palm = new THREE.Group(); palm.position.set(-2.95, 0, -1.75); room.add(palm);
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.13,0.3,14), new THREE.MeshStandardMaterial({color:0x6e3a20, roughness:0.6}));
+  pot.position.y = 0.15; pot.castShadow = true; palm.add(pot);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.05,0.95,8), M.woodDark);
+  trunk.position.y = 0.75; palm.add(trunk);
+  const frondGeo = new THREE.PlaneGeometry(0.16, 1.15, 1, 6);
+  const fp = frondGeo.attributes.position;
+  for(let i=0;i<fp.count;i++){ const y = fp.getY(i); fp.setZ(i, Math.sin((y+0.55)*2.2)*0.22); }
+  frondGeo.computeVertexNormals();
+  for(let i=0;i<10;i++){
+    const a = i/10*Math.PI*2;
+    const f = new THREE.Mesh(frondGeo, M.leaf);
+    f.position.set(0, 1.28, 0);
+    f.rotation.set(0, a, 0);
+    f.translateY(0.42); f.rotateX(-0.7 - (i%3)*0.28);
+    f.castShadow = true; palm.add(f);
+  }
+}
+
+/* ---------- ceiling rose + chandelier ---------- */
+{
+  const rose = new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.4,0.05,24), M.ceiling);
+  rose.position.set(0, 3.32, -0.6); room.add(rose);
+  const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.012,0.62,6), M.brassDark);
+  chain.position.set(0, 3.0, -0.6); room.add(chain);
+  const hub = new THREE.Mesh(new THREE.SphereGeometry(0.075,14,10), M.brass);
+  hub.position.set(0, 2.68, -0.6); room.add(hub);
+  for(let i=0;i<6;i++){
+    const a = i/6*Math.PI*2;
+    const arm = new THREE.Mesh(new THREE.TorusGeometry(0.17,0.014,6,14,Math.PI*0.75), M.brass);
+    arm.position.set(0, 2.66, -0.6); arm.rotation.y = a; arm.rotation.z = Math.PI*0.12; room.add(arm);
+    const cx = Math.cos(a)*0.20, cz = -0.6 + Math.sin(a)*0.20;
+    const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.011,0.013,0.09,8), new THREE.MeshStandardMaterial({color:0xf2ead8, roughness:0.6}));
+    candle.position.set(cx, 2.74, cz); room.add(candle);
+    const fl = new THREE.Mesh(new THREE.ConeGeometry(0.011,0.045,6), M.flame2);
+    fl.position.set(cx, 2.815, cz); room.add(fl); flames.push(fl);
+  }
+}
+const chandelierLight = new THREE.PointLight(0xffd9a0, 0.6, 5.5, 2);
+chandelierLight.position.set(0, 2.55, -0.6); scene.add(chandelierLight);
+
+/* ---------- bench ---------- */
+{
+  const bench = new THREE.Group(); bench.position.set(0.08, 0, -0.52); bench.rotation.y = 0.05; room.add(bench);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.1, 0.36), M.tuft);
+  seat.position.y = 0.485; seat.castShadow = true; seat.receiveShadow = true; bench.add(seat);
+  box(1.06, 0.045, 0.4, M.lacquerDark, 0, 0.425, 0, bench);
+  for(const sx of [-0.44, 0.44]) for(const sz of [-0.12, 0.12]){
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.032,0.024,0.4,10), M.lacquerDark);
+    leg.position.set(sx, 0.2, sz); leg.castShadow = true; bench.add(leg);
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.035,10,8), M.brassDark);
+    foot.position.set(sx, 0.02, sz); bench.add(foot);
+  }
+}
+
+/* ============================================================
+   LIGHTS
+   ============================================================ */
+const hemi = new THREE.HemisphereLight(0x6b564a, 0x241a14, 0.55);
+scene.add(hemi);
+
+// warm key light — long evening shadows across the room
+const keyLight = new THREE.DirectionalLight(0xffd2a0, 1.55);
+keyLight.position.set(2.9, 4.6, 2.15);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(4096, 4096);                       // 4K shadow map
+keyLight.shadow.camera.left = -4.2; keyLight.shadow.camera.right = 4.2;
+keyLight.shadow.camera.top = 4.2; keyLight.shadow.camera.bottom = -4.2;
+keyLight.shadow.camera.near = 0.5; keyLight.shadow.camera.far = 13;
+keyLight.shadow.bias = -0.00045;
+keyLight.target.position.set(0, 0.7, -1.5);
+scene.add(keyLight, keyLight.target);
+
+// cool moonlight wash from the window
+const moonLight = new THREE.DirectionalLight(0x8ea6d8, 0.42);
+moonLight.position.set(-3.4, 2.6, 1.0);
+moonLight.target.position.set(0.6, 0.5, -1.7);
+scene.add(moonLight, moonLight.target);
+
+// fireplace flicker light
+const fireLight = new THREE.PointLight(0xff7a2e, 1.25, 5.5, 2);
+fireLight.position.set(3.05, 0.55, -0.45); scene.add(fireLight);
+
+/* ============================================================
+   THE PIANOFORTE  (piano group; local coords, front faces +z)
+   ============================================================ */
+const piano = new THREE.Group(); piano.position.set(0, 0, PIANO_Z); scene.add(piano);
+const pianoParts = {};
+
+const KEY_COUNT = 88, MIDI_MIN = 21, MIDI_MAX = 108;
+const WW = 0.0228;                     // white key pitch
+const WHITE_SPAN = WW * 52;
+const keyX = {};                       // midi -> local x
+{
+  let wi = 0;
+  for(let m = MIDI_MIN; m <= MIDI_MAX; m++){
+    if(!isBlack(m)){ keyX[m] = (wi - 25.5) * WW; wi++; }
+    else keyX[m] = keyX[m-1] + WW * 0.5;
+  }
+}
+const sx = m => keyX[m] * 0.965;       // action/string fan
+
+// ---- keybed & cabinet shell ----
+box(1.6, 0.075, 0.7, M.lacquer, 0, 0.695, 0.0, piano);                  // keybed slab
+box(1.64, 0.045, 0.72, M.lacquerDark, 0, 0.652, 0.0, piano);            // keybed molding
+box(1.66, 0.05, 0.34, M.lacquer, 0, 0.745, 0.155, piano);               // front rail below keys
+box(0.07, 0.075, 0.3, M.lacquerDark, -0.625, 0.75, 0.17, piano);        // cheek block L
+box(0.07, 0.075, 0.3, M.lacquerDark,  0.625, 0.75, 0.17, piano);        // cheek block R
+// brass nameplate on front rail
+{
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.055), new THREE.MeshStandardMaterial({ map:nameplateTex, roughness:0.3, metalness:0.85, emissive:0x2a1e05, emissiveIntensity:0.5 }));
+  plate.position.set(0, 0.742, 0.3285); piano.add(plate);
+}
+// side cheeks of the upper case
+box(0.055, 0.775, 0.62, M.lacquer, -0.7725, 1.13, -0.035, piano);
+box(0.055, 0.775, 0.62, M.lacquer,  0.7725, 1.13, -0.035, piano);
+// vertical gold stringing inlay on cheeks
+for(const s of [-1,1]) for(let i=0;i<3;i++){
+  const inlay = box(0.004, 0.62, 0.012, M.brass, s*0.8015, 1.13, -0.22 + i*0.19, piano, false);
+  inlay.castShadow = false;
+}
+// back panel
+box(1.6, 0.78, 0.045, M.lacquerDark, 0, 1.13, -0.345, piano);
+// bottom board under action (visible floor of the cavity)
+box(1.5, 0.03, 0.6, M.interior, 0, 0.755, -0.05, piano, false);
+// top board + Victorian crown moldings
+box(1.62, 0.055, 0.66, M.lacquer, 0, 1.5275, -0.035, piano);
+box(1.72, 0.05, 0.72, M.lacquerDark, 0, 1.582, -0.02, piano);
+box(1.8, 0.035, 0.78, M.lacquer, 0, 1.625, 0.0, piano);
+// casters
+for(const cx of [-0.66, 0.66]) for(const cz of [-0.28, 0.28]){
+  const c = new THREE.Mesh(new THREE.SphereGeometry(0.038, 12, 8, 0, Math.PI*2, 0, Math.PI*0.55), M.brassDark);
+  c.position.set(cx, 0.062, cz); c.rotation.x = Math.PI; piano.add(c);
+}
+
+// ---- soundboard (visible, panel removed) ----
+const soundboard = plane(1.47, 0.71, M.soundboard, 0, 1.145, -0.312, 0, 0, piano);
+soundboard.receiveShadow = true;
+// bridge — diagonal rib over the soundboard
+{
+  const bridge = new THREE.Mesh(new THREE.BoxGeometry(1.28, 0.045, 0.016), M.woodDark);
+  bridge.position.set(0, 1.03, -0.30); bridge.rotation.z = 0.115; piano.add(bridge);
+  const bridge2 = bridge.clone(); bridge2.scale.x = 0.72; bridge2.position.set(0.1, 1.245, -0.30); bridge2.rotation.z = -0.09; piano.add(bridge2);
+}
+
+/* ---------- STRINGS (230, incl. wound bass) ---------- */
+const stringGroup = new THREE.Group(); piano.add(stringGroup);
+const strings = [];   // { mesh, baseX, noteIndex }
+{
+  const plainGeo  = new THREE.CylinderGeometry(0.0016, 0.0016, 1, 5);
+  const woundGeo  = new THREE.CylinderGeometry(0.0034, 0.0034, 1, 7);
+  for(let m = MIDI_MIN; m <= MIDI_MAX; m++){
+    let count, geo;
+    if(m < 28){ count = 1; geo = woundGeo; }
+    else if(m < 34){ count = 2; geo = woundGeo; }
+    else if(m < 48){ count = 2; geo = plainGeo; }
+    else { count = 3; geo = plainGeo; }
+    const topY = 1.168 - 0.035*Math.pow((m-MIDI_MIN)/(MIDI_MAX-MIDI_MIN), 2);
+    const botY = 0.845;
+    const len = topY - botY;
+    const spread = 0.0042;
+    for(let s=0;s<count;s++){
+      const off = (s - (count-1)/2) * spread;
+      const mesh = new THREE.Mesh(geo, (m<34) ? M.stringWound : M.string);
+      mesh.scale.y = len;
+      mesh.position.set(sx(m)+off, botY + len/2, -0.262 + s*0.0035);
+      stringGroup.add(mesh);
+      strings.push({ mesh, baseX: sx(m)+off, noteIndex: m - MIDI_MIN, wound: m<34 });
+    }
+  }
+}
+const STRING_COUNT = strings.length;   // 230
+
+// tuning pins + hitch pins (rows)
+{
+  const pinGeo = new THREE.CylinderGeometry(0.0028, 0.0028, 0.02, 6);
+  for(let m = MIDI_MIN; m <= MIDI_MAX; m++){
+    const p = new THREE.Mesh(pinGeo, M.brass);
+    const topY = 1.168 - 0.035*Math.pow((m-MIDI_MIN)/(MIDI_MAX-MIDI_MIN), 2);
+    p.position.set(sx(m), topY + 0.012, -0.262); piano.add(p);
+    const h = new THREE.Mesh(pinGeo, M.brassDark);
+    h.position.set(sx(m), 0.838, -0.262); piano.add(h);
+  }
+}
+
+/* ---------- TUNING HAMMER could rest on the keybed — decorative ---------- */
+{
+  const tm = new THREE.Group(); tm.position.set(0.52, 0.78, 0.18); tm.rotation.set(0.3, 0.5, 1.35); piano.add(tm);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.016, 0.19, 10), M.lacquerDark); handle.castShadow = true; tm.add(handle);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.07, 8), M.brassDark); neck.position.y = 0.13; tm.add(neck);
+  const sock = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.035, 8), M.ironPlate); sock.position.y = 0.165; sock.rotation.z = Math.PI/2; tm.add(sock);
+}
+
+/* ---------- ACTION: 88 hammers, shanks, flanges, dampers ---------- */
+const HAMMER_REST = 0.40, HAMMER_STRIKE = -1.27, SHANK_LEN = 0.17;
+const hammers = [], dampers = [];
+const shankGeo = new THREE.CylinderGeometry(0.0034, 0.0044, SHANK_LEN, 7);
+shankGeo.translate(0, SHANK_LEN/2, 0);
+const headGeo = new THREE.CylinderGeometry(0.0122, 0.0122, 0.0225, 12);
+headGeo.rotateZ(Math.PI/2);
+const headFeltGeo = new THREE.CylinderGeometry(0.0128, 0.0118, 0.008, 12);
+headFeltGeo.rotateZ(Math.PI/2); headFeltGeo.translate(0.0085, 0, 0);
+const flangeGeo = new THREE.BoxGeometry(0.02, 0.024, 0.013);
+const pivotWireGeo = new THREE.CylinderGeometry(0.0022, 0.0022, 0.075, 6);
+const damperBlockGeo = new THREE.BoxGeometry(0.0175, 0.021, 0.013);
+const damperWedgeGeo = new THREE.CylinderGeometry(0.0085, 0.0085, 0.0165, 8, 1, false, 0, Math.PI);
+damperWedgeGeo.rotateZ(Math.PI/2); damperWedgeGeo.rotateX(Math.PI/2);
+const damperWireGeo = new THREE.CylinderGeometry(0.0016, 0.0016, 0.135, 5);
+
+// action rail (fixed)
+box(1.42, 0.032, 0.058, M.woodMid, 0, 0.888, 0.02, piano);
+box(1.42, 0.02, 0.03, M.woodDark, 0, 0.862, -0.02, piano);
+// damper rail (fixed, brass)
+box(1.42, 0.018, 0.03, M.brassDark, 0, 1.248, -0.252, piano, false);
+
+for(let m = MIDI_MIN; m <= MIDI_MAX; m++){
+  const x = sx(m);
+  // hammer pivot group
+  const pivot = new THREE.Group();
+  pivot.position.set(x, 0.925, 0.02);
+  pivot.rotation.x = HAMMER_REST;
+  const shank = new THREE.Mesh(shankGeo, M.hammerCore); shank.castShadow = true; pivot.add(shank);
+  const head = new THREE.Mesh(headGeo, M.felt); head.position.y = SHANK_LEN; head.castShadow = true; pivot.add(head);
+  const cap = new THREE.Mesh(headFeltGeo, M.damperFelt); cap.position.y = SHANK_LEN; pivot.add(cap);
+  const flange = new THREE.Mesh(flangeGeo, M.woodMid); flange.position.y = 0.004; pivot.add(flange);
+  piano.add(pivot);
+  // static pivot wire below flange
+  const wire = new THREE.Mesh(pivotWireGeo, M.brassDark); wire.position.set(x, 0.885, 0.02); piano.add(wire);
+  hammers.push({ pivot, baseX: x });
+
+  // damper assembly (block + felt wedge + wire), lifts vertically
+  const dGroup = new THREE.Group();
+  dGroup.position.set(x, 1.108, -0.258);
+  const block = new THREE.Mesh(damperBlockGeo, M.woodMid); block.castShadow = true; dGroup.add(block);
+  const wedge = new THREE.Mesh(damperWedgeGeo, M.damperFelt); wedge.position.y = -0.014; dGroup.add(wedge);
+  const dWire = new THREE.Mesh(damperWireGeo, M.brassDark); dWire.position.y = 0.078; dGroup.add(dWire);
+  const spoon = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.02, 0.012), M.brass); spoon.position.y = 0.145; dGroup.add(spoon);
+  piano.add(dGroup);
+  dampers.push({ group: dGroup, baseY: 1.108, lift: 0 });
+}
+
+/* ---------- KEYS (52 white, 36 black) ---------- */
+const keys = [];            // index = midi - MIDI_MIN
+const keyHitMeshes = [];
+const whiteKeyGeo = new THREE.BoxGeometry(WW - 0.0032, 0.02, 0.14);
+whiteKeyGeo.translate(0, 0, 0.07);
+const blackKeyGeo = new THREE.BoxGeometry(0.0134, 0.021, 0.096);
+blackKeyGeo.translate(0, 0, 0.048);
+for(let m = MIDI_MIN; m <= MIDI_MAX; m++){
+  const black = isBlack(m);
+  const pivot = new THREE.Group();
+  pivot.position.set(keyX[m], black ? 0.7495 : 0.7385, 0.155);
+  const mesh = new THREE.Mesh(black ? blackKeyGeo : whiteKeyGeo, black ? M.keyBlack : M.keyWhite);
+  mesh.position.set(0, black ? 0.0105 : 0.008, black ? 0.016 : 0.012);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.userData.midi = m;
+  pivot.add(mesh);
+  // key front ivory dip detail (thin darker line at the very front)
+  piano.add(pivot);
+  keys.push({ pivot, mesh, black, midi: m, press: 0 });
+  keyHitMeshes.push(mesh);
+}
+// white key gaps — thin dark grooves (visual richness)
+{
+  let wi = 0;
+  for(let m = MIDI_MIN; m <= MIDI_MAX; m++){
+    if(!isBlack(m)) wi++;
+    if(wi < 52){
+      const groove = new THREE.Mesh(new THREE.BoxGeometry(0.0016, 0.021, 0.14), M.woodDark);
+      groove.position.set(keyX[m] + WW/2, 0.7465, 0.227); piano.add(groove);
+    }
+  }
+}
+
+/* ---------- SUSTAIN PEDAL + lyre ---------- */
+const pedalGroup = new THREE.Group(); pedalGroup.position.set(0, 0, 0.16); piano.add(pedalGroup);
+{
+  // lyre posts
+  const postGeo = new THREE.CylinderGeometry(0.016, 0.022, 0.42, 10);
+  const p1 = new THREE.Mesh(postGeo, M.lacquer); p1.position.set(-0.14, 0.30, -0.02); p1.rotation.z = 0.10; p1.castShadow = true; pedalGroup.add(p1);
+  const p2 = p1.clone(); p2.position.x = 0.14; p2.rotation.z = -0.10; pedalGroup.add(p2);
+  box(0.36, 0.035, 0.05, M.lacquerDark, 0, 0.50, -0.02, pedalGroup);
+  box(0.36, 0.05, 0.07, M.lacquerDark, 0, 0.095, 0.02, pedalGroup);
+}
+const pedalPivot = new THREE.Group(); pedalPivot.position.set(0, 0.085, 0.03); pedalGroup.add(pedalPivot);
+{
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.02, 0.24), M.pedalBrass);
+  arm.position.set(0, 0.012, 0.1); arm.castShadow = true; pedalPivot.add(arm);
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.012, 0.06), M.pedalBrass);
+  pad.position.set(0, 0.026, 0.2); pedalPivot.add(pad);
+}
+
+/* ============================================================
+   PAPER ROLL + TRACKER BAR  (holes derived from the tune)
+   ============================================================ */
+const LEAD_BEATS = 3, TAIL_BEATS = 2, BEAT_SPACING = 0.06;
+let TUNE_TOTAL_BEATS = 34;   // updated after tune definition below
+
+function buildRollTexture(notes, totalBeats){
+  const W = 2048, H = 2048;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const TOT = totalBeats + LEAD_BEATS + TAIL_BEATS;
+  // aged paper
+  const gr = g.createLinearGradient(0,0,0,H);
+  gr.addColorStop(0,'#ead9b4'); gr.addColorStop(0.5,'#dcc99e'); gr.addColorStop(1,'#c9b588');
+  g.fillStyle = gr; g.fillRect(0,0,W,H);
+  const rnd = mulberry32(1357);
+  for(let i=0;i<700;i++){
+    g.fillStyle = rnd()<0.5 ? 'rgba(120,90,40,0.07)' : 'rgba(255,248,225,0.08)';
+    g.beginPath(); g.ellipse(rnd()*W, rnd()*H, 8+rnd()*60, 4+rnd()*26, rnd()*3, 0, 7); g.fill();
+  }
+  // edges
+  g.fillStyle = '#a8916a'; g.fillRect(0,0,30,H); g.fillRect(W-30,0,30,H);
+  g.fillStyle = '#c9a227'; g.globalAlpha = 0.8; g.fillRect(30,0,5,H); g.fillRect(W-35,0,5,H); g.globalAlpha = 1;
+  // 88 tracker lanes
+  const colW = W/88;
+  for(let i=0;i<=88;i++){
+    g.strokeStyle = (i%12===0) ? 'rgba(80,55,20,0.5)' : 'rgba(80,55,20,0.16)';
+    g.lineWidth = (i%12===0) ? 3 : 1.4;
+    g.beginPath(); g.moveTo(i*colW, 0); g.lineTo(i*colW, H); g.stroke();
+  }
+  // decorative center flourish column
+  g.fillStyle = 'rgba(120,40,30,0.35)';
+  for(let b=0;b<totalBeats;b+=4){
+    const y = (1 - (b+LEAD_BEATS)/TOT) * H;
+    g.save(); g.translate(W/2, y); g.rotate(Math.PI/4); g.fillRect(-9,-9,18,18); g.restore();
+  }
+  // HOLES — one per note, aligned to its key's lane
+  for(const n of notes){
+    const col = n.midi - MIDI_MIN;
+    const x = (col + 0.5) * colW;
+    const v = (n.beat + LEAD_BEATS) / TOT;
+    const y = (1 - v) * H;
+    const ry = Math.max(7, (0.24 / TOT) * H * 0.5);
+    const rx = colW * 0.30;
+    g.fillStyle = '#f8efda'; g.beginPath(); g.ellipse(x, y+1.5, rx+2.4, ry+2.4, 0, 0, 7); g.fill();
+    g.fillStyle = '#17100a'; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, 7); g.fill();
+  }
+  // title block near the start of the tune (bottom of the paper)
+  const drawTitle = (yBase, flip) => {
+    g.save(); g.translate(W/2, yBase); if(flip) g.rotate(Math.PI);
+    g.fillStyle = '#33200e'; g.textAlign = 'center';
+    g.font = 'bold 118px Georgia'; g.fillText('FÜR  ELISE', 0, 0);
+    g.font = 'italic 42px Georgia'; g.fillText('Ludwig van Beethoven · WoO 59', 0, 66);
+    g.font = '30px Georgia'; g.fillStyle = '#6e4a1a'; g.fillText('·  T H E   A U T O M A T I C   P I A N O F O R T E  ·', 0, 118);
+    g.strokeStyle = '#6e4a1a'; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(-330, 140); g.quadraticCurveTo(0, 172, 330, 140); g.stroke();
+    g.restore();
+  };
+  drawTitle(H - 130, false);
+  drawTitle(150, true);
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
+/* ---------- tracker bar with 88 glowing holes ---------- */
+const trackerDots = [];
+{
+  const bar = box(1.5, 0.032, 0.055, M.brass, 0, 1.298, 0.168, piano);
+  bar.castShadow = false;
+  box(1.52, 0.012, 0.06, M.brassDark, 0, 1.278, 0.168, piano, false);
+  // curved brass support arms to the cabinet sides
+  for(const s of [-1,1]){
+    const arm = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.011, 8, 12, Math.PI*0.55), M.brass);
+    arm.position.set(s*0.72, 1.32, 0.13); arm.rotation.z = s>0 ? Math.PI*0.15 : Math.PI*0.85 - Math.PI/2 + Math.PI*0.15; pedalGroup; piano.add(arm);
+  }
+  const dotGeo = new THREE.CircleGeometry(0.0042, 10);
+  for(let m = MIDI_MIN; m <= MIDI_MAX; m++){
+    const mat = new THREE.MeshBasicMaterial({ color:0xffc25e, transparent:true, opacity:0.13 });
+    const d = new THREE.Mesh(dotGeo, mat);
+    d.rotation.x = -Math.PI/2;
+    d.position.set(keyX[m]*1.02, 1.3145, 0.168);
+    piano.add(d); trackerDots.push(mat);
+  }
+}
+
+/* ============================================================
+   THE TUNE — Für Elise (WoO 59), encoded as note data
+   47 melody notes + 37 chord tones = 84 notes, incl. chords
+   ============================================================ */
+const MEL = [
+  [0,76,.5],[.5,75,.5],[1,76,.5],[1.5,75,.5],[2,76,.5],[2.5,71,.5],[3,74,.5],[3.5,72,.5],
+  [4,69,1.0],[5,60,.5],[5.5,64,.5],[6,69,1.0],[7,71,1.0],
+  [8,64,.5],[8.5,68,.5],[9,71,1.5],
+  [10.5,64,.5],[11,76,.5],[11.5,75,.5],[12,76,.5],[12.5,75,.5],[13,76,.5],[13.5,71,.5],[14,74,.5],[14.5,72,.5],
+  [15,69,1.0],[16,60,.5],[16.5,64,.5],[17,69,1.0],
+  [18,72,.5],[18.5,71,2.0],
+  [21,64,.5],[21.5,68,.5],[22,71,1.5],
+  [23.5,64,.5],[24,76,.5],[24.5,75,.5],[25,76,.5],[25.5,75,.5],[26,76,.5],[26.5,71,.5],[27,74,.5],[27.5,72,.5],
+  [28,69,1.5],[29.5,60,.5],[30,64,.5],[30.5,69,3.0]
+];
+const CHORDS = [   // [beat, [midis], durBeats] — pianola chord strikes
+  [0,   [45,52,57], 2.0],
+  [2,   [45,52,57], 1.5],
+  [4,   [33,45,52], 1.5],
+  [6,   [40,52,56], 2.0],
+  [9,   [45,52,57], 2.0],
+  [12,  [40,47,56], 1.5],
+  [15,  [45,52,57], 1.5],
+  [17,  [40,52,56], 1.5],
+  [18.5,[45,52,57], 2.5],
+  [22,  [40,52,56], 2.0],
+  [26,  [45,52,57], 2.0],
+  [30.5,[33,45,52,57], 3.0]
+];
+const PEDAL_EVENTS = [  // sustain pedal automation (beat, down)
+  {beat:0, down:true},{beat:3.8, down:false},{beat:4, down:true},{beat:7.5, down:false},
+  {beat:8, down:true},{beat:10.4, down:false},{beat:10.5, down:true},{beat:14.7, down:false},
+  {beat:15, down:true},{beat:17.8, down:false},{beat:18.5, down:true},{beat:21.8, down:false},
+  {beat:22, down:true},{beat:30.4, down:false},{beat:30.5, down:true}
+];
+const NOTES = [];
+for(const [b,m,d] of MEL) NOTES.push({ beat:b, midi:m, dur:d, vel:0.92 });
+for(const [b,ms,d] of CHORDS) for(const m of ms) NOTES.push({ beat:b, midi:m, dur:d, vel:0.78 });
+NOTES.sort((a,b)=>a.beat-b.beat);
+{
+  let end = 0; for(const n of NOTES) end = Math.max(end, n.beat + n.dur);
+  TUNE_TOTAL_BEATS = Math.ceil(end) + 1;   // ≈ 34
+}
+const NOTE_COUNT = NOTES.length;   // 84
+const notesByPitch = {};
+NOTES.forEach((n,i) => { (notesByPitch[n.midi] = notesByPitch[n.midi] || []).push(i); });
+
+// build the roll now that the tune exists
+const ROLL_TOT_BEATS = TUNE_TOTAL_BEATS + LEAD_BEATS + TAIL_BEATS;
+const PAPER_LEN = ROLL_TOT_BEATS * BEAT_SPACING;    // ≈ 2.34 m of paper
+const STRIP_H = 0.40;
+const ROLL_REPEAT = STRIP_H / PAPER_LEN;
+const rollTex = buildRollTexture(NOTES, TUNE_TOTAL_BEATS);
+rollTex.repeat.set(1, ROLL_REPEAT);
+{
+  // draped paper — custom curved plane, hanging from the spool to the tracker bar
+  const geo = new THREE.PlaneGeometry(1.44, STRIP_H, 48, 40);
+  const pos = geo.attributes.position;
+  for(let i=0;i<pos.count;i++){
+    const x = pos.getX(i), y = pos.getY(i);
+    const v = (y + STRIP_H/2) / STRIP_H;               // 0 bottom → 1 top
+    let z = 0.165 - 0.135*Math.pow(v, 3.1) - 0.008*Math.sin(v*7.0 + x*1.6);
+    z += 0.006*Math.sin(x*22.0) * (1.0 - v*0.6);       // faint ripple
+    pos.setZ(i, z);
+  }
+  geo.computeVertexNormals();
+  const paper = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map:rollTex, roughness:0.88, metalness:0.0, side:THREE.DoubleSide }));
+  paper.position.set(0, 1.50, 0); paper.castShadow = true;
+  piano.add(paper);
+  pianoParts.paper = paper;
+}
+// spool + posts + finials
+{
+  const spool = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 1.47, 22), M.lacquerDark);
+  spool.rotation.z = Math.PI/2; spool.position.set(0, 1.70, 0.028); spool.castShadow = true; piano.add(spool);
+  for(const s of [-1,1]){
+    const flange = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.018, 22), M.brassDark);
+    flange.rotation.z = Math.PI/2; flange.position.set(s*0.745, 1.70, 0.028); piano.add(flange);
+    // turned brass posts
+    const postBase = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.034, 0.05, 12), M.brass);
+    postBase.position.set(s*0.745, 1.665, 0.028); piano.add(postBase);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.017, 0.09, 12), M.brass);
+    post.position.set(s*0.745, 1.72, 0.028); piano.add(post);
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.026, 14, 10), M.pedalBrass);
+    orb.position.set(s*0.745, 1.775, 0.028); piano.add(orb);
+  }
+}
+
+/* ============================================================
+   AUDIO — additive synthesis with inharmonicity (Web Audio)
+   ============================================================ */
+const AudioEngine = {
+  ctx: null, master: null, compressor: null, streamDest: null, noiseBuf: null,
+  voices: [],
+  ensure(){
+    if(this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain(); this.master.gain.value = 0.85;
+    this.compressor = this.ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -18; this.compressor.ratio.value = 5;
+    this.streamDest = this.ctx.createMediaStreamDestination();
+    this.master.connect(this.compressor);
+    this.compressor.connect(this.ctx.destination);
+    this.compressor.connect(this.streamDest);
+    // hammer knock noise buffer
+    const len = Math.floor(this.ctx.sampleRate * 0.06);
+    this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = this.noiseBuf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2.2);
+  },
+  resume(){ this.ensure(); if(this.ctx.state === 'suspended') this.ctx.resume(); },
+  noteOn(midi, vel, delay){
+    this.ensure();
+    const t = this.ctx.currentTime + (delay||0);
+    const f0 = mtof(midi);
+    const B = 2.3e-4;
+    const peak = 0.24 * (vel||0.9) * (midi < 40 ? 1.25 : 1.0);
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.linearRampToValueAtTime(peak, t + 0.006);
+    const susT = clamp(6.5 * Math.pow(2, (48 - midi)/32), 0.9, 6.5);
+    env.gain.exponentialRampToValueAtTime(peak*0.34, t + susT*0.28);
+    env.gain.exponentialRampToValueAtTime(peak*0.05, t + susT);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + susT + 1.2);
+    // gentle lowpass, opens with velocity
+    const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.value = clamp(900 + f0*4.5 + vel*2200, 900, 9000); lp.Q.value = 0.6;
+    env.connect(lp); lp.connect(this.master);
+    const partials = [[1,1.0],[2,0.52],[3,0.30],[4.16,0.15],[5.41,0.085],[6.8,0.045]];
+    const oscs = [];
+    for(const [n, amp] of partials){
+      const f = n * f0 * Math.sqrt(1 + B*n*n);
+      if(f > 12000) break;
+      const o = this.ctx.createOscillator(); o.type = 'sine';
+      o.frequency.value = f; o.detune.value = (Math.random()-0.5)*4;
+      const g = this.ctx.createGain(); g.gain.value = amp / (1 + (n-1)*0.42);
+      o.connect(g); g.connect(env); o.start(t); o.stop(t + susT + 1.4);
+      oscs.push(o);
+    }
+    // hammer thump
+    const noise = this.ctx.createBufferSource(); noise.buffer = this.noiseBuf;
+    const bp = this.ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 1500 + f0*0.6; bp.Q.value = 1.1;
+    const ng = this.ctx.createGain(); ng.gain.setValueAtTime(0.16*vel, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    noise.connect(bp); bp.connect(ng); ng.connect(this.master); noise.start(t); noise.stop(t + 0.09);
+    const voice = { env, oscs, midi, released:false };
+    this.voices.push(voice);
+    return voice;
+  },
+  noteOff(voice, fade){
+    if(!voice || voice.released) return; voice.released = true;
+    const t = this.ctx.currentTime, f = fade || 0.055;
+    voice.env.gain.cancelScheduledValues(t);
+    voice.env.gain.setValueAtTime(Math.max(voice.env.gain.value, 0.0001), t);
+    voice.env.gain.setTargetAtTime(0.0001, t, f);
+    for(const o of voice.oscs){ try{ o.stop(t + f*8 + 0.25); }catch(e){} }
+  },
+  silenceAll(){
+    for(const v of this.voices) this.noteOff(v, 0.02);
+    this.voices = this.voices.filter(v=>false);
+  }
+};
+
+/* ============================================================
+   SIMULATION STATE
+   ============================================================ */
+let tempo = 96;                       // quarter notes per minute
+let playing = true;
+let beatPos = -1.2;                   // musical position in beats (starts with pre-roll)
+let visT = 0;                         // wall-clock for flames/dust (or showcase time)
+let notesPlayed = 0;                  // manual + song strikes (persists)
+let showcaseNotesBase = 0;            // used so seek() is deterministic
+let manualCount = 0;
+let lastBeatPos = beatPos;
+const spb = () => 60 / tempo;
+
+// manual key holds
+const manualHold = new Map();   // midi -> {start, until, voice}
+
+// NOTE scheduling bookkeeping (forward playback only)
+const voiceEnds = [];           // {voice, endBeat}
+
+function noteEndBeat(n){ return n.beat + n.dur; }
+function songIsNoteActive(n, b){
+  const a = n.beat, e = noteEndBeat(n);
+  if(b < a) return 0;
+  const atk = smoothstep(a, a + 0.09, b);
+  const rel = 1 - smoothstep(e, e + 0.18, b);
+  return atk * rel;
+}
+function pedalStateAt(b){
+  let down = false, lastT = -10;
+  for(const ev of PEDAL_EVENTS){ if(ev.beat <= b){ down = ev.down; lastT = ev.beat; } else break; }
+  if(lastT < -5) return 0;
+  const age = b - lastT;
+  return down ? (1 - Math.exp(-age*2.6)) : Math.exp(-age*3.2);
+}
+function rollOffsetAt(b){
+  return clamp((b + LEAD_BEATS) / ROLL_TOT_BEATS, 0, 1 - ROLL_REPEAT);
+}
+const activeKeysNow = [];   // reused array (midi list) — rebuilt each eval
+
+/* Evaluate every moving part as a pure function of (beatPos, visT).
+   This is what makes seek() deterministic. */
+function evaluateScene(b, t, dtForTracker){
+  activeKeysNow.length = 0;
+  const secPerBeat = spb();
+  const pedal = pedalStateAt(b);
+
+  // --- keys, hammers, dampers, strings, tracker dots ---
+  for(let i = 0; i < KEY_COUNT; i++){
+    const midi = MIDI_MIN + i;
+    let press = 0, amp = 0, strikeAge = 1e9;
+    const pitchNotes = notesByPitch[midi];
+    if(pitchNotes){
+      for(const ni of pitchNotes){
+        const n = NOTES[ni];
+        press = Math.max(press, songIsNoteActive(n, b));
+        const age = (b - n.beat) * secPerBeat;
+        if(age > 0 && age < noteEndBeat(n)*0 + 3.5){
+          amp = Math.max(amp, Math.exp(-age * (midi < 45 ? 1.7 : 2.5)) * n.vel * (b < noteEndBeat(n) + 1.6 ? 1 : 0));
+        }
+        if(age >= 0) strikeAge = Math.min(strikeAge, age);
+      }
+    }
+    // manual holds
+    const mh = manualHold.get(midi);
+    if(mh){
+      const atk = clamp((t - mh.start) * 9, 0, 1);
+      let rel = 1;
+      if(t > mh.until) rel = clamp(1 - (t - mh.until) * 5, 0, 1);
+      press = Math.max(press, atk * rel);
+      const age = t - mh.start;
+      amp = Math.max(amp, Math.exp(-age * 1.9) * 0.9 * (t < mh.until + 1.4 ? 1 : 0));
+      strikeAge = Math.min(strikeAge, age);
+      if(rel <= 0.001) manualHold.delete(midi);
+    }
+    if(press > 0.02) activeKeysNow.push(midi);
+
+    // key rotation
+    const key = keys[i];
+    key.press = press;
+    key.pivot.rotation.x = press * (key.black ? 0.048 : 0.055);
+
+    // hammer — snappy strike with rebound, driven by age since strike
+    const h = hammers[i];
+    let theta = HAMMER_REST;
+    if(strikeAge < 1.2){
+      const d = (1 - Math.exp(-strikeAge * 42)) * Math.exp(-strikeAge * 6.2) * 1.28;
+      theta = HAMMER_REST - (HAMMER_REST - HAMMER_STRIKE) * clamp(d, 0, 1);
+    }
+    h.pivot.rotation.x = theta;
+
+    // damper — lifts off the string (or with the sustain pedal)
+    const damp = dampers[i];
+    const noteLift = press;
+    const target = Math.max(noteLift, pedal * 0.96);
+    damp.lift = target;
+    damp.group.position.y = damp.baseY + target * 0.034;
+
+    // string vibration — visible shimmer travelling along the wire
+    const vib = strings; // base array
+    // (displacement applied per-string below, grouped by note for sync)
+    damperTracker: {
+      const glow = trackerDots[i];
+      glow.opacity = 0.13 + press * 0.85 + pedal * 0.08;
+    }
+  }
+  // --- per-string displacement (all strings of a note share amplitude) ---
+  for(const s of strings){
+    const midi = MIDI_MIN + s.noteIndex;
+    let amp = 0, strikeAge = 1e9;
+    const pitchNotes = notesByPitch[midi];
+    if(pitchNotes){
+      for(const ni of pitchNotes){
+        const n = NOTES[ni];
+        const age = (b - n.beat) * secPerBeat;
+        if(age > 0){
+          amp = Math.max(amp, Math.exp(-age * (midi < 45 ? 1.6 : 2.35)) * n.vel);
+          strikeAge = Math.min(strikeAge, age);
+        }
+      }
+    }
+    const mh = manualHold.get(midi);
+    if(mh){ const age = t - mh.start; amp = Math.max(amp, Math.exp(-age*1.8)*0.9); }
+    if(amp > 0.004){
+      const freqVis = mtof(midi) / 6.0;
+      const dx = Math.sin(t * Math.PI * 2 * freqVis + s.noteIndex * 1.7) * 0.0052 * amp;
+      s.mesh.position.x = s.baseX + dx;
+      s.mesh.scale.x = 1 + Math.abs(dx) * 260;
+    } else {
+      s.mesh.position.x = s.baseX;
+      s.mesh.scale.x = 1;
+    }
+  }
+  // --- pedal ---
+  const pedalPivotAngle = pedal * 0.16;
+  pedalPivot.rotation.x = pedalPivotAngle;
+  pianoParts.pedal = pedal;
+  // --- roll scroll ---
+  const off = rollOffsetAt(b);
+  rollTex.offset.y = off;
+  pianoParts.rollPosition = clamp((b + LEAD_BEATS) / ROLL_TOT_BEATS, 0, 1);
+  return { pedal, rollPosition: pianoParts.rollPosition };
+}
+
+/* ---------- audio triggering during forward playback ---------- */
+function triggerAudioForCrossedNotes(prevB, nowB){
+  for(const n of NOTES){
+    if(n.beat > prevB && n.beat <= nowB){
+      const v = AudioEngine.noteOn(n.midi, n.vel, 0);
+      voiceEnds.push({ voice: v, endBeat: n.beat + n.dur, midi: n.midi });
+      notesPlayed++;
+    }
+  }
+}
+function releaseFinishedVoices(b){
+  const pedalDown = pedalStateAt(b) > 0.35;
+  for(let i = voiceEnds.length - 1; i >= 0; i--){
+    const ve = voiceEnds[i];
+    if(b >= ve.endBeat){
+      if(!pedalDown){ AudioEngine.noteOff(ve.voice, 0.06); voiceEnds.splice(i,1); }
+      else ve.sustained = true;
+    }
+  }
+  // pedal lifted → release sustained voices
+  if(!pedalDown){
+    for(let i = voiceEnds.length - 1; i >= 0; i--){
+      if(voiceEnds[i].sustained || b >= voiceEnds[i].endBeat){
+        AudioEngine.noteOff(voiceEnds[i].voice, 0.05); voiceEnds.splice(i,1);
+      }
+    }
+  } else {
+    for(let i = voiceEnds.length - 1; i >= 0; i--){
+      if(voiceEnds[i].sustained && b >= voiceEnds[i].endBeat + 2.5){
+        AudioEngine.noteOff(voiceEnds[i].voice, 0.35); voiceEnds.splice(i,1);
+      }
+    }
+  }
+}
+
+/* ============================================================
+   INTERACTION — Space, Up/Down, A–K, key clicks
+   ============================================================ */
+const statusEl = document.getElementById('status');
+const tempoReadout = document.getElementById('tempoReadout');
+function updateTempoUI(){ tempoReadout.textContent = 'tempo ♩ = ' + tempo; }
+const KEY_MAP = { KeyA:60, KeyB:61, KeyC:62, KeyD:63, KeyE:64, KeyF:65, KeyG:66, KeyH:67, KeyI:68, KeyJ:69, KeyK:70 };
+
+function manualStrike(midi, dur){
+  AudioEngine.resume();
+  const v = AudioEngine.noteOn(midi, 0.95, 0);
+  manualCount++; notesPlayed++;
+  manualHold.set(midi, { start: visT, until: visT + (dur||0.9), voice: v });
+  voiceEnds.push({ voice: v, endBeat: beatPos + (dur||0.9) * (tempo/60), midi });
+}
+window.addEventListener('keydown', (e) => {
+  if(e.code === 'Space'){
+    e.preventDefault();
+    AudioEngine.resume();
+    playing = !playing;
+    statusEl.firstChild.textContent = playing ? '— the pianola plays itself —' : '— paused · press Space —';
+    return;
+  }
+  if(e.code === 'ArrowUp'){ e.preventDefault(); tempo = Math.min(168, tempo + 4); updateTempoUI(); return; }
+  if(e.code === 'ArrowDown'){ e.preventDefault(); tempo = Math.max(48, tempo - 4); updateTempoUI(); return; }
+  const midi = KEY_MAP[e.code];
+  if(midi !== undefined && !e.repeat){ e.preventDefault(); manualStrike(midi, 1.1); }
+});
+window.addEventListener('pointerdown', () => AudioEngine.resume(), { once:false });
+
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+let keyPointerActive = false;
+function pickKey(e){
+  pointerNdc.x = (e.clientX / innerWidth) * 2 - 1;
+  pointerNdc.y = -(e.clientY / innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointerNdc, camera);
+  const hits = raycaster.intersectObjects(keyHitMeshes, false);
+  return hits.length ? hits[0].object.userData.midi : null;
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  const midi = pickKey(e);
+  if(midi !== null){
+    keyPointerActive = true;
+    controls.enabled = false;
+    manualStrike(midi, 1.2);
+  }
+});
+window.addEventListener('pointerup', () => { if(keyPointerActive){ keyPointerActive = false; controls.enabled = true; } });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if(keyPointerActive && e.buttons){
+    const midi = pickKey(e);
+    if(midi !== null && !manualHold.has(midi)) manualStrike(midi, 0.35);
+  }
+});
+
+/* ============================================================
+   SHOWCASE — deterministic 12 s camera piece
+   ============================================================ */
+const SHOW_DURATION = 12;
+const SHOW_T0 = 1.0;                       // music begins at showcase t = 1 s
+const showSeekBeat = t => (t - SHOW_T0) * (96 / 60);   // showcase always at 96 bpm
+const SHOW_KEYS = [
+  { t: 0.0,  p: [ 2.75, 1.95,  1.75], l: [ 0.0, 1.02, -1.50] },
+  { t: 2.3,  p: [ 0.95, 1.12, -0.42], l: [ 0.05, 0.83, -1.45] },
+  { t: 4.3,  p: [ 0.60, 1.30, -1.00], l: [ 0.0, 1.00, -1.86] },
+  { t: 6.2,  p: [-0.58, 1.66, -0.72], l: [ 0.28, 1.47, -1.52] },
+  { t: 8.2,  p: [-1.85, 1.52,  0.12], l: [ 0.15, 1.18, -1.62] },
+  { t: 9.8,  p: [ 1.62, 1.82,  0.85], l: [ 0.0, 0.95, -1.42] },
+  { t: 12.0, p: [ 2.62, 1.78,  2.15], l: [ 0.0, 0.98, -1.50] }
+];
+function showcasePose(t){
+  let a = SHOW_KEYS[0], b2 = SHOW_KEYS[SHOW_KEYS.length-1];
+  for(let i=0;i<SHOW_KEYS.length-1;i++){
+    if(t >= SHOW_KEYS[i].t && t <= SHOW_KEYS[i+1].t){ a = SHOW_KEYS[i]; b2 = SHOW_KEYS[i+1]; break; }
+  }
+  const u = smoothstep(a.t, b2.t, t);
+  return {
+    pos: [ lerp(a.p[0],b2.p[0],u), lerp(a.p[1],b2.p[1],u), lerp(a.p[2],b2.p[2],u) ],
+    look:[ lerp(a.l[0],b2.l[0],u), lerp(a.l[1],b2.l[1],u), lerp(a.l[2],b2.l[2],u) ]
+  };
+}
+const _bench = window.__bench = { notesPlayed: 0, activeKeys: [], tempo: tempo, rollPosition: 0 };
+
+function seek(t){
+  t = clamp(t, 0, SHOW_DURATION);
+  AudioEngine.silenceAll();   // seek renders a frame; no note should keep sounding
+  visT = t;
+  beatPos = showSeekBeat(t);
+  const { rollPosition } = evaluateScene(beatPos, visT, 0);
+  // camera
+  const pose = showcasePose(t);
+  camera.position.set(pose.pos[0], pose.pos[1], pose.pos[2]);
+  camera.lookAt(pose.look[0], pose.look[1], pose.look[2]);
+  controls.enabled = false;
+  // lighting arc — lamp flares as we pull back, window cools down
+  const flare = Math.exp(-Math.pow((t - 8.6) / 1.5, 2));
+  lampLight.intensity = 1.18 * (1 + 0.9 * flare);
+  chandelierLight.intensity = 0.6 * (1 + 0.5 * flare);
+  moonLight.intensity = 0.42 - 0.24 * smoothstep(5.0, 10.5, t);
+  fireLight.intensity = 1.25 + 0.35*Math.sin(t*9.1) + 0.22*Math.sin(t*17.3 + 1.7) + 0.7*Math.exp(-Math.pow((t-4.3)/1.3, 2));
+  // flames
+  flames.forEach((f,i)=>{
+    const s = 1 + 0.34*Math.sin(t*11 + i*2.1) + 0.16*Math.sin(t*23 + i*4.7);
+    f.scale.set(1/Math.sqrt(s), s, 1/Math.sqrt(s));
+  });
+  // dust motes
+  updateDust(t);
+  // bench
+  let n = manualCount;
+  for(const nt of NOTES){ if(nt.beat <= beatPos) n++; }
+  _bench.notesPlayed = n;
+  _bench.activeKeys = activeKeysNow.slice();
+  _bench.tempo = 96;
+  _bench.rollPosition = rollPosition;
+  renderer.render(scene, camera);
+  return _bench;
+}
+window.showcase = { duration: SHOW_DURATION, seek };
+
+let showcaseMode = false, showcaseT = 0;
+let recording = false, recordT = 0, recordLastBeat = -999;
+const recordBtn = document.getElementById('recordBtn');
+const showcaseBtn = document.getElementById('showcaseBtn');
+
+function startShowcase(){
+  showcaseMode = true; showcaseT = 0;
+  playing = false; controls.enabled = false;
+}
+showcaseBtn.addEventListener('click', () => { if(!recording) startShowcase(); });
+
+recordBtn.addEventListener('click', () => {
+  if(recording) return;
+  AudioEngine.resume();
+  const stream = renderer.domElement.captureStream(60);
+  try{ stream.addTrack(AudioEngine.streamDest.stream.getAudioTracks()[0]); }catch(e){}
+  let mime = 'video/webm;codecs=vp9';
+  if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 14_000_000 });
+  const chunks = [];
+  rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    recording = false; recordBtn.classList.remove('recording');
+    recordBtn.innerHTML = '⬤ &nbsp;Record video';
+    const blob = new Blob(chunks, { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'automatic-pianoforte-showcase.webm'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    controls.enabled = true; playing = false;
+    statusEl.firstChild.textContent = '— the pianola plays itself —';
+  };
+  recording = true; recordT = 0; recordLastBeat = showSeekBeat(0);
+  recordBtn.classList.add('recording');
+  rec.start(250);
+  window._mediaRecorder = rec;
+  controls.enabled = false; playing = false;
+  statusEl.firstChild.textContent = '— recording showcase —';
+});
+
+/* ============================================================
+   DUST MOTES in the lamplight
+   ============================================================ */
+const DUST_N = 170;
+const dustGeo = new THREE.BufferGeometry();
+const dustBase = new Float32Array(DUST_N * 3);
+const dustPhase = new Float32Array(DUST_N);
+{
+  const rnd = mulberry32(2718);
+  for(let i=0;i<DUST_N;i++){
+    dustBase[i*3+0] = -2.6 + rnd()*2.6;
+    dustBase[i*3+1] = 0.4 + rnd()*2.2;
+    dustBase[i*3+2] = -1.6 + rnd()*2.2;
+    dustPhase[i] = rnd()*Math.PI*2;
+  }
+  dustGeo.setAttribute('position', new THREE.BufferAttribute(dustBase.slice(), 3));
+}
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({
+  color: 0xffe2b0, size: 0.011, transparent: true, opacity: 0.4,
+  blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+}));
+scene.add(dust);
+function updateDust(t){
+  const pos = dustGeo.attributes.position;
+  for(let i=0;i<DUST_N;i++){
+    pos.array[i*3+0] = dustBase[i*3+0] + Math.sin(t*0.22 + dustPhase[i]) * 0.09;
+    pos.array[i*3+1] = dustBase[i*3+1] + Math.sin(t*0.16 + dustPhase[i]*1.7) * 0.12 - (t*0.006 % 0.4);
+    pos.array[i*3+2] = dustBase[i*3+2] + Math.cos(t*0.19 + dustPhase[i]*0.6) * 0.09;
+  }
+  pos.needsUpdate = true;
+}
+
+/* ============================================================
+   MAIN LOOP
+   ============================================================ */
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  visT += dt;
+
+  if(recording){
+    recordT += dt;
+    const t = Math.min(recordT, SHOW_DURATION);
+    // fire audio for notes crossed during this frame
+    const nowB = showSeekBeat(t);
+    if(nowB > recordLastBeat){
+      for(const n of NOTES){
+        if(n.beat > recordLastBeat && n.beat <= nowB){
+          AudioEngine.noteOn(n.midi, n.vel, 0);
+          notesPlayed++;
+        }
+      }
+      recordLastBeat = nowB;
+    }
+    seek(t);
+    recordBtn.innerHTML = '⬤ &nbsp;Recording… ' + t.toFixed(1) + 's';
+    if(recordT >= SHOW_DURATION){
+      try{ window._mediaRecorder.stop(); }catch(e){}
+    }
+    return;
+  }
+
+  if(showcaseMode){
+    showcaseT += dt;
+    seek(Math.min(showcaseT, SHOW_DURATION));
+    if(showcaseT >= SHOW_DURATION){
+      showcaseMode = false;
+      controls.enabled = true;
+      statusEl.firstChild.textContent = '— the pianola plays itself —';
+      playing = true;
+    }
+    return;
+  }
+
+  // ---- interactive playback ----
+  controls.update();
+  if(playing){
+    lastBeatPos = beatPos;
+    beatPos += dt * (tempo / 60);
+    if(beatPos > TUNE_TOTAL_BEATS + 2){ beatPos = -1.2; lastBeatPos = beatPos; }  // loop the roll
+    triggerAudioForCrossedNotes(lastBeatPos, beatPos);
+    releaseFinishedVoices(beatPos);
+  }
+  const { rollPosition } = evaluateScene(beatPos, visT, dt);
+
+  // fire & flames flicker
+  fireLight.intensity = 1.22 + 0.22*Math.sin(visT*9.1) + 0.16*Math.sin(visT*17.3+1.7) + 0.09*Math.sin(visT*29.7+0.4);
+  flames.forEach((f,i)=>{
+    const s = 1 + 0.32*Math.sin(visT*11 + i*2.3) + 0.18*Math.sin(visT*23 + i*4.1);
+    f.scale.set(1/Math.sqrt(s), s, 1/Math.sqrt(s));
+  });
+  lampLight.intensity = 1.18 + 0.05*Math.sin(visT*2.1);
+  updateDust(visT);
+
+  // ---- bench ----
+  _bench.notesPlayed = notesPlayed;
+  _bench.activeKeys = activeKeysNow.slice();
+  _bench.tempo = tempo;
+  _bench.rollPosition = rollPosition;
+
+  composer.render();
+}
+
+/* ============================================================
+   POST — subtle bloom on the lamp, candles, fire & tracker dots
+   ============================================================ */
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.62, 0.78);
+bloomPass.renderToScreen = true;
+composer.addPass(bloomPass);
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+updateTempoUI();
+animate();
+</script>
+</body>
+</html>

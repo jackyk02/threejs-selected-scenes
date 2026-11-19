@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Gilded Hourglass — An Antique Study in Sand</title>
+<style>
+  :root{
+    --gold:#d8c084;
+    --gold-dim:#a8894e;
+    --ink:rgba(10,8,6,.72);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#050403;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;}
+
+  .vignette{
+    position:fixed;inset:0;pointer-events:none;z-index:5;
+    background:radial-gradient(ellipse at 50% 42%, transparent 52%, rgba(0,0,0,.38) 82%, rgba(0,0,0,.66) 100%);
+  }
+
+  .title-card{
+    position:fixed;top:26px;left:32px;z-index:10;pointer-events:none;
+    font-family:Georgia,'Times New Roman',serif;color:var(--gold);
+    text-shadow:0 2px 14px rgba(0,0,0,.9);
+    user-select:none;
+  }
+  .title-card h1{
+    font-size:21px;font-weight:400;letter-spacing:.42em;text-transform:uppercase;
+    color:#e7d6a0;
+  }
+  .title-card h1 .thin{color:var(--gold-dim);}
+  .title-card p{
+    margin-top:6px;font-size:11.5px;letter-spacing:.18em;font-style:italic;
+    color:rgba(216,192,132,.66);
+  }
+  .title-card .rule{
+    margin-top:10px;width:170px;height:1px;
+    background:linear-gradient(90deg,var(--gold-dim),transparent);
+  }
+
+  .hint{
+    position:fixed;bottom:22px;left:32px;z-index:10;pointer-events:none;
+    font-family:Georgia,serif;font-size:11px;letter-spacing:.08em;
+    color:rgba(231,214,160,.62);text-shadow:0 1px 8px #000;user-select:none;line-height:1.9;
+  }
+  .hint b{color:rgba(231,214,160,.95);font-weight:normal;border:1px solid rgba(216,192,132,.35);
+    border-radius:4px;padding:0 6px;margin:0 2px;font-size:10px;background:rgba(20,14,8,.55);}
+
+  #recordBtn{
+    position:fixed;top:26px;right:30px;z-index:11;cursor:pointer;
+    font-family:Georgia,serif;font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    color:#1b120a;padding:12px 20px;border:none;border-radius:3px;
+    background:linear-gradient(180deg,#e6cd8f 0%,#c8a552 45%,#9a7733 100%);
+    box-shadow:0 4px 18px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 4px rgba(80,55,15,.6);
+    transition:transform .18s ease, box-shadow .18s ease, filter .18s ease;
+  }
+  #recordBtn:hover{transform:translateY(-1px);filter:brightness(1.07);box-shadow:0 8px 26px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.7);}
+  #recordBtn:disabled{opacity:.55;cursor:default;transform:none;filter:grayscale(.4);}
+  #recordBtn .dot{color:#7a1d12;margin-right:8px;}
+
+  #recBadge{
+    display:none;position:fixed;top:30px;right:190px;z-index:11;pointer-events:none;
+    font-family:Georgia,serif;font-size:11px;letter-spacing:.22em;color:#ff8d7a;
+    padding:8px 14px;border:1px solid rgba(255,120,100,.4);border-radius:3px;background:rgba(30,8,4,.55);
+  }
+  #recBadge .blink{animation:blink 1s steps(2) infinite;}
+  @keyframes blink{50%{opacity:.15;}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="vignette"></div>
+
+<div class="title-card">
+  <h1>The Gilded <span class="thin">Hourglass</span></h1>
+  <p>An antique study in sand &amp; candlelight</p>
+  <div class="rule"></div>
+</div>
+
+<div class="hint">
+  <b>Click</b> flip the glass &nbsp;·&nbsp; <b>Drag glass</b> tilt it &nbsp;·&nbsp; <b>Drag space</b> orbit &nbsp;·&nbsp; <b>R</b> reset &nbsp;·&nbsp; <b>Scroll</b> zoom
+</div>
+
+<button id="recordBtn"><span class="dot">●</span>Record Video</button>
+<div id="recBadge"><span class="blink">●</span>&nbsp; REC · SHOWCASE</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* ============================================================
+   THE GILDED HOURGLASS
+   A fully procedural, granular-sand hourglass in an antique study.
+   ============================================================ */
+
+// ---------- deterministic RNG ----------
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const easeInOutCubic = x => x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x+2, 3)/2;
+const smoothstep = x => x*x*(3-2*x);
+
+// ============================================================
+// RENDERER / SCENE / CAMERA / CONTROLS  (top-level, required)
+// ============================================================
+const container = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+container.appendChild(renderer.domElement);
+const canvas = renderer.domElement;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070605);
+scene.fog = new THREE.FogExp2(0x0a0806, 0.078);
+
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth/window.innerHeight, 0.1, 80);
+camera.position.set(4.7, 2.7, 5.45);
+
+const controls = new OrbitControls(camera, canvas);
+controls.target.set(0, 1.45, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 1.6;
+controls.maxDistance = 13;
+controls.maxPolarAngle = 1.53;
+controls.update();
+
+// ============================================================
+// PROCEDURAL TEXTURES (canvas only — no external assets)
+// ============================================================
+function makeCanvas(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; }
+function toTexture(c, srgb=true, repeat){
+  const t = new THREE.CanvasTexture(c);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  if (repeat) t.repeat.set(repeat[0], repeat[1]);
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+
+// ---- dark walnut wood ----
+function woodCanvas({base='#3b2416', dark='#20100a', light='#5c3a22', size=512, planks=0}){
+  const c = makeCanvas(size,size), x = c.getContext('2d');
+  x.fillStyle = base; x.fillRect(0,0,size,size);
+  // long grain streaks
+  for (let i=0;i<170;i++){
+    const y0 = Math.random()*size;
+    const amp = 2+Math.random()*9, per = 120+Math.random()*260, ph = Math.random()*Math.PI*2;
+    x.strokeStyle = (Math.random()<0.6 ? dark : light);
+    x.globalAlpha = 0.12+Math.random()*0.3;
+    x.lineWidth = 0.6+Math.random()*3.4;
+    x.beginPath();
+    for (let px=0; px<=size; px+=8){
+      const y = y0 + Math.sin(px/per*Math.PI*2+ph)*amp + Math.sin(px/37+ph*2)*1.5;
+      px===0 ? x.moveTo(px,y) : x.lineTo(px,y);
+    }
+    x.stroke();
+  }
+  // knots
+  for (let i=0;i<7;i++){
+    const kx=Math.random()*size, ky=Math.random()*size, r=4+Math.random()*10;
+    for (let k=r;k>0;k-=1.6){
+      x.globalAlpha = 0.10+Math.random()*0.14;
+      x.strokeStyle = k%3<1.5 ? dark : light;
+      x.lineWidth = 1.2;
+      x.beginPath(); x.ellipse(kx,ky,k*1.6,k,0,0,Math.PI*2); x.stroke();
+    }
+  }
+  // speckle
+  x.globalAlpha = 1;
+  const id = x.getImageData(0,0,size,size), d = id.data;
+  for (let i=0;i<d.length;i+=4){
+    const n = (Math.random()-0.5)*26;
+    d[i]+=n; d[i+1]+=n; d[i+2]+=n;
+  }
+  x.putImageData(id,0,0);
+  if (planks>0){
+    x.globalAlpha = 0.55; x.strokeStyle = '#140a06'; x.lineWidth = 3;
+    for (let p=1;p<planks;p++){
+      const y = p*size/planks;
+      x.beginPath(); x.moveTo(0,y); x.lineTo(size,y); x.stroke();
+      x.globalAlpha = 0.25; x.strokeStyle = '#6b452a'; x.lineWidth = 1;
+      x.beginPath(); x.moveTo(0,y+2); x.lineTo(size,y+2); x.stroke(); x.globalAlpha = 0.55;
+    }
+  }
+  x.globalAlpha = 1;
+  return c;
+}
+const deskTex   = toTexture(woodCanvas({base:'#33200f', dark:'#1a0e06', light:'#553521', planks:5}), true, [1.6,1.6]);
+const capTex    = toTexture(woodCanvas({base:'#2c1a0e', dark:'#150a05', light:'#4e3018'}), true, [2,1]);
+const pillarTex = toTexture(woodCanvas({base:'#38220f', dark:'#1d0f07', light:'#5e3c20'}), true, [1,2]);
+
+// ---- plaster wall ----
+function plasterCanvas(){
+  const s=512, c=makeCanvas(s,s), x=c.getContext('2d');
+  x.fillStyle='#181311'; x.fillRect(0,0,s,s);
+  for (let i=0;i<46;i++){
+    const gx=Math.random()*s, gy=Math.random()*s, r=40+Math.random()*160;
+    const g=x.createRadialGradient(gx,gy,0,gx,gy,r);
+    const warm = Math.random()<0.4;
+    g.addColorStop(0, warm?'rgba(70,54,40,0.30)':'rgba(8,6,5,0.35)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle=g; x.fillRect(0,0,s,s);
+  }
+  const id=x.getImageData(0,0,s,s), d=id.data;
+  for (let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*16; d[i]+=n; d[i+1]+=n; d[i+2]+=n; }
+  x.putImageData(id,0,0);
+  // faint damask-ish motif grid
+  x.globalAlpha=0.05; x.strokeStyle='#c8b088'; x.lineWidth=1;
+  for (let ry=40; ry<s; ry+=86){
+    for (let rx=40+((ry/86)%2)*44; rx<s; rx+=88){
+      x.beginPath(); x.ellipse(rx,ry,12,17,0,0,Math.PI*2); x.stroke();
+      x.beginPath(); x.ellipse(rx,ry,5,8,0,0,Math.PI*2); x.stroke();
+    }
+  }
+  x.globalAlpha=1;
+  return c;
+}
+const wallTex = toTexture(plasterCanvas(), true, [3,1.6]);
+
+// ---- antique globe map ----
+function globeCanvas(){
+  const w=1024,h=512, c=makeCanvas(w,h), x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#b39355'); g.addColorStop(0.5,'#a8874c'); g.addColorStop(1,'#7d6132');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  // aged blotches
+  for (let i=0;i<160;i++){
+    x.globalAlpha=0.08+Math.random()*0.12;
+    x.fillStyle=Math.random()<0.5?'#6b4f24':'#d6bd85';
+    x.beginPath(); x.ellipse(Math.random()*w,Math.random()*h,10+Math.random()*70,8+Math.random()*40,Math.random()*3,0,Math.PI*2); x.fill();
+  }
+  x.globalAlpha=1;
+  // graticule
+  x.strokeStyle='rgba(70,48,18,0.55)'; x.lineWidth=1.4;
+  for (let i=1;i<12;i++){ x.beginPath(); x.moveTo(i*w/12,0); x.lineTo(i*w/12,h); x.stroke(); }
+  for (let i=1;i<6;i++){ x.beginPath(); x.moveTo(0,i*h/6); x.lineTo(w,i*h/6); x.stroke(); }
+  x.lineWidth=3; x.strokeStyle='rgba(80,52,16,0.8)';
+  x.beginPath(); x.moveTo(0,h/2); x.lineTo(w,h/2); x.stroke();
+  // continents — seeded blobby masses
+  const rnd = mulberry32(1337);
+  const blob=(cx,cy,R)=>{
+    x.beginPath();
+    const n=14;
+    for (let i=0;i<=n;i++){
+      const a=i/n*Math.PI*2, r=R*(0.62+rnd()*0.62);
+      const px=cx+Math.cos(a)*r*1.35, py=cy+Math.sin(a)*r*0.8;
+      i===0?x.moveTo(px,py):x.lineTo(px,py);
+    }
+    x.closePath();
+    x.fillStyle='#5e4423'; x.fill();
+    x.strokeStyle='rgba(46,30,10,0.7)'; x.lineWidth=2; x.stroke();
+  };
+  blob(180,150,70); blob(330,300,48); blob(430,130,34); blob(560,215,88);
+  blob(720,110,42); blob(830,310,60); blob(940,180,28); blob(90,320,36); blob(660,380,30);
+  // equator cartouche
+  x.globalAlpha=0.85; x.fillStyle='#c8ab6d';
+  x.fillRect(w/2-70,h/2-13,140,26);
+  x.strokeStyle='#4a3312'; x.lineWidth=2; x.strokeRect(w/2-70,h/2-13,140,26);
+  x.globalAlpha=1; x.strokeStyle='#4a3312';
+  for (let i=0;i<3;i++){ x.beginPath(); x.moveTo(w/2-48,h/2-5+i*6); x.lineTo(w/2+48,h/2-5+i*6); x.stroke(); }
+  return c;
+}
+
+// ---- book leather ----
+function bookCanvas(leather, band){
+  const w=256,h=384, c=makeCanvas(w,h), x=c.getContext('2d');
+  x.fillStyle=leather; x.fillRect(0,0,w,h);
+  for (let i=0;i<900;i++){
+    x.globalAlpha=Math.random()*0.14;
+    x.fillStyle=Math.random()<0.5?'#000':'#fff';
+    x.fillRect(Math.random()*w,Math.random()*h,1.6,1.6);
+  }
+  x.globalAlpha=1;
+  // gilt border
+  x.strokeStyle=band; x.lineWidth=4; x.strokeRect(14,14,w-28,h-28);
+  x.lineWidth=1.4; x.strokeRect(22,22,w-44,h-44);
+  // raised bands
+  for (const by of [h*0.22, h*0.78]){
+    x.fillStyle='rgba(0,0,0,0.45)'; x.fillRect(0,by-7,w,14);
+    x.fillStyle='rgba(255,255,255,0.16)'; x.fillRect(0,by-9,w,3);
+  }
+  // gilt title lines
+  x.strokeStyle=band; x.lineWidth=3;
+  for (let i=0;i<4;i++){
+    const lw = 120 - i*22, y = h*0.40 + i*22;
+    x.beginPath(); x.moveTo(w/2-lw/2, y); x.lineTo(w/2+lw/2, y); x.stroke();
+  }
+  return c;
+}
+
+// ---- candle drips ----
+function candleCanvas(){
+  const w=128,h=256, c=makeCanvas(w,h), x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,w,0);
+  g.addColorStop(0,'#c9b98f'); g.addColorStop(0.5,'#efe3bd'); g.addColorStop(1,'#b3a279');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  for (let i=0;i<12;i++){
+    const dx=Math.random()*w, len=20+Math.random()*90;
+    x.fillStyle='rgba(120,105,70,0.5)';
+    x.beginPath(); x.ellipse(dx,len/2,2.2+Math.random()*2,len/2,0,0,Math.PI*2); x.fill();
+  }
+  return c;
+}
+
+// ---- old-master painting (blurry smear) ----
+function paintingCanvas(){
+  const w=256,h=320, c=makeCanvas(w,h), x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#2b2016'); g.addColorStop(0.55,'#4a3823'); g.addColorStop(0.72,'#6b5636'); g.addColorStop(1,'#14100b');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  const blob=(cx,cy,rx,ry,col,al)=>{ x.globalAlpha=al; x.fillStyle=col; x.beginPath(); x.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); x.fill(); };
+  blob(128,205,90,44,'#1c150e',0.9);
+  blob(105,130,26,40,'#0f0c08',0.95); blob(152,128,24,42,'#171208',0.95);
+  blob(108,116,11,14,'#8a7254',0.9);  blob(153,114,10,13,'#7d684c',0.85);
+  blob(128,80,120,26,'#584a30',0.5);
+  x.globalAlpha=1;
+  return c;
+}
+
+// ---- flame sprite ----
+function flameCanvas(){
+  const w=128,h=256, c=makeCanvas(w,h), x=c.getContext('2d');
+  const layer=(cx,cy,rx,ry,col)=>{
+    const g=x.createRadialGradient(cx,cy,1,cx,cy,Math.max(rx,ry));
+    g.addColorStop(0,col); g.addColorStop(1,'rgba(0,0,0,0)');
+    x.save(); x.translate(cx,cy); x.scale(rx/Math.max(rx,ry), ry/Math.max(rx,ry)); x.translate(-cx,-cy);
+    x.fillStyle=g; x.fillRect(0,0,w,h); x.restore();
+  };
+  layer(64,150,52,105,'rgba(255,140,40,0.55)');
+  layer(64,160,32,72,'rgba(255,205,105,0.85)');
+  layer(64,172,15,40,'rgba(255,244,205,1)');
+  return c;
+}
+
+// ---- light shaft gradient ----
+function shaftCanvas(){
+  const w=128,h=512, c=makeCanvas(w,h), x=c.getContext('2d');
+  const gh=x.createLinearGradient(0,0,w,0);
+  gh.addColorStop(0,'rgba(255,255,255,0)'); gh.addColorStop(0.5,'rgba(255,255,255,1)'); gh.addColorStop(1,'rgba(255,255,255,0)');
+  x.fillStyle=gh; x.fillRect(0,0,w,h);
+  x.globalCompositeOperation='destination-in';
+  const gv=x.createLinearGradient(0,0,0,h);
+  gv.addColorStop(0,'rgba(0,0,0,1)'); gv.addColorStop(0.75,'rgba(0,0,0,0.55)'); gv.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=gv; x.fillRect(0,0,w,h);
+  return c;
+}
+
+// ---- window pane texture (bright, blooms) ----
+function windowCanvas(){
+  const w=256,h=340, c=makeCanvas(w,h), x=c.getContext('2d');
+  const g=x.createRadialGradient(w/2,h*0.42,10,w/2,h*0.45,w*0.75);
+  g.addColorStop(0,'#fffdf2'); g.addColorStop(0.35,'#dfe9ec'); g.addColorStop(0.75,'#8d9aa2'); g.addColorStop(1,'#4a5258');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  // distant rooftops silhouette
+  x.fillStyle='rgba(52,58,64,0.85)';
+  x.beginPath(); x.moveTo(0,h*0.74);
+  x.lineTo(40,h*0.74); x.lineTo(40,h*0.62); x.lineTo(78,h*0.62); x.lineTo(78,h*0.74);
+  x.lineTo(120,h*0.74); x.lineTo(120,h*0.55); x.lineTo(150,h*0.44); x.lineTo(180,h*0.55); x.lineTo(180,h*0.74);
+  x.lineTo(225,h*0.74); x.lineTo(225,h*0.66); x.lineTo(256,h*0.66); x.lineTo(256,h); x.lineTo(0,h);
+  x.closePath(); x.fill();
+  // mullions
+  x.fillStyle='#221a12';
+  x.fillRect(w/2-7,0,14,h); x.fillRect(0,h*0.34-6,w,12); x.fillRect(0,h*0.62-6,w,12);
+  x.strokeStyle='#221a12'; x.lineWidth=16; x.strokeRect(0,0,w,h);
+  return c;
+}
+
+// ---- environment equirect (for glass reflections) ----
+function envCanvas(){
+  const w=1024,h=512, c=makeCanvas(w,h), x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#05070c'); g.addColorStop(0.42,'#141210'); g.addColorStop(0.55,'#241d15'); g.addColorStop(0.72,'#100c08'); g.addColorStop(1,'#050333'.slice(0,7));
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  // bright cool window patch (left)
+  let rg=x.createRadialGradient(190,205,8,190,205,150);
+  rg.addColorStop(0,'#fdfdf4'); rg.addColorStop(0.3,'#c9d6da'); rg.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=rg; x.fillRect(0,0,w,h);
+  // warm candle glow (right of center)
+  rg=x.createRadialGradient(660,300,4,660,300,110);
+  rg.addColorStop(0,'#ffd9a0'); rg.addColorStop(0.35,'#a86a2c'); rg.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=rg; x.fillRect(0,0,w,h);
+  // soft amber bounce along "floor"
+  rg=x.createRadialGradient(430,430,10,430,430,300);
+  rg.addColorStop(0,'rgba(150,95,40,0.55)'); rg.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=rg; x.fillRect(0,0,w,h);
+  // faint rim strips for glass highlights
+  x.fillStyle='rgba(235,240,245,0.85)'; x.fillRect(60,150,26,140); x.fillRect(950,160,14,120);
+  return c;
+}
+const envTex = new THREE.CanvasTexture(envCanvas());
+envTex.mapping = THREE.EquirectangularReflectionMapping;
+envTex.colorSpace = THREE.SRGBColorSpace;
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromEquirectangular(envTex).texture;
+
+// ============================================================
+// MATERIALS
+// ============================================================
+const woodCapMat  = new THREE.MeshStandardMaterial({ map:capTex,  color:0xa98873, roughness:0.52, metalness:0.06, envMapIntensity:0.7 });
+const woodPillarMat = new THREE.MeshStandardMaterial({ map:pillarTex, color:0xb59a83, roughness:0.46, metalness:0.06, envMapIntensity:0.8 });
+const deskMat     = new THREE.MeshStandardMaterial({ map:deskTex, color:0xb9a58f, roughness:0.42, metalness:0.05, envMapIntensity:0.6 });
+const wallMat     = new THREE.MeshStandardMaterial({ map:wallTex, color:0xbfb3a4, roughness:0.95, metalness:0.0 });
+const brassMat    = new THREE.MeshStandardMaterial({ color:0xd0a94f, metalness:1.0, roughness:0.24, envMapIntensity:1.6 });
+const brassDark   = new THREE.MeshStandardMaterial({ color:0x8f7130, metalness:1.0, roughness:0.4,  envMapIntensity:1.1 });
+const leatherPad  = new THREE.MeshStandardMaterial({ color:0x182a20, roughness:0.94, metalness:0.0, envMapIntensity:0.35 });
+const ivoryMat    = new THREE.MeshStandardMaterial({ map:toTexture(candleCanvas()), color:0xf5ecd4, roughness:0.55 });
+const glassMat    = new THREE.MeshPhysicalMaterial({
+  color:0xf2fbff, metalness:0, roughness:0.055,
+  transmission:1.0, thickness:0.09, ior:1.52,
+  clearcoat:1.0, clearcoatRoughness:0.07,
+  envMapIntensity:1.5, specularIntensity:1.15,
+  attenuationColor:new THREE.Color(0xdff2ee), attenuationDistance:2.5,
+  side:THREE.DoubleSide
+});
+
+// ============================================================
+// ROOM — desk, wall, floor, window, picture, pad
+// ============================================================
+const roomGroup = new THREE.Group();
+scene.add(roomGroup);
+
+const desk = new THREE.Mesh(new THREE.BoxGeometry(13, 0.34, 8), deskMat);
+desk.position.set(0, -0.17, 0);
+desk.receiveShadow = true;
+roomGroup.add(desk);
+
+const deskApron = new THREE.Mesh(new THREE.BoxGeometry(13, 3.4, 8), new THREE.MeshStandardMaterial({ color:0x191008, roughness:0.8 }));
+deskApron.position.set(0, -2.05, 0);
+roomGroup.add(deskApron);
+
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(18, 9), wallMat);
+wall.position.set(0, 2.2, -3.35);
+wall.receiveShadow = true;
+roomGroup.add(wall);
+
+const pad = new THREE.Mesh(new THREE.CircleGeometry(1.82, 72), leatherPad);
+pad.rotation.x = -Math.PI/2; pad.position.y = 0.006; pad.receiveShadow = true;
+roomGroup.add(pad);
+// tooled brass rim on the pad
+const padRing = new THREE.Mesh(new THREE.RingGeometry(1.70, 1.78, 72), brassDark);
+padRing.rotation.x = -Math.PI/2; padRing.position.y = 0.008;
+roomGroup.add(padRing);
+
+// window (glowing, on back-left wall)
+const windowMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.3, 1.72),
+  new THREE.MeshBasicMaterial({ map:toTexture(windowCanvas(), true) })
+);
+windowMesh.position.set(-2.55, 2.62, -3.33);
+roomGroup.add(windowMesh);
+const winFrame = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.92, 0.09), woodPillarMat);
+winFrame.position.set(-2.55, 2.62, -3.38);
+roomGroup.add(winFrame);
+
+// light shaft (two crossed additive gradient planes)
+const shaftTex = toTexture(shaftCanvas(), false);
+const shaftMat = new THREE.MeshBasicMaterial({
+  map:shaftTex, color:0xc8dde8, transparent:true, opacity:0.34,
+  blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide, fog:false
+});
+const shaftGeo = new THREE.PlaneGeometry(2.5, 5.6);
+const shaft1 = new THREE.Mesh(shaftGeo, shaftMat);
+shaft1.position.set(-1.25, 1.72, -1.35);
+shaft1.rotation.set(0.18, 0.52, -0.62);
+scene.add(shaft1);
+const shaft2 = new THREE.Mesh(shaftGeo, shaftMat.clone());
+shaft2.material.opacity = 0.18;
+shaft2.position.copy(shaft1.position);
+shaft2.rotation.set(0.18, 0.52 + Math.PI/2, -0.62);
+scene.add(shaft2);
+
+// framed painting
+const painting = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.92, 1.18),
+  new THREE.MeshStandardMaterial({ map:toTexture(paintingCanvas()), roughness:0.85 })
+);
+painting.position.set(1.85, 2.45, -3.32);
+roomGroup.add(painting);
+const paintFrame = new THREE.Mesh(new THREE.BoxGeometry(1.14, 1.4, 0.07), brassDark);
+paintFrame.position.set(1.85, 2.45, -3.35);
+roomGroup.add(paintFrame);
+
+// ============================================================
+// GLOBE
+// ============================================================
+const globeGroup = new THREE.Group();
+globeGroup.position.set(-2.25, 0, -1.7);
+scene.add(globeGroup);
+
+const standPts = [
+  new THREE.Vector2(0.001,0), new THREE.Vector2(0.34,0), new THREE.Vector2(0.30,0.035),
+  new THREE.Vector2(0.16,0.06), new THREE.Vector2(0.10,0.14), new THREE.Vector2(0.085,0.34),
+  new THREE.Vector2(0.13,0.40), new THREE.Vector2(0.001,0.42)
+];
+const stand = new THREE.Mesh(new THREE.LatheGeometry(standPts, 48), woodPillarMat);
+stand.castShadow = true; stand.receiveShadow = true;
+globeGroup.add(stand);
+
+const globeTilt = new THREE.Group();
+globeTilt.position.set(0, 0.82, 0);
+globeTilt.rotation.z = THREE.MathUtils.degToRad(23.4);
+globeGroup.add(globeTilt);
+const globe = new THREE.Mesh(
+  new THREE.SphereGeometry(0.46, 64, 48),
+  new THREE.MeshStandardMaterial({ map:toTexture(globeCanvas()), roughness:0.62, metalness:0.05, envMapIntensity:0.5 })
+);
+globe.castShadow = true;
+globeTilt.add(globe);
+const meridian = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.028, 12, 72, Math.PI), brassMat);
+meridian.rotation.z = Math.PI/2;
+globeTilt.add(meridian);
+
+// ============================================================
+// BOOKS
+// ============================================================
+function makeBook(w,h,d, leather, band){
+  const tex = toTexture(bookCanvas(leather, band));
+  const cover = new THREE.MeshStandardMaterial({ map:tex, roughness:0.72, metalness:0.05, envMapIntensity:0.5 });
+  const pages = new THREE.MeshStandardMaterial({ color:0xd8cba6, roughness:0.9 });
+  const spine = new THREE.MeshStandardMaterial({ map:tex, roughness:0.62, envMapIntensity:0.7 });
+  const mats = [pages, pages, cover, cover, spine, pages];
+  const b = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mats);
+  b.castShadow = true; b.receiveShadow = true;
+  return b;
+}
+const bookStack = new THREE.Group();
+bookStack.position.set(2.1, 0, -1.4);
+scene.add(bookStack);
+const bookDefs = [
+  { w:0.72, h:0.145, d:0.52, c:'#4a2c1a', band:'#c8a24a', ry:0.10 },
+  { w:0.64, h:0.13,  d:0.47, c:'#272b38', band:'#b9b9c8', ry:-0.14 },
+  { w:0.70, h:0.155, d:0.50, c:'#3a1f24', band:'#d0a94f', ry:0.26 },
+  { w:0.52, h:0.11,  d:0.40, c:'#1d3325', band:'#a8894e', ry:-0.05 }
+];
+let bookY = 0;
+for (const bd of bookDefs){
+  const b = makeBook(bd.w, bd.h, bd.d, bd.c, bd.band);
+  b.position.y = bookY + bd.h/2;
+  b.rotation.y = bd.ry;
+  bookStack.add(b);
+  bookY += bd.h;
+}
+// one leaning book
+const leaner = makeBook(0.16, 0.62, 0.44, '#33231a', '#c8a24a');
+leaner.position.set(0.52, 0.30, 0.02);
+leaner.rotation.z = -0.30;
+leaner.rotation.y = 0.35;
+bookStack.add(leaner);
+
+// ============================================================
+// CANDLE
+// ============================================================
+const candleGroup = new THREE.Group();
+candleGroup.position.set(-1.78, 0, 1.08);
+scene.add(candleGroup);
+
+const dishPts = [
+  new THREE.Vector2(0.001,0), new THREE.Vector2(0.30,0), new THREE.Vector2(0.33,0.025),
+  new THREE.Vector2(0.28,0.055), new THREE.Vector2(0.15,0.075), new THREE.Vector2(0.115,0.11), new THREE.Vector2(0.001,0.11)
+];
+const dish = new THREE.Mesh(new THREE.LatheGeometry(dishPts, 48), brassMat);
+dish.castShadow = true; dish.receiveShadow = true;
+candleGroup.add(dish);
+const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.094, 0.66, 32), ivoryMat);
+candle.position.y = 0.11 + 0.33;
+candle.castShadow = true;
+candleGroup.add(candle);
+const wick = new THREE.Mesh(new THREE.CylinderGeometry(0.006,0.006,0.035,6), new THREE.MeshBasicMaterial({ color:0x140c06 }));
+wick.position.y = 0.775;
+candleGroup.add(wick);
+
+const flame = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.16, 0.34),
+  new THREE.MeshBasicMaterial({ map:toTexture(flameCanvas(), false), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide, fog:false })
+);
+flame.position.set(0, 0.90, 0);
+candleGroup.add(flame);
+
+const candleLight = new THREE.PointLight(0xffa050, 15, 8.5, 2);
+candleLight.position.set(-1.78, 0.98, 1.08);
+scene.add(candleLight);
+
+// ============================================================
+// LIGHTS
+// ============================================================
+scene.add(new THREE.HemisphereLight(0x35302a, 0x0b0806, 0.75));
+
+const windowLight = new THREE.DirectionalLight(0xd2e0ec, 3.1);
+windowLight.position.set(-2.6, 3.3, -2.3);
+windowLight.target.position.set(0.4, 1.1, 0.4);
+windowLight.castShadow = true;
+windowLight.shadow.mapSize.set(4096, 4096);
+windowLight.shadow.camera.left = -4.5; windowLight.shadow.camera.right = 4.5;
+windowLight.shadow.camera.top = 5;     windowLight.shadow.camera.bottom = -3;
+windowLight.shadow.camera.near = 0.5;  windowLight.shadow.camera.far = 14;
+windowLight.shadow.bias = -0.00035;
+windowLight.shadow.normalBias = 0.025;
+scene.add(windowLight, windowLight.target);
+
+const rimLight = new THREE.PointLight(0xffc890, 7.5, 10, 2);   // warm rim from back-right
+rimLight.position.set(2.3, 2.6, -2.1);
+scene.add(rimLight);
+
+const fillLight = new THREE.DirectionalLight(0x8a97a8, 0.55);  // faint cool frontal fill
+fillLight.position.set(2.6, 2.1, 4.6);
+scene.add(fillLight);
+
+// ============================================================
+// HOURGLASS — glass + turned frame + brass
+// ============================================================
+const hourglass = new THREE.Group();
+const HG_Y = 1.478;
+hourglass.position.set(0, HG_Y, 0);
+scene.add(hourglass);
+
+// inner glass profile (bottom -> top)
+const PROFILE = [
+  [-1.34,0.02],[-1.31,0.30],[-1.26,0.62],[-1.19,0.88],[-1.08,1.02],[-0.95,1.07],
+  [-0.78,1.035],[-0.60,0.90],[-0.44,0.70],[-0.30,0.46],[-0.19,0.255],[-0.12,0.155],
+  [-0.075,0.105],[-0.056,0.083],[0.056,0.083],[0.075,0.105],[0.12,0.155],[0.19,0.255],
+  [0.30,0.46],[0.44,0.70],[0.60,0.90],[0.78,1.035],[0.95,1.07],[1.08,1.02],
+  [1.19,0.88],[1.26,0.62],[1.31,0.30],[1.34,0.02]
+];
+// segments for collision
+const SEGS = [];
+for (let i=0;i<PROFILE.length-1;i++){
+  const [y1,r1] = PROFILE[i], [y2,r2] = PROFILE[i+1];
+  SEGS.push({ r1, y1, r2, y2, midY:(y1+y2)/2 });
+}
+function profileRadiusAt(y){
+  if (y <= PROFILE[0][0]) return PROFILE[0][1];
+  for (let i=0;i<PROFILE.length-1;i++){
+    const [y1,r1]=PROFILE[i], [y2,r2]=PROFILE[i+1];
+    if (y <= y2){ const t=(y-y1)/(y2-y1); return r1+(r2-r1)*t; }
+  }
+  return PROFILE[PROFILE.length-1][1];
+}
+
+// outer glass lathe (offset along 2D normal)
+const WALL = 0.038;
+const outerPts = [];
+for (let i=0;i<PROFILE.length;i++){
+  const p = PROFILE[i];
+  const pa = PROFILE[Math.max(0,i-1)], pb = PROFILE[Math.min(PROFILE.length-1,i+1)];
+  let tr = pb[1]-pa[1], ty = pb[0]-pa[0];
+  const len = Math.hypot(tr,ty); tr/=len; ty/=len;
+  const nr = ty, ny = -tr;             // outward for this winding
+  outerPts.push(new THREE.Vector2(p[1]+nr*WALL, p[0]+ny*WALL));
+}
+const glass = new THREE.Mesh(new THREE.LatheGeometry(outerPts, 96), glassMat);
+glass.castShadow = false;
+hourglass.add(glass);
+
+// turned wood cap (lathe, local coords)
+function turnedCap(sign){ // sign = -1 bottom, +1 top
+  const s = sign;
+  const pts = [
+    new THREE.Vector2(0.001, s*1.478),
+    new THREE.Vector2(1.05,  s*1.478),
+    new THREE.Vector2(1.19,  s*1.452),
+    new THREE.Vector2(1.285, s*1.405),
+    new THREE.Vector2(1.315, s*1.35),
+    new THREE.Vector2(1.29,  s*1.30),
+    new THREE.Vector2(1.10,  s*1.262),
+    new THREE.Vector2(0.55,  s*1.252),
+    new THREE.Vector2(0.001, s*1.252)
+  ];
+  // ensure bottom->top winding for lathe
+  const ordered = s < 0 ? pts : [...pts].reverse();
+  const cap = new THREE.Mesh(new THREE.LatheGeometry(ordered, 96), woodCapMat);
+  cap.castShadow = true; cap.receiveShadow = true;
+  return cap;
+}
+hourglass.add(turnedCap(-1), turnedCap(1));
+
+// brass trim rings on caps
+for (const s of [-1, 1]){
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.315, 0.032, 14, 96), brassMat);
+  ring.rotation.x = Math.PI/2;
+  ring.position.y = s*1.35;
+  hourglass.add(ring);
+  const ring2 = new THREE.Mesh(new THREE.TorusGeometry(1.16, 0.02, 12, 80), brassDark);
+  ring2.rotation.x = Math.PI/2;
+  ring2.position.y = s*1.262;
+  hourglass.add(ring2);
+}
+
+// neck brass bands
+for (const s of [-1, 1]){
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.098, 0.018, 10, 48), brassMat);
+  band.rotation.x = Math.PI/2;
+  band.position.y = s*0.055;
+  hourglass.add(band);
+}
+
+// turned pillars (smooth spline profile)
+const pillarCtrl = [
+  [-1.26,0.108],[-1.21,0.128],[-1.155,0.10],[-1.085,0.086],[-0.985,0.118],[-0.885,0.076],
+  [-0.73,0.086],[-0.55,0.070],[-0.35,0.096],[-0.175,0.070],[0,0.074],[0.175,0.070],
+  [0.35,0.096],[0.55,0.070],[0.73,0.086],[0.885,0.076],[0.985,0.118],[1.085,0.086],
+  [1.155,0.10],[1.21,0.128],[1.26,0.108]
+].map(p => new THREE.Vector2(p[1], p[0]));
+const pillarCurve = new THREE.SplineCurve(pillarCtrl);
+const pillarPts = pillarCurve.getPoints(72);
+const pillarGeo = new THREE.LatheGeometry(pillarPts, 40);
+const PILLAR_R = 1.235;
+for (const angDeg of [60, 180, 300]){
+  const a = THREE.MathUtils.degToRad(angDeg);
+  const pillar = new THREE.Mesh(pillarGeo, woodPillarMat);
+  pillar.position.set(Math.cos(a)*PILLAR_R, 0, Math.sin(a)*PILLAR_R);
+  pillar.castShadow = true; pillar.receiveShadow = true;
+  hourglass.add(pillar);
+  // brass ferrules top & bottom of each pillar
+  for (const s of [-1, 1]){
+    const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.132, 0.132, 0.065, 28), brassMat);
+    ferrule.position.set(Math.cos(a)*PILLAR_R, s*1.225, Math.sin(a)*PILLAR_R);
+    hourglass.add(ferrule);
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.02, 10, 32), brassMat);
+    collar.rotation.x = Math.PI/2;
+    collar.position.set(Math.cos(a)*PILLAR_R, s*0.96, Math.sin(a)*PILLAR_R);
+    hourglass.add(collar);
+  }
+}
+
+// top finial — brass onion dome
+const finialPts = [
+  new THREE.Vector2(0.001,1.478), new THREE.Vector2(0.17,1.478), new THREE.Vector2(0.185,1.53),
+  new THREE.Vector2(0.10,1.565), new THREE.Vector2(0.185,1.63), new THREE.Vector2(0.205,1.71),
+  new THREE.Vector2(0.135,1.795), new THREE.Vector2(0.055,1.845), new THREE.Vector2(0.018,1.895), new THREE.Vector2(0.001,1.905)
+];
+const finial = new THREE.Mesh(new THREE.LatheGeometry(finialPts, 48), brassMat);
+finial.castShadow = true;
+hourglass.add(finial);
+
+// invisible interaction proxy (easy clicking)
+const hitProxy = new THREE.Mesh(
+  new THREE.CylinderGeometry(1.5, 1.5, 3.35, 12),
+  new THREE.MeshBasicMaterial({ colorWrite:false, depthWrite:false, depthTest:false })
+);
+hourglass.add(hitProxy);
+
+// ============================================================
+// SAND — granular simulation (≥ 6,000 grains)
+// ============================================================
+const N = 6500;
+const GR = 0.02;               // grain radius
+const DIA = GR * 2;
+const G = 9.8;
+
+const pos  = new Float32Array(N * 3);
+const vel  = new Float32Array(N * 3);
+const col  = new Float32Array(N * 3);
+
+const GY_MIN = -0.15, GY_MAX = 3.15, CELL = 0.045;
+const GX = 64, GZ = 64, GYC = Math.ceil((GY_MAX - GY_MIN) / CELL);
+const CELL_COUNT = GX * GZ * GYC;
+const gridHead = new Int32Array(CELL_COUNT);
+const gridNext = new Int32Array(N);
+
+// scratch
+const _q = new THREE.Quaternion(), _qi = new THREE.Quaternion();
+const _p = new THREE.Vector3(), _v = new THREE.Vector3();
+const _n = new THREE.Vector3(), _l = new THREE.Vector3();
+
+function rotateByQuat(out, q, x, y, z){
+  // out = q * (x,y,z)
+  const ix = q.w*x + q.y*z - q.z*y;
+  const iy = q.w*y + q.z*x - q.x*z;
+  const iz = q.w*z + q.x*y - q.y*x;
+  const iw = -q.x*x - q.y*y - q.z*z;
+  out.x = ix*q.w + iw*-q.x + iy*-q.z - iz*-q.y;
+  out.y = iy*q.w + iw*-q.y + iz*-q.x - ix*-q.z;
+  out.z = iz*q.w + iw*-q.z + ix*-q.y - iy*-q.x;
+  return out;
+}
+
+function glassCollideAll(){
+  hourglass.getWorldQuaternion(_q);
+  _qi.copy(_q).invert();
+  const gx = hourglass.position.x, gy = hourglass.position.y, gz = hourglass.position.z;
+  for (let i=0;i<N;i++){
+    const i3 = i*3;
+    // to local
+    _l.set(pos[i3]-gx, pos[i3+1]-gy, pos[i3+2]-gz);
+    rotateByQuat(_v, _qi, _l.x, _l.y, _l.z); // _v = local pos
+    let r = Math.hypot(_v.x, _v.z);
+    const y = _v.y, rSafe = Math.max(r, 1e-5);
+    const erx = _v.x / rSafe, erz = _v.z / rSafe;
+    // closest point on profile polyline (2D r-y)
+    let bestD2 = Infinity, bestSeg = null, bestCx = 0, bestCy = 0;
+    for (let s=0;s<SEGS.length;s++){
+      const sg = SEGS[s];
+      const ax = sg.r1, ay = sg.y1;
+      const dx = sg.r2-sg.r1, dy = sg.y2-sg.y1;
+      const len2 = dx*dx + dy*dy;
+      let t = len2 > 0 ? ((r-ax)*dx + (y-ay)*dy) / len2 : 0;
+      t = t < 0 ? 0 : (t > 1 ? 1 : t);
+      const cx = ax + dx*t, cy = ay + dy*t;
+      const ddx = r-cx, ddy = y-cy;
+      const d2 = ddx*ddx + ddy*ddy;
+      if (d2 < bestD2){ bestD2 = d2; bestSeg = sg; bestCx = cx; bestCy = cy; }
+    }
+    const dist = Math.sqrt(bestD2);
+    if (dist < GR){
+      // inward (2D) normal
+      const sg = bestSeg;
+      let nx = (sg.y2-sg.y1), ny = -(sg.r2-sg.r1);   // perp of (dr, dy)
+      const nlen = Math.hypot(nx, ny) || 1; nx /= nlen; ny /= nlen;
+      const refY = sg.midY < 0 ? -0.75 : 0.75;
+      // choose orientation toward interior reference axis point (0, refY)
+      const dotRef = nx*(0 - bestCx) + ny*(refY - bestCy);
+      if (dotRef < 0){ nx = -nx; ny = -ny; }
+      const pen = GR - dist;
+      // push local position along 3D normal
+      const nLx = nx*erx, nLy = ny, nLz = nx*erz;
+      _v.x += nLx*pen; _v.y += nLy*pen; _v.z += nLz*pen;
+      // back to world
+      rotateByQuat(_l, _q, _v.x, _v.y, _v.z);
+      pos[i3] = _l.x + gx; pos[i3+1] = _l.y + gy; pos[i3+2] = _l.z + gz;
+      // velocity response — normal & friction in world frame
+      rotateByQuat(_n, _q, nLx, nLy, nLz);
+      const vlen = Math.hypot(_n.x,_n.y,_n.z) || 1;
+      _n.x/=vlen; _n.y/=vlen; _n.z/=vlen;
+      const vn = vel[i3]*_n.x + vel[i3+1]*_n.y + vel[i3+2]*_n.z;
+      if (vn < 0){
+        const rest = 1.06;                 // restitution ~0.06
+        vel[i3]   -= _n.x * vn * rest;
+        vel[i3+1] -= _n.y * vn * rest;
+        vel[i3+2] -= _n.z * vn * rest;
+        // tangential friction
+        const tx = vel[i3]   - _n.x*(vel[i3]*_n.x + vel[i3+1]*_n.y + vel[i3+2]*_n.z);
+        const ty = vel[i3+1] - _n.y*(vel[i3]*_n.x + vel[i3+1]*_n.y + vel[i3+2]*_n.z);
+        const tz = vel[i3+2] - _n.z*(vel[i3]*_n.x + vel[i3+1]*_n.y + vel[i3+2]*_n.z);
+        vel[i3]   -= tx*0.38; vel[i3+1] -= ty*0.38; vel[i3+2] -= tz*0.38;
+      }
+    }
+  }
+}
+
+function particleCollide(){
+  gridHead.fill(-1);
+  const inv = 1 / CELL;
+  for (let i=0;i<N;i++){
+    const i3=i*3;
+    let cx = ((pos[i3]   + 1.44) * inv) | 0; cx = cx<0?0:(cx>=GX?GX-1:cx);
+    let cy = ((pos[i3+1] - GY_MIN) * inv) | 0; cy = cy<0?0:(cy>=GYC?GYC-1:cy);
+    let cz = ((pos[i3+2] + 1.44) * inv) | 0; cz = cz<0?0:(cz>=GZ?GZ-1:cz);
+    const idx = cx + cz*GX + cy*GX*GZ;
+    gridNext[i] = gridHead[idx];
+    gridHead[idx] = i;
+  }
+  const R = DIA, R2 = R*R;
+  for (let i=0;i<N;i++){
+    const i3=i*3;
+    const px=pos[i3], py=pos[i3+1], pz=pos[i3+2];
+    let cx = ((px + 1.44) * inv) | 0; cx = cx<0?0:(cx>=GX?GX-1:cx);
+    let cy = ((py - GY_MIN) * inv) | 0; cy = cy<0?0:(cy>=GYC?GYC-1:cy);
+    let cz = ((pz + 1.44) * inv) | 0; cz = cz<0?0:(cz>=GZ?GZ-1:cz);
+    for (let dz=-1;dz<=1;dz++){
+      const nz = cz+dz; if (nz<0||nz>=GZ) continue;
+      for (let dy=-1;dy<=1;dy++){
+        const ny = cy+dy; if (ny<0||ny>=GYC) continue;
+        const rowBase = ny*GX*GZ + nz*GX;
+        for (let dx=-1;dx<=1;dx++){
+          const nx2 = cx+dx; if (nx2<0||nx2>=GX) continue;
+          let j = gridHead[rowBase + nx2];
+          while (j !== -1){
+            if (j > i){
+              const j3 = j*3;
+              const ddx = pos[j3]-px, ddy = pos[j3+1]-py, ddz = pos[j3+2]-pz;
+              const d2 = ddx*ddx + ddy*ddy + ddz*ddz;
+              if (d2 < R2 && d2 > 1e-9){
+                const d = Math.sqrt(d2);
+                const invD = 1/d;
+                const nx = ddx*invD, ny2 = ddy*invD, nz2 = ddz*invD;
+                const overlap = R - d;
+                const corr = overlap * 0.38;
+                pos[i3]   -= nx*corr;  pos[i3+1] -= ny2*corr; pos[i3+2] -= nz2*corr;
+                pos[j3]   += nx*corr;  pos[j3+1] += ny2*corr; pos[j3+2] += nz2*corr;
+                // relative normal velocity — kill approach (restitution 0)
+                const rvx = vel[j3]-vel[i3], rvy = vel[j3+1]-vel[i3+1], rvz = vel[j3+2]-vel[i3+2];
+                const rvn = rvx*nx + rvy*ny2 + rvz*nz2;
+                if (rvn < 0){
+                  const jimp = -rvn * 0.5;
+                  vel[i3]   -= nx*jimp; vel[i3+1] -= ny2*jimp; vel[i3+2] -= nz2*jimp;
+                  vel[j3]   += nx*jimp; vel[j3+1] += ny2*jimp; vel[j3+2] += nz2*jimp;
+                }
+                // tangential friction — bleeds relative sliding, builds a stable repose pile
+                const tx = rvx - nx*rvn, ty = rvy - ny2*rvn, tz = rvz - nz2*rvn;
+                vel[i3]   += tx*0.22; vel[i3+1] += ty*0.22; vel[i3+2] += tz*0.22;
+                vel[j3]   -= tx*0.22; vel[j3+1] -= ty*0.22; vel[j3+2] -= tz*0.22;
+              }
+            }
+            j = gridNext[j];
+          }
+        }
+      }
+    }
+  }
+}
+
+function substep(h){
+  for (let i=0;i<N;i++){
+    const i3=i*3;
+    vel[i3+1] -= G*h;
+    vel[i3]   *= 0.9985; vel[i3+1] *= 0.9985; vel[i3+2] *= 0.9985;
+    pos[i3]   += vel[i3]*h; pos[i3+1] += vel[i3+1]*h; pos[i3+2] += vel[i3+2]*h;
+  }
+  glassCollideAll();
+  particleCollide();
+  // kill micro-jitter so settled piles freeze into their repose angle
+  for (let i=0;i<N;i++){
+    const i3=i*3;
+    const s = vel[i3]*vel[i3] + vel[i3+1]*vel[i3+1] + vel[i3+2]*vel[i3+2];
+    if (s < 4e-4){ vel[i3]*=0.55; vel[i3+1]*=0.55; vel[i3+2]*=0.55; }
+    else if (s > 240){ const k=Math.sqrt(240/s); vel[i3]*=k; vel[i3+1]*=k; vel[i3+2]*=k; }
+  }
+}
+
+function stepSimulation(dt){
+  const h = dt * 0.5;
+  substep(h);
+  substep(h);
+  simTime += dt;
+  if (flipAnim && simTime - flipAnim.start >= flipAnim.dur) flipAnim = null;
+  // showcase auto-flip
+  if (autoFlipAt !== null && autoFlipAt !== undefined && simTime - dt < autoFlipAt && simTime >= autoFlipAt){
+    flip();
+  }
+}
+
+// ---- sand point cloud ----
+const sandGeo = new THREE.BufferGeometry();
+sandGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+sandGeo.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
+sandGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, HG_Y, 0), 4);
+
+const sandUniforms = {
+  uScale: { value: 600 },
+  uDiam:  { value: DIA }
+};
+const sandMat = new THREE.ShaderMaterial({
+  uniforms: sandUniforms,
+  vertexShader: `
+    attribute vec3 aColor;
+    varying vec3 vColor;
+    uniform float uScale;
+    uniform float uDiam;
+    void main(){
+      vColor = aColor;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      float ps = uDiam * uScale / max(0.05, -mv.z);
+      gl_PointSize = clamp(ps, 1.4, 110.0);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vColor;
+    void main(){
+      vec2 pc = gl_PointCoord - 0.5;
+      float d2 = dot(pc, pc) * 4.0;
+      if (d2 > 1.0) discard;
+      float nz = sqrt(max(0.0, 1.0 - d2));
+      vec3 n = normalize(vec3(pc.x * 2.0, -pc.y * 2.0, nz));
+      vec3 L = normalize(vec3(0.55, 0.78, 0.45));
+      vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
+      float diff = clamp(dot(n, L), 0.0, 1.0);
+      float spec = pow(clamp(dot(n, H), 0.0, 1.0), 30.0);
+      vec3 colr = vColor * (0.34 + 0.78 * diff);
+      colr += vec3(1.0, 0.92, 0.72) * spec * 0.55;      // warm sparkle
+      colr *= 0.62 + 0.38 * smoothstep(1.0, 0.55, d2);  // soft edge darkening
+      gl_FragColor = vec4(colr, 1.0);
+    }
+  `
+});
+const sand = new THREE.Points(sandGeo, sandMat);
+sand.frustumCulled = false;
+scene.add(sand);
+
+function paintGrainColors(rand){
+  const c = new THREE.Color();
+  for (let i=0;i<N;i++){
+    const h = 0.098 + rand()*0.028;
+    const s = 0.58 + rand()*0.32;
+    const l = 0.34 + rand()*0.30;
+    c.setHSL(h, s, l);
+    col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
+  }
+  sandGeo.attributes.aColor.needsUpdate = true;
+}
+
+// ---- simulation state / reset ----
+let simTime = 0;
+let totalFlips = 0;
+let flipAnim = null;           // {start, dur}
+let autoFlipAt = null;         // showcase-only scripted flip
+const FLIP_DUR = 1.35;
+const FLIP_AT_SHOWCASE = 5.0;
+
+const _spawn = new THREE.Vector3();
+function spawnSand(seed){
+  const rand = mulberry32(seed);
+  paintGrainColors(rand);
+  let i = 0, guard = 0;
+  while (i < N && guard < N * 60){
+    guard++;
+    const y = 0.085 + rand() * 0.46;
+    const R = profileRadiusAt(y) - GR - 0.004;
+    if (R <= 0.005) continue;
+    const rr = Math.sqrt(rand()) * R;
+    const a = rand() * Math.PI * 2;
+    // world-space spawn inside upper bulb of the (identity-rotated) hourglass
+    _spawn.set(Math.cos(a)*rr, y + HG_Y, Math.sin(a)*rr);
+    // keep clear of the very neck on first frames
+    pos[i*3] = _spawn.x; pos[i*3+1] = _spawn.y; pos[i*3+2] = _spawn.z;
+    vel[i*3] = (rand()-0.5)*0.1; vel[i*3+1] = -0.1; vel[i*3+2] = (rand()-0.5)*0.1;
+    i++;
+  }
+  // settle
+  for (let k=0;k<110;k++) substep(1/120);
+  simTime = 0;
+  sandGeo.attributes.position.needsUpdate = true;
+}
+
+function resetSimulation(seed = 0xBEE5, autoFlip = null){
+  // clear flip state
+  totalFlips = 0;
+  flipAnim = null;
+  autoFlipAt = autoFlip;
+  simTime = 0;
+  tiltTarget.x = 0; tiltTarget.z = 0; tilt.x = 0; tilt.z = 0;
+  hourglass.rotation.set(0, 0, 0);
+  spawnSand(seed);
+  updateBench();
+}
+
+function flip(){
+  if (flipAnim) return;
+  totalFlips++;
+  flipAnim = { start: simTime, dur: FLIP_DUR };
+}
+function currentFlipAngle(){
+  if (!flipAnim) return totalFlips * Math.PI;
+  const p = clamp((simTime - flipAnim.start) / flipAnim.dur, 0, 1);
+  return (totalFlips - 1) * Math.PI + easeInOutCubic(p) * Math.PI;
+}
+
+// ---- bench counters ----
+const bench = { grains: N, grainsTop: N, grainsBottom: 0, flips: 0 };
+window.__bench = bench;
+
+function updateBench(){
+  hourglass.getWorldQuaternion(_q).invert();
+  const gx = hourglass.position.x, gy = hourglass.position.y, gz = hourglass.position.z;
+  let top = 0, bottom = 0;
+  for (let i=0;i<N;i++){
+    const i3=i*3;
+    _l.set(pos[i3]-gx, pos[i3+1]-gy, pos[i3+2]-gz);
+    rotateByQuat(_v, _q, _l.x, _l.y, _l.z);
+    if (_v.y >= 0) top++; else bottom++;
+  }
+  bench.grains = N;
+  bench.grainsTop = top;
+  bench.grainsBottom = bottom;
+  bench.flips = totalFlips;
+}
+
+// ============================================================
+// DUST MOTES in the light shaft (deterministic in time)
+// ============================================================
+const DUST_N = 260;
+const dustBase = new Float32Array(DUST_N * 3);
+const dustSeed = new Float32Array(DUST_N);
+{
+  const rand = mulberry32(0xD057);
+  const A = new THREE.Vector3(-2.35, 2.45, -2.5);   // near window
+  const B = new THREE.Vector3(0.55, 0.35, 0.75);    // desk landing
+  const P = new THREE.Vector3();
+  for (let i=0;i<DUST_N;i++){
+    const s = Math.pow(rand(), 0.8);
+    P.lerpVectors(A, B, s);
+    dustBase[i*3]   = P.x + (rand()-0.5)*1.15;
+    dustBase[i*3+1] = P.y + (rand()-0.5)*0.85;
+    dustBase[i*3+2] = P.z + (rand()-0.5)*1.15;
+    dustSeed[i] = rand();
+  }
+}
+const dustGeo = new THREE.BufferGeometry();
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustBase, 3));
+dustGeo.setAttribute('aSeed', new THREE.BufferAttribute(dustSeed, 1));
+const dustUniforms = { uTime:{ value:0 }, uScale:{ value:600 } };
+const dustMat = new THREE.ShaderMaterial({
+  uniforms: dustUniforms,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  vertexShader: `
+    attribute float aSeed;
+    uniform float uTime, uScale;
+    varying float vA;
+    void main(){
+      vec3 p = position;
+      p.x += sin(uTime*0.32 + aSeed*17.0)*0.16;
+      p.y += sin(uTime*0.21 + aSeed*29.0)*0.13 + sin(uTime*0.9 + aSeed*7.0)*0.02;
+      p.z += cos(uTime*0.26 + aSeed*23.0)*0.15;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      gl_PointSize = (1.6 + aSeed*3.2) * uScale / max(0.1, -mv.z) * 0.012;
+      vA = 0.35 + 0.65 * (0.5 + 0.5*sin(uTime*(0.7 + aSeed*0.9) + aSeed*44.0));
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    varying float vA;
+    void main(){
+      vec2 pc = gl_PointCoord - 0.5;
+      float d = length(pc) * 2.0;
+      if (d > 1.0) discard;
+      float a = smoothstep(1.0, 0.15, d) * vA * 0.6;
+      gl_FragColor = vec4(0.93, 0.9, 0.8, a);
+    }
+  `
+});
+const dust = new THREE.Points(dustGeo, dustMat);
+dust.frustumCulled = false;
+scene.add(dust);
+
+// ============================================================
+// POST — bloom
+// ============================================================
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+composer.setSize(window.innerWidth, window.innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.75, 0.72);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ============================================================
+// INTERACTION — click flip · drag tilt · R reset · orbit
+// ============================================================
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const tilt = { x:0, z:0 };
+const tiltTarget = { x:0, z:0 };
+let draggingGlass = false;
+let dragStart = { x:0, y:0 }, dragLast = { x:0, y:0 }, dragTotal = 0;
+
+function pickGlass(cx, cy){
+  ndc.x = (cx / window.innerWidth) * 2 - 1;
+  ndc.y = -(cy / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  return raycaster.intersectObject(hitProxy, false).length > 0;
+}
+canvas.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  if (pickGlass(e.clientX, e.clientY)){
+    draggingGlass = true;
+    dragStart.x = dragLast.x = e.clientX;
+    dragStart.y = dragLast.y = e.clientY;
+    dragTotal = 0;
+    controls.enabled = false;
+  }
+});
+window.addEventListener('pointermove', e => {
+  if (!draggingGlass) return;
+  const dx = e.clientX - dragLast.x, dy = e.clientY - dragLast.y;
+  dragTotal += Math.abs(dx) + Math.abs(dy);
+  dragLast.x = e.clientX; dragLast.y = e.clientY;
+  tiltTarget.z = clamp(-(e.clientX - dragStart.x) * 0.0032, -0.23, 0.23);
+  tiltTarget.x = clamp( (e.clientY - dragStart.y) * 0.0026, -0.19, 0.19);
+});
+window.addEventListener('pointerup', () => {
+  if (!draggingGlass) return;
+  draggingGlass = false;
+  controls.enabled = true;
+  if (dragTotal < 7) flip();      // it was a click — flip the glass
+  tiltTarget.x = 0; tiltTarget.z = 0;
+});
+window.addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'R'){
+    resetSimulation((Math.random()*0xffffffff)>>>0, null);
+  }
+});
+
+// ============================================================
+// SHOWCASE — scripted 12 s cinematography, deterministic seek()
+// ============================================================
+const SHOWCASE_DURATION = 12;
+const CAM_KEYS = [
+  { t: 0.0,  pos: [ 5.7, 3.35, 6.7 ], tgt: [ 0.0, 1.30,  0.0] },   // wide establishing
+  { t: 2.4,  pos: [ 3.35, 2.3, 4.55], tgt: [ 0.0, 1.45,  0.0] },   // push in
+  { t: 4.3,  pos: [ 1.52, 1.92, 2.4 ], tgt: [ 0.0, 1.42,  0.0] },  // neck close-up
+  { t: 5.0,  pos: [ 1.18, 1.74, 1.98], tgt: [ 0.0, 1.40,  0.0] },  // the flip begins
+  { t: 6.7,  pos: [ 1.32, 0.98, 2.18], tgt: [ 0.0, 1.12,  0.0] },  // low on the growing cone
+  { t: 8.8,  pos: [ 2.8, 1.7, 3.55 ], tgt: [ 0.0, 1.42,  0.0] },   // three-quarter drift
+  { t: 12.0, pos: [ 4.7, 2.65, 5.35], tgt: [ 0.0, 1.45,  0.0] }    // hero settle
+];
+const _camA = new THREE.Vector3(), _camB = new THREE.Vector3();
+function camAt(t){
+  t = clamp(t, 0, SHOWCASE_DURATION);
+  let i = 0;
+  while (i < CAM_KEYS.length-2 && t > CAM_KEYS[i+1].t) i++;
+  const a = CAM_KEYS[i], b = CAM_KEYS[i+1];
+  const u = smoothstep(clamp((t - a.t) / Math.max(1e-6, b.t - a.t), 0, 1));
+  _camA.set(
+    a.pos[0] + (b.pos[0]-a.pos[0])*u,
+    a.pos[1] + (b.pos[1]-a.pos[1])*u,
+    a.pos[2] + (b.pos[2]-a.pos[2])*u
+  );
+  _camB.set(
+    a.tgt[0] + (b.tgt[0]-a.tgt[0])*u,
+    a.tgt[1] + (b.tgt[1]-a.tgt[1])*u,
+    a.tgt[2] + (b.tgt[2]-a.tgt[2])*u
+  );
+  return { pos:_camA, tgt:_camB };
+}
+
+function renderFrame(time){
+  // flame flicker (pure function of time → deterministic in seek)
+  const fl = 1 + 0.17*Math.sin(time*11.3) + 0.11*Math.sin(time*23.7 + 1.7) + 0.07*Math.sin(time*5.1 + 0.6);
+  flame.scale.set(1/fl, fl, 1);
+  candleLight.intensity = 15 * fl;
+  // globe slow rotation
+  globe.rotation.y = time * 0.06;
+  // shader clocks
+  dustUniforms.uTime.value = time;
+  // hourglass pose: flip + drag-tilt spring
+  tilt.x += (tiltTarget.x - tilt.x) * 0.12;
+  tilt.z += (tiltTarget.z - tilt.z) * 0.12;
+  const flipA = currentFlipAngle();
+  let sway = 0;
+  if (flipAnim){
+    const p = clamp((simTime - flipAnim.start)/flipAnim.dur, 0, 1);
+    sway = Math.sin(p * Math.PI) * 0.13;
+  }
+  hourglass.rotation.x = tilt.x;
+  hourglass.rotation.z = flipA + tilt.z;
+  hourglass.rotation.y = sway;
+  sandGeo.attributes.position.needsUpdate = true;
+  composer.render();
+  updateBench();
+}
+
+const SEEK_H = 1/60;
+const seekState = { clean: false };
+function seek(t){
+  t = clamp(t, 0, SHOWCASE_DURATION);
+  if (!seekState.clean || t < simTime - 1e-6){
+    resetSimulation(0xF11D, FLIP_AT_SHOWCASE);
+    seekState.clean = true;
+  }
+  while (simTime < t - 1e-9){
+    stepSimulation(Math.min(SEEK_H, t - simTime));
+  }
+  const cam = camAt(t);
+  camera.position.copy(cam.pos);
+  controls.target.copy(cam.tgt);
+  controls.update();
+  renderFrame(t);
+}
+window.showcase = { duration: SHOWCASE_DURATION, seek };
+
+// ============================================================
+// RECORD BUTTON — capture showcase to .webm
+// ============================================================
+const recordBtn = document.getElementById('recordBtn');
+const recBadge = document.getElementById('recBadge');
+let mode = 'live';         // 'live' | 'record'
+let recT = 0, recorder = null, recChunks = [];
+
+recordBtn.addEventListener('click', () => {
+  if (mode === 'record') return;
+  const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+    .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+  if (!mime){
+    alert('MediaRecorder with WebM is not supported in this browser.');
+    return;
+  }
+  mode = 'record';
+  recT = 0;
+  recChunks = [];
+  recordBtn.disabled = true;
+  recBadge.style.display = 'block';
+  seekState.clean = false;          // force a fresh deterministic run
+  seek(0);
+  const stream = canvas.captureStream(60);
+  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12000000 });
+  recorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(recChunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gilded-hourglass-showcase.webm';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    mode = 'live';
+    recordBtn.disabled = false;
+    recBadge.style.display = 'none';
+  };
+  recorder.start();
+});
+
+// ============================================================
+// RESIZE
+// ============================================================
+function updatePointScale(){
+  const hPx = renderer.domElement.height;   // drawing buffer px
+  const s = hPx / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)));
+  sandUniforms.uScale.value = s;
+  dustUniforms.uScale.value = s;
+}
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  updatePointScale();
+});
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+resetSimulation(0xBEE5, null);
+updatePointScale();
+
+const clock = new THREE.Clock();
+let simAccumulator = 0;
+const FIXED_H = 1/60;
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dtReal = Math.min(clock.getDelta(), 0.05);
+  const tNow = clock.elapsedTime;
+
+  if (mode === 'record'){
+    recT += 1 / 60;
+    if (recT >= SHOWCASE_DURATION){
+      seek(SHOWCASE_DURATION);
+      try { recorder.stop(); } catch(e) { mode='live'; recordBtn.disabled=false; recBadge.style.display='none'; }
+      return;
+    }
+    seek(recT);
+    return;
+  }
+
+  // live mode — fixed-timestep simulation, frame-rate independent
+  simAccumulator += dtReal;
+  let stepped = 0;
+  while (simAccumulator >= FIXED_H && stepped < 5){
+    stepSimulation(FIXED_H);
+    simAccumulator -= FIXED_H;
+    stepped++;
+    seekState.clean = false;    // any live stepping invalidates seek incrementality
+  }
+  controls.update();
+  renderFrame(tNow);
+}
+animate();
+</script>
+</body>
+</html>
+

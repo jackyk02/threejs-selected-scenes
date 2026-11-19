@@ -1,0 +1,1644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Die Schwarzwalduhr — Black Forest Cuckoo Clock</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#171310;
+    font-family:Georgia,'Times New Roman',serif;color:#e8d9b8;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;touch-action:none;}
+  .vignette{position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 42%, transparent 55%, rgba(10,6,3,.55) 100%);}
+  #title{position:fixed;top:18px;left:22px;pointer-events:none;text-shadow:0 2px 12px #000;}
+  #title h1{margin:0;font-size:21px;letter-spacing:.14em;font-weight:600;color:#f0dcb2;}
+  #title p{margin:2px 0 0;font-size:11px;letter-spacing:.22em;color:#b9a071;text-transform:uppercase;}
+  #hud{position:fixed;left:22px;bottom:16px;pointer-events:none;font-size:12px;
+    color:#d8c49a;text-shadow:0 1px 6px #000;letter-spacing:.06em;}
+  #hud b{color:#ffd98a;font-weight:600;}
+  #hint{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);pointer-events:none;
+    font-size:11.5px;letter-spacing:.08em;color:#cbb684;opacity:.9;text-shadow:0 1px 6px #000;
+    background:rgba(30,20,12,.45);padding:6px 14px;border:1px solid rgba(220,190,130,.25);
+    border-radius:20px;backdrop-filter:blur(4px);white-space:nowrap;}
+  #panel{position:fixed;top:16px;right:18px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;}
+  .btn{cursor:pointer;font-family:Georgia,serif;font-size:12px;letter-spacing:.12em;
+    color:#f3e2b0;background:linear-gradient(180deg,rgba(74,52,30,.92),rgba(46,32,18,.92));
+    border:1px solid rgba(255,214,140,.4);border-radius:8px;padding:9px 16px;
+    box-shadow:0 4px 18px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,235,180,.25);
+    transition:transform .15s, box-shadow .15s, color .15s;}
+  .btn:hover{transform:translateY(-1px);color:#ffe9a8;box-shadow:0 6px 22px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,235,180,.35);}
+  .btn.active{background:linear-gradient(180deg,rgba(140,96,34,.95),rgba(90,60,20,.95));color:#ffe9a8;}
+  #recNote{position:fixed;top:64px;right:18px;font-size:11px;color:#ffd98a;letter-spacing:.1em;
+    background:rgba(60,20,10,.6);border:1px solid rgba(255,160,90,.4);padding:6px 10px;border-radius:6px;display:none;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="vignette"></div>
+<div id="title"><h1>DIE SCHWARZWALDUHR</h1><p>Black Forest Cuckoo Clock · c. 1890</p></div>
+<div id="hud">time <b id="hudTime">--:--</b> &nbsp;·&nbsp; cuckoos <b id="hudCuck">0</b> &nbsp;·&nbsp; <b id="hudMode">1×</b></div>
+<div id="hint">Drag to orbit &nbsp;·&nbsp; drag the <b>minute hand</b> to set time &nbsp;·&nbsp; <b>F</b> = 60× &nbsp;·&nbsp; click the cuckoo door &nbsp;·&nbsp; drag a <b>chain</b> down to rewind</div>
+<div id="panel">
+  <button class="btn" id="btnRec">⏺ &nbsp;Record video</button>
+  <button class="btn" id="btnSpeed">⏩ &nbsp;60× (F)</button>
+</div>
+<div id="recNote">Recording showcase… 12 s</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/GammaCorrectionShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+'use strict';
+/* ============================================================
+   DIE SCHWARZWALDUHR — procedural cuckoo clock scene
+   ============================================================ */
+
+// ---------- canvas texture helpers ----------
+function canvasTex(w, h, draw, repeat){
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8; t.encoding = THREE.sRGBEncoding;
+  if (repeat) t.repeat.set(repeat[0], repeat[1]);
+  return t;
+}
+function grain(x, w, h, base, streaks, vertical){
+  x.fillStyle = base; x.fillRect(0,0,w,h);
+  for (let i=0;i<streaks;i++){
+    const a = 0.05 + Math.random()*0.16;
+    x.strokeStyle = Math.random()<0.5 ? 'rgba(30,16,6,'+a+')' : 'rgba(255,220,160,'+(a*0.7)+')';
+    x.lineWidth = 1 + Math.random()*3.4;
+    x.beginPath();
+    if (vertical){
+      let px = Math.random()*w; x.moveTo(px, -10);
+      for (let y=0; y<=h; y+=32) x.lineTo(px + Math.sin(y*0.02+i)*6 + (Math.random()-0.5)*4, y);
+    } else {
+      let py = Math.random()*h; x.moveTo(-10, py);
+      for (let xx=0; xx<=w; xx+=32) x.lineTo(xx, py + Math.sin(xx*0.02+i)*6 + (Math.random()-0.5)*4);
+    }
+    x.stroke();
+  }
+}
+const woodDark = canvasTex(512,512,(x,w,h)=>grain(x,w,h,'#4a2e1c',150,false));
+const woodMid  = canvasTex(512,512,(x,w,h)=>grain(x,w,h,'#5f3f26',150,false));
+const woodLight= canvasTex(512,512,(x,w,h)=>grain(x,w,h,'#7a5533',130,false));
+const plankWall = canvasTex(512,512,(x,w,h)=>{
+  x.fillStyle='#57412e'; x.fillRect(0,0,w,h);
+  const bw=64;
+  for(let bx=0;bx<w;bx+=bw){
+    const s=0.82+Math.random()*0.36;
+    x.fillStyle='rgb('+Math.floor(88*s)+','+Math.floor(64*s)+','+Math.floor(44*s)+')';
+    x.fillRect(bx,0,bw,h);
+    grain(x,bw,h,'rgba(0,0,0,0)',0,true);
+    x.fillStyle='rgba(20,10,4,.75)'; x.fillRect(bx,0,3,h); x.fillRect(bx+bw-3,0,3,h);
+    x.fillStyle='rgba(255,225,170,.08)'; x.fillRect(bx+3,0,2,h);
+  }
+},[2.4,1]);
+const wainscotTex = canvasTex(512,512,(x,w,h)=>{
+  x.fillStyle='#3c2a1c'; x.fillRect(0,0,w,h);
+  for(let by=0;by<h;by+=86){
+    const s=0.8+Math.random()*0.4;
+    x.fillStyle='rgb('+Math.floor(66*s)+','+Math.floor(46*s)+','+Math.floor(30*s)+')';
+    x.fillRect(0,by,w,86);
+    x.fillStyle='rgba(15,8,3,.8)'; x.fillRect(0,by,w,4);
+    x.fillStyle='rgba(255,225,170,.07)'; x.fillRect(0,by+4,w,2);
+  }
+},[2.4,1]);
+const floorTex = canvasTex(512,512,(x,w,h)=>{
+  x.fillStyle='#5f4128'; x.fillRect(0,0,w,h);
+  let row=0;
+  for(let ry=0; ry<h; ry+=86, row++){
+    const s=0.85+Math.random()*0.35;
+    x.fillStyle='rgb('+Math.floor(98*s)+','+Math.floor(66*s)+','+Math.floor(40*s)+')';
+    x.fillRect(0,ry,w,86);
+    x.fillStyle='rgba(18,9,3,.85)'; x.fillRect(0,ry,w,4);
+    const joint=(row*197)%w; x.fillRect(joint,ry,4,86); x.fillRect((joint+256)%w,ry,4,86);
+    for(let i=0;i<26;i++){
+      x.strokeStyle='rgba(30,16,6,'+(0.1+Math.random()*0.15)+')'; x.lineWidth=1+Math.random()*2;
+      const py=ry+6+Math.random()*74; x.beginPath(); x.moveTo(0,py);
+      for(let xx=0;xx<=w;xx+=40) x.lineTo(xx, py+Math.sin(xx*0.03+i)*3); x.stroke();
+    }
+  }
+},[3.2,2.6]);
+const shingleTex = canvasTex(512,512,(x,w,h)=>{
+  x.fillStyle='#33241a'; x.fillRect(0,0,w,h);
+  const rh=62, sw=86;
+  let row=0;
+  for(let ry=-10; ry<h; ry+=rh, row++){
+    const off=(row%2)*sw*0.5;
+    for(let sx=-sw; sx<w+sw; sx+=sw){
+      const s=0.75+Math.random()*0.5;
+      x.fillStyle='rgb('+Math.floor(74*s)+','+Math.floor(50*s)+','+Math.floor(32*s)+')';
+      x.beginPath();
+      x.moveTo(sx+off, ry); x.lineTo(sx+off+sw-6, ry);
+      x.lineTo(sx+off+sw-6, ry+rh-8);
+      x.arc(sx+off+(sw-6)/2, ry+rh-8, (sw-6)/2, 0, Math.PI);
+      x.closePath(); x.fill();
+      x.fillStyle='rgba(255,225,170,.09)'; x.fillRect(sx+off, ry, sw-6, 3);
+    }
+  }
+},[3,1.6]);
+const dialTex = canvasTex(1024,1024,(x,w,h)=>{
+  const cx=512, cy=512;
+  const g=x.createRadialGradient(cx,cy,60,cx,cy,512);
+  g.addColorStop(0,'#f9efdb'); g.addColorStop(0.65,'#eedfb8'); g.addColorStop(1,'#c4a96f');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  x.strokeStyle='#2c1a0e'; x.lineWidth=26;
+  x.beginPath(); x.arc(cx,cy,470,0,Math.PI*2); x.stroke();
+  x.strokeStyle='#8a6a35'; x.lineWidth=5;
+  x.beginPath(); x.arc(cx,cy,428,0,Math.PI*2); x.stroke();
+  x.beginPath(); x.arc(cx,cy,286,0,Math.PI*2); x.stroke();
+  // minute ticks
+  for(let m=0;m<60;m++){
+    const a=m*Math.PI/30, maj=m%5===0;
+    x.strokeStyle='#23150a'; x.lineWidth=maj?11:4;
+    x.beginPath();
+    x.moveTo(cx+Math.sin(a)*428, cy-Math.cos(a)*428);
+    x.lineTo(cx+Math.sin(a)*(maj?368:398), cy-Math.cos(a)*(maj?368:398));
+    x.stroke();
+  }
+  // roman numerals (clockmaker's IIII)
+  const numerals=['XII','I','II','III','IIII','V','VI','VII','VIII','IX','X','XI'];
+  x.fillStyle='#24150a'; x.font='700 76px Georgia,"Times New Roman",serif';
+  x.textAlign='center'; x.textBaseline='middle';
+  for(let i=0;i<12;i++){
+    const a=i*Math.PI/6;
+    x.fillText(numerals[i], cx+Math.sin(a)*330, cy-Math.cos(a)*330);
+  }
+  x.font='600 34px Georgia,serif'; x.fillStyle='#4a2f18';
+  x.fillText('S C H W A R Z W A L D', cx, cy-118);
+  x.font='600 28px Georgia,serif';
+  x.fillText('K U C K U C K S U H R', cx, cy+128);
+  x.fillStyle='#6b4a26';
+  x.beginPath(); x.arc(cx,cy-84,4,0,Math.PI*2); x.fill();
+  x.beginPath(); x.arc(cx,cy+88,4,0,Math.PI*2); x.fill();
+});
+const rugTex = canvasTex(512,512,(x,w,h)=>{
+  x.fillStyle='#5e1c1f'; x.fillRect(0,0,w,h);
+  const cx=256,cy=256;
+  x.strokeStyle='#caa14e'; x.lineWidth=16; x.beginPath(); x.arc(cx,cy,238,0,Math.PI*2); x.stroke();
+  x.lineWidth=5;  x.beginPath(); x.arc(cx,cy,208,0,Math.PI*2); x.stroke();
+  x.lineWidth=9;  x.beginPath(); x.arc(cx,cy,112,0,Math.PI*2); x.stroke();
+  // diamond band
+  x.save(); x.translate(cx,cy);
+  for(let i=0;i<24;i++){
+    x.rotate(Math.PI/12);
+    x.strokeStyle='#caa14e'; x.lineWidth=6;
+    x.save(); x.translate(0,-160); x.rotate(Math.PI/4); x.strokeRect(-13,-13,26,26); x.restore();
+  }
+  x.restore();
+  x.strokeStyle='#caa14e'; x.lineWidth=7;
+  x.save(); x.translate(cx,cy); x.rotate(Math.PI/4);
+  x.strokeRect(-46,-46,92,92); x.rotate(-Math.PI/4); x.strokeRect(-46,-46,92,92); x.restore();
+  x.fillStyle='#caa14e'; x.beginPath(); x.arc(cx,cy,16,0,Math.PI*2); x.fill();
+});
+const skyTex = canvasTex(512,640,(x,w,h)=>{
+  const g=x.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#b9dbf2'); g.addColorStop(0.45,'#e6dfc0'); g.addColorStop(0.8,'#f4cf96'); g.addColorStop(1,'#e8b878');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  const sg=x.createRadialGradient(360,390,10,360,390,150);
+  sg.addColorStop(0,'rgba(255,250,225,1)'); sg.addColorStop(0.25,'rgba(255,240,190,.9)'); sg.addColorStop(1,'rgba(255,240,190,0)');
+  x.fillStyle=sg; x.fillRect(0,0,w,h);
+  x.fillStyle='#87977a'; x.beginPath(); x.moveTo(0,430); x.lineTo(130,300); x.lineTo(260,430); x.closePath(); x.fill();
+  x.fillStyle='#6d7f63'; x.beginPath(); x.moveTo(140,440); x.lineTo(300,260); x.lineTo(470,440); x.closePath(); x.fill();
+  x.fillStyle='#57684f'; x.beginPath(); x.moveTo(330,445); x.lineTo(430,340); x.lineTo(512,445); x.closePath(); x.fill();
+  x.strokeStyle='#3a3a34'; x.lineWidth=3;
+  const bird=(bx,by,s)=>{ x.beginPath(); x.moveTo(bx-s,by); x.quadraticCurveTo(bx-s*0.4,by-s*0.7,bx,by); x.quadraticCurveTo(bx+s*0.4,by-s*0.7,bx+s,by); x.stroke(); };
+  bird(150,180,18); bird(210,140,13); bird(255,205,11);
+});
+const artTex1 = canvasTex(256,320,(x,w,h)=>{
+  const g=x.createLinearGradient(0,0,0,h); g.addColorStop(0,'#c9d8dd'); g.addColorStop(1,'#e8d9b0');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  x.fillStyle='#5d6e5a'; x.beginPath(); x.moveTo(0,150); x.lineTo(90,60); x.lineTo(180,150); x.closePath(); x.fill();
+  x.fillStyle='#47573f'; x.beginPath(); x.moveTo(90,160); x.lineTo(170,80); x.lineTo(256,160); x.closePath(); x.fill();
+  x.fillStyle='#31404b'; x.fillRect(0,160,w,60);
+  x.fillStyle='rgba(233,222,180,.35)'; for(let i=0;i<7;i++) x.fillRect(20+i*34, 172+i*4, 22, 3);
+  x.fillStyle='#20302a'; x.fillRect(0,220,w,100);
+});
+const artTex2 = canvasTex(256,320,(x,w,h)=>{
+  x.fillStyle='#e8c87a'; x.fillRect(0,0,w,h);
+  x.fillStyle='#b8433a'; x.beginPath(); x.arc(128,150,62,0,Math.PI*2); x.fill();
+  x.fillStyle='#7a3b2a'; x.fillRect(0,200,w,120);
+  x.fillStyle='#8f4a33'; for(let i=0;i<5;i++) x.fillRect(0,214+i*22,w,4);
+});
+const brassPlateTex = canvasTex(256,64,(x,w,h)=>{
+  const g=x.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#e8c96a'); g.addColorStop(0.5,'#a8813c'); g.addColorStop(1,'#d8b45c');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+  x.strokeStyle='#5a4418'; x.lineWidth=6; x.strokeRect(4,4,w-8,h-8);
+  x.fillStyle='#3a2c10'; x.font='700 30px Georgia,serif'; x.textAlign='center'; x.textBaseline='middle';
+  x.fillText('S C H W A R Z W A L D', w/2, h/2+1);
+});
+
+// ---------- renderer / scene / camera ----------
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+renderer.outputEncoding = THREE.sRGBEncoding;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14100c);
+
+const camera = new THREE.PerspectiveCamera(46, window.innerWidth/window.innerHeight, 0.05, 60);
+camera.position.set(2.35, 1.95, 3.35);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.66, -0.42);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 1.0;
+controls.maxDistance = 5.4;
+controls.maxPolarAngle = 1.66;
+controls.minPolarAngle = 0.35;
+controls.update();
+
+// bloom composer (falls back gracefully conceptually — CDN guaranteed)
+let composer = null;
+try {
+  composer = new THREE.EffectComposer(renderer);
+  composer.addPass(new THREE.RenderPass(scene, camera));
+  const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.42, 0.62, 0.74);
+  composer.addPass(bloom);
+  composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader));
+} catch (e) { composer = null; }
+function renderFrame(){ if (composer) composer.render(); else renderer.render(scene, camera); }
+
+// ---------- lights ----------
+const hemi = new THREE.HemisphereLight(0xcfd8e2, 0x40301f, 0.55);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff0d8, 1.55);
+sun.position.set(-2.55, 2.35, 1.05);
+sun.target.position.set(0.7, 0.8, -0.35);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.left = -3.4; sun.shadow.camera.right = 3.4;
+sun.shadow.camera.top = 3.4;  sun.shadow.camera.bottom = -2.0;
+sun.shadow.camera.near = 0.4; sun.shadow.camera.far = 9;
+sun.shadow.bias = -0.0004;
+scene.add(sun); scene.add(sun.target);
+
+const coolFill = new THREE.DirectionalLight(0x9fb4d8, 0.32);
+coolFill.position.set(2.6, 2.2, 3.0);
+scene.add(coolFill);
+
+const lampLight = new THREE.PointLight(0xffb168, 1.35, 6.5, 2);
+lampLight.position.set(1.62, 1.06, 0.42);
+lampLight.castShadow = true;
+lampLight.shadow.mapSize.set(1024,1024);
+lampLight.shadow.bias = -0.004;
+scene.add(lampLight);
+
+// ============================================================
+// ROOM
+// ============================================================
+const room = new THREE.Group(); scene.add(room);
+const std = (map, rough, metal, extra) => new THREE.MeshStandardMaterial(Object.assign({ map:map||null, roughness:rough!==undefined?rough:0.85, metalness:metal||0 }, extra||{}));
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 5.8), std(floorTex, 0.75));
+floor.rotation.x = -Math.PI/2; floor.position.set(0, 0, 1.95); floor.receiveShadow = true; room.add(floor);
+
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 2.95), std(plankWall, 0.9));
+backWall.position.set(0, 1.475, -0.62); backWall.receiveShadow = true; room.add(backWall);
+const backWainscot = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 0.92), std(wainscotTex, 0.9));
+backWainscot.position.set(0, 0.46, -0.615); room.add(backWainscot);
+
+const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 2.95), std(plankWall, 0.92));
+leftWall.rotation.y = Math.PI/2; leftWall.position.set(-3.7, 1.475, 1.95); leftWall.receiveShadow = true; room.add(leftWall);
+const leftWains = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 0.92), std(wainscotTex, 0.92));
+leftWains.rotation.y = Math.PI/2; leftWains.position.set(-3.695, 0.46, 1.95); room.add(leftWains);
+
+const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 2.95), std(plankWall, 0.95));
+rightWall.rotation.y = -Math.PI/2; rightWall.position.set(3.7, 1.475, 1.95); rightWall.receiveShadow = true; room.add(rightWall);
+const rightWains = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 0.92), std(wainscotTex, 0.95));
+rightWains.rotation.y = -Math.PI/2; rightWains.position.set(3.695, 0.46, 1.95); room.add(rightWains);
+
+const ceil = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 5.8), std(woodDark, 0.95));
+ceil.rotation.x = Math.PI/2; ceil.position.set(0, 2.95, 1.95); room.add(ceil);
+
+// ceiling beams
+[[-0.2],[1.3],[2.75]].forEach(z=>{
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(7.4, 0.16, 0.22), std(woodDark, 0.9));
+  beam.position.set(0, 2.87, z[0]); beam.castShadow = true; room.add(beam);
+});
+// baseboards + chair rail + crown
+function rail(w,h,d,x,y,z,mat){ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); room.add(m); return m; }
+const railMat = std(woodDark, 0.8);
+rail(7.4,0.14,0.03, 0,0.07,-0.615, railMat);
+rail(7.4,0.05,0.04, 0,0.945,-0.61, railMat);
+rail(7.4,0.09,0.03, 0,2.90,-0.61, railMat);
+
+// window on left wall
+const winGroup = new THREE.Group();
+winGroup.position.set(-3.68, 1.78, 0.55); winGroup.rotation.y = Math.PI/2; room.add(winGroup);
+const sky = new THREE.Mesh(new THREE.PlaneGeometry(1.28, 1.5),
+  new THREE.MeshBasicMaterial({ map: skyTex }));
+sky.position.z = 0.015; winGroup.add(sky);
+const frameMat = std(woodDark, 0.7);
+const fT=0.09, fD=0.07;
+[[0, 0.79],[0, -0.79]].forEach(p=>{
+  const f=new THREE.Mesh(new THREE.BoxGeometry(1.48,fT,fD), frameMat); f.position.set(p[0],p[1],0.05); f.castShadow=true; winGroup.add(f);
+});
+[[-0.70],[0.70]].forEach(p=>{
+  const f=new THREE.Mesh(new THREE.BoxGeometry(fT,1.66,fD), frameMat); f.position.set(p[0],0,0.05); f.castShadow=true; winGroup.add(f);
+});
+const muntinV = new THREE.Mesh(new THREE.BoxGeometry(0.045,1.5,0.045), frameMat); muntinV.position.set(0,0,0.06); winGroup.add(muntinV);
+const muntinH = new THREE.Mesh(new THREE.BoxGeometry(1.28,0.045,0.045), frameMat); muntinH.position.set(0,0,0.06); winGroup.add(muntinH);
+const sill = new THREE.Mesh(new THREE.BoxGeometry(1.62,0.06,0.16), frameMat); sill.position.set(0,-0.87,0.09); sill.castShadow=true; winGroup.add(sill);
+
+// light shaft (additive planes) + dust motes
+const shaftMat = new THREE.MeshBasicMaterial({ color:0xffe8b8, transparent:true, opacity:0.055,
+  blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide });
+const shaft = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 3.1), shaftMat);
+shaft.position.set(-2.35, 1.55, 0.75); shaft.rotation.set(0.15, 0.9, 0.42); room.add(shaft);
+const shaft2 = shaft.clone(); shaft2.rotation.set(0.15, 0.9+Math.PI/2, 0.42); shaft2.position.set(-2.3,1.5,0.7); room.add(shaft2);
+
+const MOTES = 90;
+const motePos = new Float32Array(MOTES*3), moteBase = [];
+for (let i=0;i<MOTES;i++){
+  const p = [ -3.1+Math.random()*2.3, 0.5+Math.random()*1.9, -0.4+Math.random()*1.9 ];
+  moteBase.push(p); motePos.set(p, i*3);
+}
+const moteGeo = new THREE.BufferGeometry();
+moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+const moteMat = new THREE.PointsMaterial({ color:0xffe6b0, size:0.016, transparent:true, opacity:0.55,
+  blending:THREE.AdditiveBlending, depthWrite:false });
+const motes = new THREE.Points(moteGeo, moteMat); room.add(motes);
+
+// rug
+const rug = new THREE.Mesh(new THREE.CircleGeometry(1.32, 48), std(rugTex, 0.95));
+rug.rotation.x = -Math.PI/2; rug.position.set(0.15, 0.012, 1.15); rug.receiveShadow = true; room.add(rug);
+
+// picture frames (procedural art)
+function framedArt(tex, x, y, w, h){
+  const g = new THREE.Group();
+  const art = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map:tex, roughness:0.85 }));
+  art.position.z = 0.021; g.add(art);
+  const fm = std(woodDark, 0.6);
+  const t=0.055;
+  [[0,h/2+t/2,w+2*t,t],[0,-h/2-t/2,w+2*t,t],[-w/2-t/2,0,t,h],[w/2+t/2,0,t,h]].forEach(r=>{
+    const b=new THREE.Mesh(new THREE.BoxGeometry(r[2],r[3],0.045), fm); b.position.set(r[0],r[1],0.012); b.castShadow=true; g.add(b);
+  });
+  g.position.set(x, y, -0.605); room.add(g);
+}
+framedArt(artTex1, -1.75, 1.95, 0.42, 0.55);
+framedArt(artTex2,  1.78, 2.02, 0.36, 0.46);
+
+// side table + books + teapot
+const table = new THREE.Group(); table.position.set(1.62, 0, 0.42); room.add(table);
+const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.035, 28), std(woodMid, 0.6));
+tableTop.position.y = 0.735; tableTop.castShadow = true; tableTop.receiveShadow = true; table.add(tableTop);
+const tableShelf = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.02, 28), std(woodDark, 0.7));
+tableShelf.position.y = 0.28; table.add(tableShelf);
+for (let i=0;i<4;i++){
+  const a = i*Math.PI/2 + Math.PI/4;
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.016, 0.74, 10), std(woodDark, 0.7));
+  leg.position.set(Math.cos(a)*0.24, 0.37, Math.sin(a)*0.24); leg.castShadow = true; table.add(leg);
+}
+const bookCols = [0x5a2f2a, 0x2f4034, 0x33405a];
+bookCols.forEach((c,i)=>{
+  const b = new THREE.Mesh(new THREE.BoxGeometry(0.20-i*0.03, 0.035, 0.15-i*0.02),
+    new THREE.MeshStandardMaterial({ color:c, roughness:0.85 }));
+  b.position.set(-0.06+i*0.01, 0.772+i*0.036, 0.02); b.rotation.y = 0.2-i*0.24; b.castShadow = true; table.add(b);
+});
+// teapot (lathe)
+const teapotPts = [];
+[[0.001,0],[0.045,0.005],[0.062,0.03],[0.055,0.06],[0.028,0.075],[0.02,0.082]].forEach(p=>teapotPts.push(new THREE.Vector2(p[0],p[1])));
+const teapot = new THREE.Group(); teapot.position.set(0.13, 0.752, 0.10); table.add(teapot);
+const pot = new THREE.Mesh(new THREE.LatheGeometry(teapotPts, 22),
+  new THREE.MeshStandardMaterial({ color:0xb8bcc4, metalness:0.95, roughness:0.22 }));
+pot.castShadow = true; teapot.add(pot);
+const spout = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.055, 10),
+  new THREE.MeshStandardMaterial({ color:0xb8bcc4, metalness:0.95, roughness:0.22 }));
+spout.rotation.z = -1.0; spout.position.set(0.062, 0.045, 0); teapot.add(spout);
+const handle = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.007, 8, 18, Math.PI),
+  new THREE.MeshStandardMaterial({ color:0x8a8e96, metalness:0.9, roughness:0.3 }));
+handle.rotation.z = Math.PI/2; handle.position.set(-0.055, 0.045, 0); teapot.add(handle);
+
+// lamp on table
+const lamp = new THREE.Group(); lamp.position.set(0, 0.752, -0.12); table.add(lamp);
+const lampBasePts = [ [0.001,0],[0.075,0.008],[0.05,0.025],[0.028,0.03],[0.022,0.16],[0.03,0.17],[0.012,0.175] ]
+  .map(p=>new THREE.Vector2(p[0],p[1]));
+const lampBase = new THREE.Mesh(new THREE.LatheGeometry(lampBasePts, 22),
+  new THREE.MeshStandardMaterial({ color:0x6e5a34, metalness:0.75, roughness:0.3 }));
+lampBase.castShadow = true; lamp.add(lampBase);
+const shade = new THREE.Mesh(new THREE.ConeGeometry(0.155, 0.165, 26, 1, true),
+  new THREE.MeshStandardMaterial({ color:0xe8bd85, emissive:0xffc073, emissiveIntensity:1.9,
+    side:THREE.DoubleSide, roughness:0.9 }));
+shade.position.y = 0.245; lamp.add(shade);
+const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 10),
+  new THREE.MeshBasicMaterial({ color:0xffe6b0 }));
+bulb.position.y = 0.215; lamp.add(bulb);
+
+// armchair
+const chair = new THREE.Group(); chair.position.set(2.45, 0, 1.55); chair.rotation.y = -0.72; room.add(chair);
+const fabric = new THREE.MeshStandardMaterial({ color:0x37493a, roughness:0.98 });
+const woodLeg = std(woodDark, 0.6);
+const seat = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.22, 0.72), fabric); seat.position.y = 0.46; seat.castShadow = true; chair.add(seat);
+const cushion = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.09, 0.62), new THREE.MeshStandardMaterial({ color:0x4b5e4e, roughness:1 }));
+cushion.position.y = 0.60; cushion.castShadow = true; chair.add(cushion);
+const back = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.72, 0.17), fabric);
+back.position.set(0, 0.92, -0.30); back.rotation.x = -0.14; back.castShadow = true; chair.add(back);
+[[-0.36],[0.36]].forEach(p=>{
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.10, 0.66), fabric);
+  arm.position.set(p[0], 0.66, 0.02); arm.castShadow = true; chair.add(arm);
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.22, 0.14), fabric);
+  post.position.set(p[0], 0.52, 0.26); chair.add(post);
+});
+[[-0.3,-0.28],[0.3,-0.28],[-0.3,0.3],[0.3,0.3]].forEach(p=>{
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.02,0.38,10), woodLeg);
+  leg.position.set(p[0], 0.19, p[1]); leg.castShadow = true; chair.add(leg);
+});
+
+// wall mount shadow behind clock
+const mount = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.7, 0.04), new THREE.MeshStandardMaterial({ color:0x241810, roughness:1 }));
+mount.position.set(0, 1.6, -0.60); room.add(mount);
+
+// ============================================================
+// CUCKOO CLOCK
+// ============================================================
+const CW = 0.56, CH = 0.64, CD = 0.30, HH = CH/2;
+const clock = new THREE.Group();
+clock.position.set(0, 1.86, -0.435);
+scene.add(clock);
+const clockZ = -0.435;
+
+const walnut = std(woodMid, 0.62);
+const walnutDark = std(woodDark, 0.68);
+const walnutLight = std(woodLight, 0.6);
+const brass = new THREE.MeshStandardMaterial({ color:0xcfa848, metalness:0.9, roughness:0.32 });
+const brassDark = new THREE.MeshStandardMaterial({ color:0x8a6c28, metalness:0.85, roughness:0.42 });
+const steel = new THREE.MeshStandardMaterial({ color:0xb9bdc6, metalness:0.95, roughness:0.28 });
+const darkIron = new THREE.MeshStandardMaterial({ color:0x3a3a40, metalness:0.8, roughness:0.5 });
+
+function box(w,h,d,mat,x,y,z,parent,shadow){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x||0,y||0,z||0);
+  if (shadow!==false){ m.castShadow = true; m.receiveShadow = true; }
+  (parent||clock).add(m); return m;
+}
+
+// dark interior back
+box(CW-0.03, CH-0.03, 0.02, new THREE.MeshStandardMaterial({ color:0x191008, roughness:1 }), 0, 0, -CD/2+0.035);
+// left solid side with panel molding
+box(0.022, CH, CD, walnut, -CW/2+0.011, 0, 0);
+box(0.012, 0.40, 0.20, walnutDark, -CW/2-0.004, 0, 0);
+box(0.02, CH, CD, walnut, CW/2-0.011, 0, 0); // right frame base (rails added over opening)
+// right cut-away rails (the gear window): opening y -0.23..0.25, z -0.115..0.115
+box(0.024, 0.10, CD, walnut, CW/2-0.012, -0.275, 0);
+box(0.024, 0.075, CD, walnut, CW/2-0.012, 0.2825, 0);
+box(0.024, 0.47, 0.045, walnut, CW/2-0.012, 0.012, 0.128);
+box(0.024, 0.47, 0.045, walnut, CW/2-0.012, 0.012, -0.128);
+// top & bottom boards
+box(CW, 0.035, CD, walnutDark, 0, HH-0.0175, 0);
+box(CW, 0.035, CD, walnutDark, 0, -HH+0.0175, 0);
+
+// front pieces around door & dial
+const frontZ = CD/2 - 0.015;
+box(0.185, 0.15, 0.03, walnut, -0.1875, 0.245, frontZ);
+box(0.185, 0.15, 0.03, walnut,  0.1875, 0.245, frontZ);
+box(CW, 0.055, 0.03, walnutDark, 0, 0.2925, frontZ);     // above door
+box(CW, 0.028, 0.03, walnut, 0, 0.149, frontZ);          // band above dial
+box(CW, 0.105, 0.03, walnut, 0, -0.2675, frontZ);        // panel below dial
+// egg-and-dart molding row between dial and lower panel
+const eggMat = std(woodLight, 0.55);
+for (let i=0;i<13;i++){
+  const egg = new THREE.Mesh(new THREE.SphereGeometry(0.0135, 10, 8), eggMat);
+  egg.scale.y = 0.75; egg.position.set(-0.27+i*0.045, -0.209, CD/2+0.004);
+  egg.castShadow = true; clock.add(egg);
+}
+// corner turned columns (lathe)
+function turnedColumn(h, r){
+  const pts=[]; const prof=[[0.9,0],[1.15,0.06],[0.8,0.14],[1.05,0.24],[0.78,0.36],[1.25,0.47],[0.95,0.53],[1.15,0.62],[0.8,0.75],[1.1,0.86],[0.9,0.94],[1.0,1]];
+  prof.forEach(p=>pts.push(new THREE.Vector2(r*p[0], h*p[1]-h/2)));
+  const m = new THREE.Mesh(new THREE.LatheGeometry(pts, 18), walnutLight);
+  m.castShadow = true; return m;
+}
+[[-1,1],[1,1],[-1,-1],[1,-1]].forEach(s=>{
+  const col = turnedColumn(CH, 0.032);
+  col.position.set(s[0]*(CW/2-0.015), 0, s[1]*(CD/2-0.015));
+  clock.add(col);
+});
+
+// brass maker's plate
+const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.0425),
+  new THREE.MeshStandardMaterial({ map:brassPlateTex, metalness:0.65, roughness:0.35 }));
+plate.position.set(0, -0.277, CD/2+0.016+0.0006); clock.add(plate);
+
+// ---------- gable + roof ----------
+const gableShape = new THREE.Shape();
+gableShape.moveTo(-0.35, 0); gableShape.lineTo(0.35, 0); gableShape.lineTo(0, 0.365); gableShape.closePath();
+const gableGeo = new THREE.ExtrudeGeometry(gableShape, { depth: CD-0.02, bevelEnabled:false });
+gableGeo.translate(0, 0, -(CD-0.02)/2);
+const gable = new THREE.Mesh(gableGeo, walnut);
+gable.position.y = 0.312; gable.castShadow = true; clock.add(gable);
+// gable front face (slightly proud, plank)
+const gableFace = new THREE.Mesh(new THREE.ShapeGeometry(gableShape), new THREE.MeshStandardMaterial({ map:woodMid, roughness:0.85 }));
+gableFace.position.set(0, 0.312, CD/2+0.001); clock.add(gableFace);
+
+const slopeAng = Math.atan2(0.365, 0.35);
+const slabLen = Math.hypot(0.46, 0.473) + 0.06;
+const slabGeo = new THREE.BoxGeometry(slabLen, 0.035, CD+0.22);
+[[-1],[1]].forEach(s=>{
+  const slab = new THREE.Mesh(slabGeo, new THREE.MeshStandardMaterial({ map:shingleTex, roughness:0.9 }));
+  slab.position.set(s[0]*0.231, 0.463, 0);
+  slab.rotation.z = s[0]*slopeAng*0 + (s[0]<0 ? -slopeAng : Math.PI+slopeAng);
+  // simpler: rotate so long axis runs from eave to ridge
+  slab.rotation.z = s[0]<0 ? -slopeAng : Math.PI+slopeAng;
+  slab.castShadow = true; slab.receiveShadow = true; clock.add(slab);
+});
+// ridge beam + finials
+const ridge = new THREE.Mesh(new THREE.CylinderGeometry(0.030, 0.030, CD+0.30, 14), walnutDark);
+ridge.rotation.x = Math.PI/2; ridge.position.set(0, 0.685, 0); ridge.castShadow = true; clock.add(ridge);
+[[-1],[1]].forEach(s=>{
+  const fin = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), walnutLight);
+  fin.position.set(0, 0.69, s[0]*(CD/2+0.15)); fin.castShadow = true; clock.add(fin);
+});
+
+// ---------- dial ----------
+const dialY = -0.035;
+const dialGroup = new THREE.Group(); dialGroup.position.set(0, dialY, 0); clock.add(dialGroup);
+const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.168, 0.168, 0.022, 48),
+  new THREE.MeshStandardMaterial({ map:dialTex, roughness:0.55 }));
+dial.rotation.x = Math.PI/2; dial.position.z = CD/2 + 0.004; dial.castShadow = true; dialGroup.add(dial);
+const bezel = new THREE.Mesh(new THREE.TorusGeometry(0.168, 0.015, 14, 48), brass);
+bezel.position.z = CD/2 + 0.016; bezel.castShadow = true; dialGroup.add(bezel);
+
+// hands (tapered blades via shape)
+function handGeo(len, wBase, wTip, tail){
+  const s = new THREE.Shape();
+  s.moveTo(-wBase, -tail); s.lineTo(wBase, -tail); s.lineTo(wTip, len); s.lineTo(-wTip, len); s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth:0.004, bevelEnabled:false });
+  return g;
+}
+const hourHand = new THREE.Mesh(handGeo(0.095, 0.016, 0.006, 0.032), new THREE.MeshStandardMaterial({ color:0x2a1a0c, metalness:0.6, roughness:0.4 }));
+hourHand.position.set(0, dialY, CD/2 + 0.024); clock.add(hourHand);
+const minuteHand = new THREE.Mesh(handGeo(0.148, 0.011, 0.004, 0.036), new THREE.MeshStandardMaterial({ color:0x2a1a0c, metalness:0.6, roughness:0.4 }));
+minuteHand.position.set(0, dialY, CD/2 + 0.031); clock.add(minuteHand);
+const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.012, 16), brass);
+cap.rotation.x = Math.PI/2; cap.position.set(0, dialY, CD/2 + 0.032); clock.add(cap);
+// invisible dial hit disc
+const dialHit = new THREE.Mesh(new THREE.CircleGeometry(0.165, 24),
+  new THREE.MeshBasicMaterial({ visible:false }));
+dialHit.position.set(0, dialY, CD/2 + 0.045); clock.add(dialHit);
+
+// ---------- carved leaves ----------
+const leafShape = new THREE.Shape();
+leafShape.moveTo(0, 0);
+leafShape.quadraticCurveTo(0.028, 0.028, 0.016, 0.075);
+leafShape.quadraticCurveTo(0.008, 0.095, 0, 0.115);
+leafShape.quadraticCurveTo(-0.008, 0.095, -0.016, 0.075);
+leafShape.quadraticCurveTo(-0.028, 0.028, 0, 0);
+const leafGeo = new THREE.ExtrudeGeometry(leafShape, { depth:0.006, bevelEnabled:true, bevelThickness:0.002, bevelSize:0.002, bevelSegments:1 });
+leafGeo.translate(0, -0.0575, 0);
+const leafMats = [
+  new THREE.MeshStandardMaterial({ color:0x33502c, roughness:0.75 }),
+  new THREE.MeshStandardMaterial({ color:0x2a4224, roughness:0.75 }),
+  new THREE.MeshStandardMaterial({ color:0x46301f, roughness:0.75 })
+];
+function addLeaf(x, y, z, rotZ, scale, matIdx, parent){
+  const l = new THREE.Mesh(leafGeo, leafMats[matIdx===undefined ? (Math.random()*3|0) : matIdx]);
+  l.position.set(x, y, z); l.rotation.z = rotZ; l.scale.setScalar(scale);
+  l.castShadow = true; (parent||clock).add(l); return l;
+}
+// arch of leaves around the cuckoo door
+const doorC = { x:0, y:0.232 };
+for (let i=0;i<11;i++){
+  const a = Math.PI - i*(Math.PI/10);
+  const r = 0.165;
+  const lx = doorC.x + Math.cos(a)*r*1.12;
+  const ly = doorC.y + Math.sin(a)*r*0.92 + 0.01;
+  if (ly < 0.155) continue;
+  addLeaf(lx, ly, CD/2+0.006, a + Math.PI/2 + (i%2?0.25:-0.25), 0.85+((i*37)%10)/22, i%3);
+}
+// leaves along gable rakes
+for (let s=-1;s<=1;s+=2){
+  for (let i=1;i<=4;i++){
+    const t = i/5;
+    const lx = s*(0.34 - t*0.315);
+    const ly = 0.335 + t*0.33;
+    addLeaf(lx + s*0.028, ly, CD/2+0.004, s*(slopeAng-0.5) + (i%2?0.3:-0.3), 0.75+i*0.08, (i+(s>0?1:0))%3);
+  }
+}
+// leaves on balcony ends (added later relative to clock — here on lower panel corners)
+addLeaf(-0.235, -0.245, CD/2+0.006,  0.7, 1.0, 0);
+addLeaf( 0.235, -0.245, CD/2+0.006, -0.7, 1.0, 1);
+addLeaf(-0.245, -0.185, CD/2+0.006,  1.1, 0.75, 2);
+addLeaf( 0.245, -0.185, CD/2+0.006, -1.1, 0.75, 0);
+
+// ---------- perched carved birds ----------
+function carvedBird(scale, bodyColor){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.024, 12, 10),
+    new THREE.MeshStandardMaterial({ color:bodyColor, roughness:0.6 }));
+  body.scale.set(1, 0.88, 1.5); body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.016, 12, 10),
+    new THREE.MeshStandardMaterial({ color:bodyColor, roughness:0.6 }));
+  head.position.set(0, 0.020, 0.024); head.castShadow = true; g.add(head);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.006, 0.018, 8),
+    new THREE.MeshStandardMaterial({ color:0xc9a227, roughness:0.5 }));
+  beak.rotation.x = Math.PI/2; beak.position.set(0, 0.019, 0.043); g.add(beak);
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.013, 10, 8),
+    new THREE.MeshStandardMaterial({ color:0x8a4030, roughness:0.7 }));
+  chest.position.set(0, -0.004, 0.028); chest.scale.set(0.8, 0.8, 0.6); g.add(chest);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.005, 0.038),
+    new THREE.MeshStandardMaterial({ color:bodyColor, roughness:0.6 }));
+  tail.position.set(0, 0.008, -0.038); tail.rotation.x = -0.35; g.add(tail);
+  g.scale.setScalar(scale);
+  return g;
+}
+const bird1 = carvedBird(1.15, 0x352b22); bird1.position.set(0, 0.735, (CD/2+0.15)); clock.add(bird1);
+const bird2 = carvedBird(0.95, 0x2a241e); bird2.position.set(-0.415, 0.235, CD/2-0.02); bird2.rotation.y = 0.5; clock.add(bird2);
+const bird3 = carvedBird(0.9, 0x40342a); bird3.position.set(0.30, 0.415, CD/2+0.10); bird3.rotation.y = -0.7; clock.add(bird3);
+
+// ---------- deer head plaque ----------
+const plaqueShape = new THREE.Shape();
+plaqueShape.moveTo(-0.092, 0.088);
+plaqueShape.quadraticCurveTo(0, 0.163, 0.092, 0.088);
+plaqueShape.lineTo(0.092, -0.02);
+plaqueShape.quadraticCurveTo(0.092, -0.098, 0, -0.158);
+plaqueShape.quadraticCurveTo(-0.092, -0.098, -0.092, -0.02);
+plaqueShape.closePath();
+const plaqueGeo = new THREE.ExtrudeGeometry(plaqueShape, { depth:0.014, bevelEnabled:true, bevelThickness:0.004, bevelSize:0.004, bevelSegments:2 });
+const plaque = new THREE.Mesh(plaqueGeo, walnutDark);
+plaque.position.set(0, 0.435, CD/2 + 0.004); plaque.castShadow = true; clock.add(plaque);
+[[-0.055,0.095],[0.055,0.095]].forEach(p=>{
+  const stud = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 8), brass);
+  stud.position.set(p[0], 0.435+p[1], CD/2+0.02); clock.add(stud);
+});
+// deer head
+const deer = new THREE.Group();
+deer.position.set(0, 0.455, CD/2 + 0.03); clock.add(deer);
+const furMat = new THREE.MeshStandardMaterial({ color:0x6e4b2e, roughness:0.85 });
+const furDark = new THREE.MeshStandardMaterial({ color:0x4a2f1c, roughness:0.85 });
+const boneMat = new THREE.MeshStandardMaterial({ color:0xd8cbb2, roughness:0.7 });
+const skull = new THREE.Mesh(new THREE.SphereGeometry(0.038, 14, 12), furMat);
+skull.scale.set(0.82, 0.92, 1.15); skull.castShadow = true; deer.add(skull);
+const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.023, 0.055, 12), furMat);
+muzzle.rotation.x = Math.PI/2 - 0.28; muzzle.position.set(0, -0.017, 0.048); muzzle.castShadow = true; deer.add(muzzle);
+const nose = new THREE.Mesh(new THREE.SphereGeometry(0.012, 10, 8), new THREE.MeshStandardMaterial({ color:0x1c1310, roughness:0.4 }));
+nose.position.set(0, -0.024, 0.077); deer.add(nose);
+[[-1],[1]].forEach(s=>{
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0068, 10, 8), new THREE.MeshStandardMaterial({ color:0x0d0906, roughness:0.15 }));
+  eye.position.set(s[0]*0.021, 0.004, 0.030); deer.add(eye);
+  const glint = new THREE.Mesh(new THREE.SphereGeometry(0.0022, 6, 6), new THREE.MeshBasicMaterial({ color:0xffffff }));
+  glint.position.set(s[0]*0.021+0.002, 0.0065, 0.0355); deer.add(glint);
+  const ear = new THREE.Mesh(new THREE.ConeGeometry(0.011, 0.035, 8), furDark);
+  ear.rotation.z = s[0]*1.25; ear.position.set(s[0]*0.042, 0.022, -0.005); deer.add(ear);
+});
+function limb(from, dir, len, r1, r2, mat, parent){
+  const d = dir.clone().normalize();
+  const geo = new THREE.CylinderGeometry(r2, r1, len, 9);
+  const m = new THREE.Mesh(geo, mat);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d);
+  m.position.copy(from.clone().add(d.clone().multiplyScalar(len/2)));
+  m.castShadow = true; (parent||deer).add(m);
+  return from.clone().add(d.clone().multiplyScalar(len));
+}
+[[-1],[1]].forEach(s=>{
+  const side = s[0];
+  const base = new THREE.Vector3(side*0.020, 0.034, -0.008);
+  let p = limb(base, new THREE.Vector3(side*0.42, 0.92, 0.10), 0.062, 0.0105, 0.0080, boneMat);
+  let p2 = limb(p, new THREE.Vector3(side*0.22, 0.97, -0.06), 0.052, 0.0080, 0.0056, boneMat);
+  limb(p2, new THREE.Vector3(side*0.10, 0.98, -0.30), 0.038, 0.0056, 0.0030, boneMat);
+  // brow tine
+  limb(base.clone().add(new THREE.Vector3(side*0.012, 0.012, 0.012)),
+       new THREE.Vector3(side*0.30, 0.75, 0.55), 0.034, 0.0060, 0.0028, boneMat);
+  // bez + trez tines
+  limb(p.clone().add(new THREE.Vector3(side*0.004, 0.004, 0)),
+       new THREE.Vector3(side*0.55, 0.82, 0.28), 0.032, 0.0052, 0.0024, boneMat);
+  const mid = p.clone().lerp(p2, 0.55);
+  limb(mid, new THREE.Vector3(side*0.62, 0.72, -0.18), 0.030, 0.0046, 0.0022, boneMat);
+});
+
+// ---------- cuckoo (bird inside door) ----------
+const DOOR_W = 0.20, DOOR_H = 0.158;
+// door hinge pivot at top of opening
+const doorPivot = new THREE.Group();
+doorPivot.position.set(0, 0.310, CD/2 + 0.002);
+clock.add(doorPivot);
+function archGeoHanging(w, h){
+  const r = w/2, s = new THREE.Shape();
+  s.moveTo(-r, -h); s.lineTo(-r, -r); s.absarc(0, -r, r, Math.PI, 0, true); s.lineTo(r, -h); s.closePath();
+  return new THREE.ExtrudeGeometry(s, { depth:0.014, bevelEnabled:true, bevelThickness:0.003, bevelSize:0.003, bevelSegments:1 });
+}
+const doorMesh = new THREE.Mesh(archGeoHanging(DOOR_W, DOOR_H), walnutLight);
+doorMesh.castShadow = true; doorPivot.add(doorMesh);
+// door carving: small leaf trio + ring
+addLeaf(0, -0.062, 0.016, 0, 0.8, 2, doorPivot);
+addLeaf(-0.035, -0.088, 0.016, 0.6, 0.6, 0, doorPivot);
+addLeaf(0.035, -0.088, 0.016, -0.6, 0.6, 1, doorPivot);
+const doorKnob = new THREE.Mesh(new THREE.TorusGeometry(0.011, 0.004, 8, 16), brass);
+doorKnob.position.set(0, -0.128, 0.018); doorPivot.add(doorKnob);
+// dark opening behind door
+const doorway = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W+0.02, DOOR_H+0.03),
+  new THREE.MeshStandardMaterial({ color:0x0c0805, roughness:1 }));
+doorway.position.set(0, 0.310-DOOR_H/2, CD/2 - 0.012); clock.add(doorway);
+// perch
+const perch = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.15, 8), walnutDark);
+perch.rotation.z = Math.PI/2; perch.position.set(0, 0.163, CD/2 + 0.05); clock.add(perch);
+
+// the cuckoo itself
+const cuckoo = new THREE.Group();
+const cuckooHome = { x:0, y:0.238, z:CD/2 - 0.085 };
+cuckoo.position.set(cuckooHome.x, cuckooHome.y, cuckooHome.z);
+clock.add(cuckoo);
+const cuckooBodyMat = new THREE.MeshStandardMaterial({ color:0x5a3a22, roughness:0.55 });
+const cuckooBelly = new THREE.MeshStandardMaterial({ color:0x9a6b3e, roughness:0.6 });
+const cBody = new THREE.Mesh(new THREE.SphereGeometry(0.035, 14, 12), cuckooBodyMat);
+cBody.scale.set(1, 1.05, 1.25); cBody.castShadow = true; cuckoo.add(cBody);
+const cBelly = new THREE.Mesh(new THREE.SphereGeometry(0.027, 12, 10), cuckooBelly);
+cBelly.position.set(0, -0.008, 0.020); cBelly.scale.set(0.75, 0.8, 0.6); cuckoo.add(cBelly);
+const cHead = new THREE.Mesh(new THREE.SphereGeometry(0.024, 12, 10), cuckooBodyMat);
+cHead.position.set(0, 0.032, 0.012); cHead.castShadow = true; cuckoo.add(cHead);
+// striped head crest (tiny cones)
+for (let i=0;i<3;i++){
+  const crest = new THREE.Mesh(new THREE.ConeGeometry(0.006, 0.016, 6),
+    new THREE.MeshStandardMaterial({ color:i%2 ? 0x9a6b3e : 0x3a281a, roughness:0.6 }));
+  crest.position.set((i-1)*0.011, 0.053, 0.012); cuckoo.add(crest);
+}
+// eyes
+[[-1],[1]].forEach(s=>{
+  const e = new THREE.Mesh(new THREE.SphereGeometry(0.0052, 8, 8),
+    new THREE.MeshStandardMaterial({ color:0x0d0906, roughness:0.15 }));
+  e.position.set(s[0]*0.0135, 0.036, 0.032); cuckoo.add(e);
+  const g2 = new THREE.Mesh(new THREE.SphereGeometry(0.0018, 6, 6), new THREE.MeshBasicMaterial({ color:0xffffff }));
+  g2.position.set(s[0]*0.0135+0.0015, 0.0378, 0.0362); cuckoo.add(g2);
+  // cheek dots
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0035, 6, 6),
+    new THREE.MeshStandardMaterial({ color:0xc9a227, roughness:0.5 }));
+  dot.position.set(s[0]*0.022, 0.024, 0.026); cuckoo.add(dot);
+});
+// beak — upper fixed, lower hinged
+const beakUpper = new THREE.Mesh(new THREE.ConeGeometry(0.0075, 0.026, 8),
+  new THREE.MeshStandardMaterial({ color:0xd8a83c, roughness:0.45 }));
+beakUpper.rotation.x = Math.PI/2 - 0.15; beakUpper.position.set(0, 0.027, 0.043); cuckoo.add(beakUpper);
+const beakLowerPivot = new THREE.Group();
+beakLowerPivot.position.set(0, 0.0225, 0.038); cuckoo.add(beakLowerPivot);
+const beakLower = new THREE.Mesh(new THREE.ConeGeometry(0.0062, 0.022, 8),
+  new THREE.MeshStandardMaterial({ color:0xb8873a, roughness:0.45 }));
+beakLower.rotation.x = Math.PI/2 + 0.32; beakLower.position.set(0, -0.002, 0.008); beakLowerPivot.add(beakLower);
+// wings — pivot at shoulder
+function makeWing(side){
+  const pivot = new THREE.Group();
+  pivot.position.set(side*0.032, 0.012, 0.002);
+  const wing = new THREE.Mesh(new THREE.ConeGeometry(0.017, 0.062, 6), cuckooBodyMat);
+  wing.scale.set(0.45, 1, 1.6);
+  wing.rotation.z = side*0.5;
+  wing.position.set(side*0.006, -0.024, -0.004);
+  wing.castShadow = true; pivot.add(wing);
+  // wing tip feather stripe
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.026, 6),
+    new THREE.MeshStandardMaterial({ color:0x3a281a, roughness:0.6 }));
+  tip.scale.set(0.5, 1, 1.4); tip.position.set(side*0.012, -0.049, -0.006); tip.rotation.z = side*0.18; pivot.add(tip);
+  cuckoo.add(pivot);
+  return pivot;
+}
+const wingL = makeWing(-1), wingR = makeWing(1);
+// tail — fans up when calling
+const tailPivot = new THREE.Group(); tailPivot.position.set(0, -0.005, -0.042); cuckoo.add(tailPivot);
+const tail = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.055, 6), cuckooBodyMat);
+tail.scale.set(1.3, 1, 0.4); tail.rotation.x = -Math.PI/2 - 0.45; tail.position.set(0, 0.005, -0.024); tailPivot.add(tail);
+
+// ---------- balcony with dancing figures ----------
+const balcony = new THREE.Group(); balcony.position.set(0, -0.168, CD/2 + 0.045); clock.add(balcony);
+const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.022, 0.105), walnutDark);
+shelf.castShadow = true; shelf.receiveShadow = true; balcony.add(shelf);
+// corbels
+[[-0.16],[0.16]].forEach(p=>{
+  const corbel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.075, 0.05), walnut);
+  corbel.position.set(p[0], -0.048, -0.022); corbel.rotation.x = 0.5; corbel.castShadow = true; balcony.add(corbel);
+});
+// railing
+const railPostGeo = new THREE.CylinderGeometry(0.005, 0.005, 0.075, 8);
+for (let i=0;i<=6;i++){
+  const post = new THREE.Mesh(railPostGeo, walnutLight);
+  post.position.set(-0.20+i*0.08, 0.048, 0.045); balcony.add(post);
+}
+const railTop = new THREE.Mesh(new THREE.CylinderGeometry(0.0075, 0.0075, 0.44, 10), walnutLight);
+railTop.rotation.z = Math.PI/2; railTop.position.set(0, 0.088, 0.045); railTop.castShadow = true; balcony.add(railTop);
+// carved end spheres on railing
+[[-0.22],[0.22]].forEach(p=>{
+  const s = new THREE.Mesh(new THREE.SphereGeometry(0.014, 10, 8), walnutLight);
+  s.position.set(p[0], 0.092, 0.045); balcony.add(s);
+});
+
+function makeDancer(palette){
+  const g = new THREE.Group();
+  const dress = new THREE.Mesh(new THREE.ConeGeometry(0.036, 0.078, 14, 1, false),
+    new THREE.MeshStandardMaterial({ color:palette.dress, roughness:0.85 }));
+  dress.position.y = 0.039; dress.castShadow = true; g.add(dress);
+  const apron = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.052, 12, 1, true),
+    new THREE.MeshStandardMaterial({ color:0xe8ddc4, roughness:0.9, side:THREE.DoubleSide }));
+  apron.position.set(0, 0.030, 0.008); g.add(apron);
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.022, 0.035, 12),
+    new THREE.MeshStandardMaterial({ color:palette.bodice, roughness:0.8 }));
+  torso.position.y = 0.088; torso.castShadow = true; g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.0165, 12, 10),
+    new THREE.MeshStandardMaterial({ color:0xe0b48a, roughness:0.7 }));
+  head.position.y = 0.122; head.castShadow = true; g.add(head);
+  // hat
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.023, 0.005, 12),
+    new THREE.MeshStandardMaterial({ color:palette.hat, roughness:0.85 }));
+  brim.position.y = 0.133; g.add(brim);
+  const crown = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.026, 12),
+    new THREE.MeshStandardMaterial({ color:palette.hat, roughness:0.85 }));
+  crown.position.y = 0.148; g.add(crown);
+  // arms — angled, jointed at shoulder
+  const armGeo = new THREE.CylinderGeometry(0.0052, 0.0042, 0.052, 8);
+  const arms = [];
+  [[-1],[1]].forEach(s=>{
+    const shoulder = new THREE.Group(); shoulder.position.set(s[0]*0.019, 0.100, 0);
+    const arm = new THREE.Mesh(armGeo, new THREE.MeshStandardMaterial({ color:palette.dress, roughness:0.85 }));
+    arm.position.y = -0.024; shoulder.add(arm);
+    shoulder.rotation.z = s[0]*0.9;
+    g.add(shoulder); arms.push(shoulder);
+  });
+  g.userData = { arms, phase: palette.phase || 0 };
+  return g;
+}
+const dancerA = makeDancer({ dress:0x8a3030, bodice:0x5a3a22, hat:0x2e2e34, phase:0 });
+dancerA.position.set(-0.115, 0.011, 0.005); balcony.add(dancerA);
+const dancerB = makeDancer({ dress:0x2c4460, bodice:0x40342a, hat:0x6e4b2e, phase:Math.PI });
+dancerB.position.set(0.115, 0.011, 0.005); balcony.add(dancerB);
+
+// ---------- waterwheel (front-right, below balcony) ----------
+const waterwheel = new THREE.Group();
+waterwheel.position.set(0.185, -0.247, CD/2 + 0.065);
+clock.add(waterwheel);
+const wwMat = new THREE.MeshStandardMaterial({ color:0x6b452a, roughness:0.75 });
+const wwRing1 = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.009, 8, 22), wwMat);
+waterwheel.add(wwRing1);
+const wwHub = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.035, 12), walnutDark);
+wwHub.rotation.x = Math.PI/2; waterwheel.add(wwHub);
+for (let i=0;i<8;i++){
+  const a = i*Math.PI/4;
+  const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.011, 0.105, 0.008), wwMat);
+  spoke.rotation.z = a; waterwheel.add(spoke);
+  const paddle = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.024, 0.03), walnutLight);
+  paddle.position.set(Math.cos(a+Math.PI/2)*0.058, Math.sin(a+Math.PI/2)*0.058, 0);
+  paddle.rotation.z = a+Math.PI/2; paddle.castShadow = true; waterwheel.add(paddle);
+}
+const wwAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.05, 8), steel);
+wwAxle.rotation.x = Math.PI/2; waterwheel.add(wwAxle);
+
+// ---------- gear train (right cut-away side) ----------
+const gearPanel = new THREE.Group();
+gearPanel.position.set(CW/2 - 0.033, 0, 0);
+gearPanel.rotation.y = Math.PI/2;   // local +z -> world +x ; view from right side
+clock.add(gearPanel);
+// dark back plate with brass screws
+const gearBack = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.50, 0.012),
+  new THREE.MeshStandardMaterial({ color:0x201410, roughness:0.95 }));
+gearBack.position.set(0.02, -0.02, -0.022); gearPanel.add(gearBack);
+[[-0.085,0.205],[0.13,0.205],[-0.085,-0.245],[0.13,-0.245]].forEach(p=>{
+  const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.006, 10), brassDark);
+  screw.rotation.x = Math.PI/2; screw.position.set(p[0], p[1], -0.014); gearPanel.add(screw);
+});
+
+const GEAR_MODULE = 0.0030;
+function gearGeometry(teeth, thickness){
+  const rp = teeth*GEAR_MODULE/2, rt = rp + GEAR_MODULE*0.78, rr = rp - GEAR_MODULE*0.85;
+  const s = new THREE.Shape();
+  const step = Math.PI*2/teeth;
+  for (let i=0;i<teeth;i++){
+    const a = i*step;
+    const seq = [[0.00,rr],[0.145,rr],[0.30,rt],[0.47,rt],[0.615,rr]];
+    for (let j=0;j<seq.length;j++){
+      const ang = a + seq[j][0]*step, r = seq[j][1];
+      const x = Math.cos(ang)*r, y = Math.sin(ang)*r;
+      if (i===0 && j===0) s.moveTo(x,y); else s.lineTo(x,y);
+    }
+  }
+  s.closePath();
+  const hole = new THREE.Path(); hole.absarc(0, 0, Math.max(rr*0.52, 0.008), 0, Math.PI*2, true); s.holes.push(hole);
+  const g = new THREE.ExtrudeGeometry(s, { depth:thickness, bevelEnabled:false, curveSegments:5 });
+  g.translate(0, 0, -thickness/2);
+  return g;
+}
+function buildGear(def){
+  // def: {teeth, pos:[x,y] in panel plane, mat, ratio (angle = ratio * thetaD), phase, pinion?}
+  const grp = new THREE.Group();
+  grp.position.set(def.pos[0], def.pos[1], 0);
+  const rim = new THREE.Mesh(gearGeometry(def.teeth, 0.016), def.mat);
+  rim.castShadow = true; grp.add(rim);
+  // spokes
+  const rr = def.teeth*GEAR_MODULE/2 - GEAR_MODULE*0.85;
+  for (let i=0;i<4;i++){
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(rr*1.05, rr*0.30, 0.013), def.mat);
+    spoke.rotation.z = i*Math.PI/4; grp.add(spoke);
+  }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(rr*0.30, 0.007), Math.max(rr*0.30, 0.007), 0.026, 12), def.mat);
+  hub.rotation.x = Math.PI/2; grp.add(hub);
+  // pinion on same shaft, offset toward viewer
+  if (def.pinion){
+    const pin = new THREE.Mesh(gearGeometry(def.pinion, 0.014), def.pinionMat || brass);
+    pin.position.z = 0.021; grp.add(pin);
+    const pinHub = new THREE.Mesh(new THREE.CylinderGeometry(def.pinion*GEAR_MODULE/2*0.5+0.002, def.pinion*GEAR_MODULE/2*0.5+0.002, 0.034, 10), brassDark);
+    pinHub.rotation.x = Math.PI/2; grp.add(pinHub);
+  }
+  // axle into back plate
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0055, 0.05, 8), steel);
+  axle.rotation.x = Math.PI/2; axle.position.z = -0.01; grp.add(axle);
+  gearPanel.add(grp);
+  return grp;
+}
+// positions computed so meshing gears sit at exactly pitch-diameter distance
+const GA = [0.010, 0.195];                                   // escape
+const GB = [-0.0675, 0.0845];                                // 60T + 12T pinion
+const GC = [-0.0095, 0.0155];                                // 48T + 12T pinion
+const GD = [ 0.021, -0.0497];                                // 36T minute + 24T pinion
+const GE = [ 0.083, -0.1382];                                // 48T
+const gearA = buildGear({ teeth:30, pos:GA, mat:steel,  ratio:-24, phase:0.000 });
+const gearB = buildGear({ teeth:60, pos:GB, mat:brass,  ratio: 12, phase:Math.PI/60, pinion:12 });
+const gearC = buildGear({ teeth:48, pos:GC, mat:brass,  ratio: -3, phase:Math.PI/48, pinion:12 });
+const gearD = buildGear({ teeth:36, pos:GD, mat:brassDark, ratio: 1, phase:Math.PI/36+0.09, pinion:24, pinionMat:brass });
+const gearE = buildGear({ teeth:48, pos:GE, mat:brass,  ratio:-0.5, phase:Math.PI/48+0.17 });
+const gearRatios = [[gearA,-24,0],[gearB,12,Math.PI/60],[gearC,-3,Math.PI/48],[gearD,1,Math.PI/36+0.09],[gearE,-0.5,Math.PI/48+0.17]];
+
+// ---------- pendulum + escapement (below case) ----------
+const escapeWheel = new THREE.Mesh(gearGeometry(30, 0.012), steel);
+escapeWheel.position.set(0, -0.352, 0.075); clock.add(escapeWheel);
+const anchorGroup = new THREE.Group();
+anchorGroup.position.set(0, -0.322, 0.075); clock.add(anchorGroup);
+const anchorBar = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.009, 0.014), darkIron);
+anchorBar.position.y = -0.010; anchorGroup.add(anchorBar);
+[[-1],[1]].forEach(s=>{
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.011, 0.048, 0.011), darkIron);
+  arm.position.set(s[0]*0.036, -0.032, 0); arm.rotation.z = s[0]*0.42; anchorGroup.add(arm);
+  const pallet = new THREE.Mesh(new THREE.BoxGeometry(0.013, 0.013, 0.016),
+    new THREE.MeshStandardMaterial({ color:0x8a5a2a, roughness:0.5 }));
+  pallet.position.set(s[0]*0.047, -0.051, 0); pallet.rotation.z = s[0]*0.6; anchorGroup.add(pallet);
+});
+const anchorPivot = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.03, 10), steel);
+anchorPivot.rotation.x = Math.PI/2; anchorGroup.add(anchorPivot);
+
+const PEND_L = 0.2486; // real length for a 1.000 s period (T = 2π√(L/g))
+const pendulumGroup = new THREE.Group();
+pendulumGroup.position.set(0, -0.322, 0.075); clock.add(pendulumGroup);
+const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.0042, 0.0042, PEND_L, 8), brassDark);
+rod.position.y = -PEND_L/2; pendulumGroup.add(rod);
+const bobProfile = [ [0.001,0],[0.045,0.004],[0.068,0.014],[0.075,0.024],[0.068,0.034],[0.045,0.044],[0.001,0.048] ]
+  .map(p=>new THREE.Vector2(p[0],p[1]));
+const bob = new THREE.Mesh(new THREE.LatheGeometry(bobProfile, 26), brass);
+bob.rotation.x = Math.PI/2;
+bob.position.y = -PEND_L + 0.026; bob.castShadow = true; pendulumGroup.add(bob);
+const bobRing = new THREE.Mesh(new THREE.TorusGeometry(0.050, 0.0035, 8, 26), brassDark);
+bobRing.position.set(0, -PEND_L + 0.026, 0.026); pendulumGroup.add(bobRing);
+
+// ---------- chains & pine-cone weights ----------
+const EYE_Y_LOCAL = -HH - 0.004;
+[[-0.135],[0.135]].forEach(p=>{
+  const eye = new THREE.Mesh(new THREE.TorusGeometry(0.008, 0.0032, 6, 12), steel);
+  eye.position.set(p[0], EYE_Y_LOCAL - 0.002, 0.085); clock.add(eye);
+});
+const weightZlocal = 0.085;
+function makePineCone(){
+  const pts = [];
+  const H = 0.125;
+  for (let i=0;i<=16;i++){
+    const t = i/16; // 0 bottom .. 1 top
+    const base = 0.010 + Math.sin(Math.PI*Math.pow(t, 0.72))*0.0335;
+    const ridge = 1 + 0.22*Math.sin(t*Math.PI*9 + 0.6);
+    pts.push(new THREE.Vector2(Math.max(0.004, base*ridge), t*H));
+  }
+  const cone = new THREE.Mesh(new THREE.LatheGeometry(pts, 20),
+    new THREE.MeshStandardMaterial({ color:0x4a2c18, roughness:0.8 }));
+  cone.castShadow = true;
+  const g = new THREE.Group();
+  cone.position.y = 0.012; g.add(cone);
+  const capTop = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.016, 0.016, 12), brassDark);
+  capTop.position.y = 0.138; g.add(capTop);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.009, 0.016, 8),
+    new THREE.MeshStandardMaterial({ color:0x33200f, roughness:0.8 }));
+  tip.position.y = 0.006; tip.rotation.x = Math.PI; g.add(tip);
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.007, 0.0028, 6, 10), steel);
+  hook.position.y = 0.153; g.add(hook);
+  return g;
+}
+const timeWeight = makePineCone();
+const strikeWeight = makePineCone();
+clock.add(timeWeight); clock.add(strikeWeight);
+
+// chains — individual links, visibility set by span
+const CHAIN_LINKS = 40, LINK_SPACING = 0.0135;
+const linkGeo = new THREE.TorusGeometry(0.0052, 0.0016, 5, 9);
+const linkMat = new THREE.MeshStandardMaterial({ color:0x777d88, metalness:0.9, roughness:0.4 });
+function makeChain(){
+  const g = new THREE.Group();
+  const links = [];
+  for (let i=0;i<CHAIN_LINKS;i++){
+    const l = new THREE.Mesh(linkGeo, linkMat);
+    l.rotation.y = (i%2)*Math.PI/2;
+    g.add(l); links.push(l);
+  }
+  clock.add(g);
+  return { group:g, links };
+}
+const timeChain = makeChain(), strikeChain = makeChain();
+
+// world anchors (clock has no rotation) — eyelets
+function weightWorldAnchor(xLocal){
+  return new THREE.Vector3(clock.position.x + xLocal, clock.position.y + EYE_Y_LOCAL - 0.006, clock.position.z + weightZlocal);
+}
+const ANCHOR_T = weightWorldAnchor(-0.135);
+const ANCHOR_S = weightWorldAnchor( 0.135);
+
+const W_HIGH = 1.38, W_LOW = 0.80; // weight center world Y range (full wind → fully dropped)
+function weightCenterY(h){ return W_LOW + (W_HIGH - W_LOW)*h; }
+
+function layoutChain(chain, anchorWorld, weightTopWorld){
+  const span = Math.max(0.02, anchorWorld.y - weightTopWorld);
+  const n = Math.min(CHAIN_LINKS, Math.ceil(span / LINK_SPACING));
+  for (let i=0;i<CHAIN_LINKS;i++){
+    const l = chain.links[i];
+    if (i < n){
+      l.visible = true;
+      l.position.set(anchorWorld.x - clock.position.x,
+                     anchorWorld.y - clock.position.y - (i+0.5)*LINK_SPACING,
+                     weightZlocal);
+      l.rotation.z = (i%2 ? 0.12 : -0.12);
+    } else l.visible = false;
+  }
+}
+
+// ============================================================
+// SIMULATION
+// ============================================================
+const GRAV = 9.81;
+const PEND_W0 = Math.sqrt(GRAV / PEND_L);
+const INIT_CLOCK = 2*3600 + 59*60 + 54;  // 02:59:54 → chimes at 3 o'clock
+const SHOW_DURATION = 12.0;
+
+const sim = {};
+function resetSim(){
+  sim.t = 0;
+  sim.clockTime = INIT_CLOCK;
+  sim.pendTheta = 0.235;
+  sim.pendVel = 0;
+  sim.pendPrevTheta = 0.235;
+  sim.tickAlt = false;
+  sim.ticks = 0;
+  sim.weightTime = 1.0;
+  sim.weightStrike = 1.0;
+  sim.cuckoos = 0;
+  sim.wheelAngle = 0;
+  sim.wheelVel = 0.18;
+  sim.dancerRot = 0;
+  sim.doorOpen = 0;
+  sim.beak = 0;
+  sim.userHold = false;
+  sim.speed = 1;
+  sim.cuckoo = { active:false, t:0, count:0, seqEnd:0, perCall:0.09, called:[] };
+}
+resetSim();
+
+const bench = { time: INIT_CLOCK, pendulumAngle: 0.235, cuckoos: 0, weightHeight: 1 };
+window.__bench = bench;
+
+function triggerCuckoo(count, strikePerCall){
+  const spacing = 1.02, first = 0.85;
+  sim.cuckoo = {
+    active: true, t: 0, count: count,
+    seqEnd: first + (count-1)*spacing + 1.35,
+    perCall: strikePerCall,
+    called: new Array(count).fill(false)
+  };
+}
+
+function audioCtxGet(){
+  if (!window.__actx){
+    try { window.__actx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ window.__actx = null; }
+    if (window.__actx){
+      window.__amaster = window.__actx.createGain();
+      window.__amaster.gain.value = 0.8;
+      window.__amaster.connect(window.__actx.destination);
+      window.__recordDest = window.__actx.createMediaStreamDestination();
+      window.__amaster.connect(window.__recordDest);
+    }
+  }
+  return window.__actx;
+}
+function tone(freq, when, dur, type, gainPeak){
+  const ctx = window.__actx; if (!ctx) return;
+  const t0 = ctx.currentTime + when;
+  const o = ctx.createOscillator(); o.type = type || 'sine'; o.frequency.value = freq;
+  const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = freq*2.001;
+  const g = ctx.createGain(), g2 = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gainPeak || 0.5, t0 + 0.018);
+  g.gain.setValueAtTime(gainPeak || 0.5, t0 + dur*0.55);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  g2.gain.value = 0.22;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400; lp.Q.value = 1.1;
+  // gentle vibrato
+  const lfo = ctx.createOscillator(); lfo.frequency.value = 5.4;
+  const lfoGain = ctx.createGain(); lfoGain.gain.value = 3.2;
+  lfo.connect(lfoGain); lfoGain.connect(o.frequency);
+  o.connect(g); o2.connect(g2); g2.connect(g); g.connect(lp); lp.connect(window.__amaster);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+  o2.start(t0); o2.stop(t0 + dur + 0.05);
+  lfo.start(t0); lfo.stop(t0 + dur + 0.05);
+}
+function playCuckooCall(){
+  const ctx = audioCtxGet(); if (!ctx) return;
+  if (ctx.state === 'suspended') ctx.resume();
+  tone(659.26, 0.00, 0.24, 'sine', 0.55);  // E5 — "cu-"
+  tone(523.25, 0.26, 0.46, 'sine', 0.62);  // C5 — "-koo"
+}
+function playTick(alt){
+  const ctx = window.__actx; if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = alt ? 2050 : 1640;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.055, t0 + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.035);
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = alt ? 2000 : 1600; bp.Q.value = 2.2;
+  o.connect(bp); bp.connect(g); g.connect(window.__amaster);
+  o.start(t0); o.stop(t0 + 0.05);
+}
+function playDoorClunk(){
+  const ctx = window.__actx; if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const o = ctx.createOscillator(); o.type = 'triangle';
+  o.frequency.setValueAtTime(140, t0); o.frequency.exponentialRampToValueAtTime(68, t0 + 0.09);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.13);
+  o.connect(g); g.connect(window.__amaster);
+  o.start(t0); o.stop(t0 + 0.16);
+}
+
+function stepSim(dt, silent){
+  sim.t += dt;
+  const frozen = sim.weightTime <= 0.0005;
+  const rate = frozen ? 0 : sim.speed;
+  const prevClock = sim.clockTime;
+  sim.clockTime += dt * rate;
+
+  // chime boundaries (1800 s grid); only for continuously-advanced time
+  if (!sim.userHold && rate > 0){
+    const crossed = Math.floor(sim.clockTime / 1800) - Math.floor(prevClock / 1800);
+    if (crossed > 0){
+      const boundary = Math.floor(prevClock / 1800) + 1;
+      const isHour = (boundary % 2 === 0);
+      const hourNum = (Math.floor(boundary / 2) % 12) || 12;
+      if (isHour) triggerCuckoo(hourNum, 0.085);
+      else triggerCuckoo(1, 0.028);      // half hour — single call
+      if (!silent) playDoorClunk();
+    }
+  }
+
+  // pendulum — damped swing with escapement recoil impulse at centre crossings
+  const prevTheta = sim.pendTheta;
+  const acc = -(GRAV / PEND_L) * Math.sin(sim.pendTheta) - 0.055 * sim.pendVel;
+  sim.pendVel += acc * dt;
+  sim.pendTheta += sim.pendVel * dt;
+  if ((prevTheta > 0) !== (sim.pendTheta > 0) && Math.abs(sim.pendTheta - prevTheta) < 0.2){
+    // centre crossing → escapement gives a push if weight remains
+    if (sim.weightTime > 0){
+      const ampEst = Math.abs(sim.pendVel) / PEND_W0;
+      const target = 0.295;
+      if (ampEst < target) sim.pendVel *= 1 + 0.55 * (target - ampEst) / target;
+    }
+    sim.ticks++;
+    sim.tickAlt = !sim.tickAlt;
+    if (!silent) playTick(sim.tickAlt);
+  }
+
+  // time weight descends (faster when 60×)
+  if (!frozen) sim.weightTime = Math.max(0, sim.weightTime - dt * rate * 0.0011);
+
+  // cuckoo sequence
+  const c = sim.cuckoo;
+  if (c.active){
+    c.t += dt;
+    const spacing = 1.02, first = 0.85;
+    for (let i = 0; i < c.count; i++){
+      if (!c.called[i] && c.t >= first + i*spacing){
+        c.called[i] = true;
+        sim.cuckoos++;
+        sim.beak = 1;
+        sim.weightStrike = Math.max(0.02, sim.weightStrike - c.perCall);
+        if (!silent) playCuckooCall();
+      }
+    }
+    if (c.t > c.seqEnd) c.active = false;
+  }
+  sim.beak = Math.max(0, sim.beak - dt*1.45);
+
+  // door ease
+  const doorTarget = (c.active && c.t < c.seqEnd - 0.42) ? 1 : 0;
+  const dd = doorTarget - sim.doorOpen;
+  sim.doorOpen += Math.sign(dd) * Math.min(Math.abs(dd), dt*2.7);
+
+  // waterwheel
+  const wheelTarget = c.active ? 4.6 : 0.18;
+  sim.wheelVel += (wheelTarget - sim.wheelVel) * Math.min(1, dt*2.4);
+  sim.wheelAngle += sim.wheelVel * dt;
+
+  // dancers turn while the cuckoo sings
+  if (c.active) sim.dancerRot += dt * 5.4;
+
+  // bench
+  bench.time = sim.clockTime;
+  bench.pendulumAngle = sim.pendTheta;
+  bench.cuckoos = sim.cuckoos;
+  bench.weightHeight = sim.weightTime;
+}
+
+// ============================================================
+// VISUAL SYNC (pure function of sim state)
+// ============================================================
+const DANCER_IDLE_SWAY = 0.16;
+function syncVisuals(){
+  const t = sim.t;
+  const thetaD = -(sim.clockTime / 3600) * Math.PI * 2; // minute shaft angle
+
+  // hands
+  minuteHand.rotation.z = thetaD;
+  hourHand.rotation.z = -((sim.clockTime / 43200) % 1) * Math.PI * 2;
+
+  // gears (ratios verified: gA drives gB..gE; thetaD = minute = 1 rev/hour)
+  for (let i=0;i<gearRatios.length;i++){
+    gearRatios[i][0].rotation.z = thetaD * gearRatios[i][1] + gearRatios[i][2];
+  }
+  // escape wheel matches its shaft angle (continuous, honest ratio)
+  escapeWheel.rotation.z = thetaD * -24 + 0.02;
+
+  // pendulum & anchor
+  pendulumGroup.rotation.z = sim.pendTheta;
+  anchorGroup.rotation.z = sim.pendTheta * 1.18;
+
+  // weights & chains
+  const tCenterWorld = weightCenterY(sim.weightTime);
+  const sCenterWorld = weightCenterY(sim.weightStrike);
+  timeWeight.position.set(-0.135, tCenterWorld - clock.position.y, weightZlocal);
+  strikeWeight.position.set(0.135, sCenterWorld - clock.position.y, weightZlocal);
+  layoutChain(timeChain, ANCHOR_T, new THREE.Vector3(ANCHOR_T.x, tCenterWorld + 0.155, ANCHOR_T.z));
+  layoutChain(strikeChain, ANCHOR_S, new THREE.Vector3(ANCHOR_S.x, sCenterWorld + 0.155, ANCHOR_S.z));
+
+  // cuckoo door + bird
+  const open = sim.doorOpen;
+  doorPivot.rotation.x = -open * 1.78;
+  const emerge = Math.pow(Math.min(1, open * 1.25), 1.35);
+  const c = sim.cuckoo;
+  const bobA = c.active ? Math.sin(c.t * 11.0) * 0.0085 * emerge : 0;
+  cuckoo.position.z = cuckooHome.z + emerge * 0.175;
+  cuckoo.position.y = cuckooHome.y + bobA;
+  cuckoo.rotation.x = c.active ? Math.sin(c.t * 11.0 + 0.7) * 0.08 * emerge : 0;
+  const flap = c.active ? Math.sin(c.t * 12.5) * 0.6 * emerge + 0.15 : 0;
+  wingL.rotation.z = -0.15 - flap;
+  wingR.rotation.z =  0.15 + flap;
+  tailPivot.rotation.x = c.active ? Math.sin(c.t * 11.0 + 1.2) * 0.35 * emerge : 0;
+  beakLowerPivot.rotation.x = sim.beak * 0.55 + (c.active ? 0.08 + 0.06*Math.sin(c.t*22) : 0);
+
+  // dancers
+  const dancing = c.active;
+  [dancerA, dancerB].forEach((d, i) => {
+    const ph = d.userData.phase;
+    const sway = Math.sin(t * Math.PI * 2 + ph) * DANCER_IDLE_SWAY;
+    const bounce = dancing ? Math.abs(Math.sin(c.t * 9 + ph)) * 0.016 : 0;
+    d.rotation.y = ph + sim.dancerRot + sway * (dancing ? 0.3 : 1);
+    d.position.y = 0.011 + bounce;
+    d.userData.arms[0].rotation.z = -0.9 - (dancing ? Math.sin(c.t*9+ph)*0.55 : Math.sin(t*2+ph)*0.12);
+    d.userData.arms[1].rotation.z =  0.9 + (dancing ? Math.cos(c.t*9+ph)*0.55 : Math.cos(t*2+ph)*0.12);
+  });
+
+  // waterwheel
+  waterwheel.rotation.z = sim.wheelAngle;
+
+  // lamp flicker (deterministic — driven by sim.t)
+  lampLight.intensity = 1.32 + 0.075*Math.sin(t*7.3) + 0.045*Math.sin(t*13.7 + 1.7) + 0.03*Math.sin(t*29.1 + 0.4);
+
+  // dust motes drift
+  const pos = moteGeo.attributes.position.array;
+  for (let i=0;i<MOTES;i++){
+    const b = moteBase[i];
+    pos[i*3]   = b[0] + Math.sin(t*0.37 + i*1.7)*0.05;
+    pos[i*3+1] = b[1] + Math.sin(t*0.22 + i*2.3)*0.07;
+    pos[i*3+2] = b[2] + Math.cos(t*0.31 + i*1.1)*0.05;
+  }
+  moteGeo.attributes.position.needsUpdate = true;
+}
+
+// ============================================================
+// INTERACTION
+// ============================================================
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+const dragState = { mode:null, weight:null, startY:0, startH:0, moved:false, downX:0, downY:0, downTarget:null };
+const chainHit = { time: timeWeight, strike: strikeWeight };
+const chainHitMeshes = [];
+timeChain.links.forEach(l=>{ l.userData.chain='time'; chainHitMeshes.push(l); });
+strikeChain.links.forEach(l=>{ l.userData.chain='strike'; chainHitMeshes.push(l); });
+timeWeight.traverse(o=>{ o.userData.chain='time'; if (o.isMesh) chainHitMeshes.push(o); });
+strikeWeight.traverse(o=>{ o.userData.chain='strike'; if (o.isMesh) chainHitMeshes.push(o); });
+const doorHitMeshes = [doorMesh, doorKnob];
+const weightPlane = new THREE.Plane(new THREE.Vector3(0,0,1), -(clockZ + weightZlocal));
+
+function setNDC(e){
+  const r = renderer.domElement.getBoundingClientRect();
+  pointerNDC.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  pointerNDC.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+}
+function pointerRay(e){ setNDC(e); raycaster.setFromCamera(pointerNDC, camera); return raycaster.ray; }
+const tmpV = new THREE.Vector3();
+
+function dialAngleMinutes(e){
+  const ray = pointerRay(e);
+  const plane = new THREE.Plane(new THREE.Vector3(0,0,1), -(clockZ + CD/2 + 0.045));
+  const hit = ray.intersectPlane(plane, tmpV);
+  if (!hit) return null;
+  const px = hit.x - clock.position.x;
+  const py = hit.y - (clock.position.y + dialY);
+  if (Math.hypot(px, py) > 0.175) return null;
+  let cw = Math.atan2(px, py); // CW from 12 o'clock
+  if (cw < 0) cw += Math.PI*2;
+  return (cw / (Math.PI*2)) * 60; // minutes
+}
+function setClockToMinutes(mins){
+  const base = sim.clockTime;
+  const hourBase = Math.floor(base / 3600) * 3600;
+  let best = null, bestDiff = Infinity;
+  for (let off=-1; off<=1; off++){
+    const cand = hourBase + off*3600 + mins*60;
+    const d = Math.abs(cand - base);
+    if (d < bestDiff){ bestDiff = d; best = cand; }
+  }
+  sim.clockTime = best;
+  bench.time = sim.clockTime;
+}
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  const ray = pointerRay(e);
+  // door?
+  const doorHits = raycaster.intersectObjects(doorHitMeshes, false);
+  if (doorHits.length){
+    dragState.mode = 'click'; dragState.downX = e.clientX; dragState.downY = e.clientY;
+    dragState.downTarget = 'door'; dragState.moved = false;
+    controls.enabled = false;
+    renderer.domElement.setPointerCapture(e.pointerId);
+    return;
+  }
+  // dial / minute hand?
+  const dialHits = raycaster.intersectObject(dialHit, false);
+  if (dialHits.length){
+    dragState.mode = 'hand'; dragState.moved = false; dragState.downX = e.clientX; dragState.downY = e.clientY;
+    sim.userHold = true;
+    controls.enabled = false;
+    renderer.domElement.setPointerCapture(e.pointerId);
+    const m = dialAngleMinutes(e); if (m !== null) setClockToMinutes(m);
+    return;
+  }
+  // chains / weights?
+  const chHits = raycaster.intersectObjects(chainHitMeshes, false);
+  if (chHits.length){
+    const which = chHits[0].object.userData.chain;
+    dragState.mode = 'chain'; dragState.weight = which; dragState.moved = false;
+    dragState.downX = e.clientX; dragState.downY = e.clientY;
+    const hit = ray.intersectPlane(weightPlane, tmpV);
+    dragState.startY = hit ? hit.y : 0;
+    dragState.startH = which === 'time' ? sim.weightTime : sim.weightStrike;
+    controls.enabled = false;
+    renderer.domElement.setPointerCapture(e.pointerId);
+    return;
+  }
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!dragState.mode){
+    // hover cursor
+    const ray = pointerRay(e);
+    const hot = raycaster.intersectObjects(doorHitMeshes.concat([dialHit], chainHitMeshes), false);
+    renderer.domElement.style.cursor = hot.length ? 'pointer' : 'grab';
+    return;
+  }
+  const dx = e.clientX - dragState.downX, dy = e.clientY - dragState.downY;
+  if (Math.hypot(dx, dy) > 4) dragState.moved = true;
+
+  if (dragState.mode === 'hand'){
+    const m = dialAngleMinutes(e); if (m !== null) setClockToMinutes(m);
+    return;
+  }
+  if (dragState.mode === 'chain'){
+    const ray = pointerRay(e);
+    const hit = ray.intersectPlane(weightPlane, tmpV);
+    if (!hit) return;
+    const delta = hit.y - dragState.startY;   // world units, +up
+    // pulling the chain DOWN rewinds the weight (raises it)
+    const isChainLink = true;
+    const wind = -delta / 0.34;               // drag 0.34 m down → fully wound
+    const direct = delta / (W_HIGH - W_LOW);  // grabbing the weight moves it directly
+    // decide by what was grabbed: links → rewind mapping, weight bodies → direct
+    let val;
+    const grabbedLink = raycaster.intersectObjects(chainHitMeshes.filter(m=>m.geometry===linkGeo), false).length > 0;
+    if (grabbedLink) val = THREE.MathUtils.clamp(dragState.startH + wind, 0, 1);
+    else val = THREE.MathUtils.clamp(dragState.startH + direct, 0, 1);
+    if (dragState.weight === 'time') sim.weightTime = val; else sim.weightStrike = val;
+    return;
+  }
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (dragState.mode === 'click' && !dragState.moved && dragState.downTarget === 'door'){
+    triggerCuckoo(1, 0.012);
+    playDoorClunk();
+  }
+  if (dragState.mode === 'hand') sim.userHold = false;
+  dragState.mode = null; dragState.weight = null; dragState.downTarget = null;
+  controls.enabled = true;
+  try { renderer.domElement.releasePointerCapture(e.pointerId); } catch(err){}
+});
+renderer.domElement.addEventListener('pointercancel', () => {
+  if (dragState.mode === 'hand') sim.userHold = false;
+  dragState.mode = null; controls.enabled = true;
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'f' || e.key === 'F') toggleSpeed();
+});
+const btnSpeed = document.getElementById('btnSpeed');
+const hudMode = document.getElementById('hudMode');
+function toggleSpeed(){
+  sim.speed = sim.speed === 1 ? 60 : 1;
+  hudMode.textContent = sim.speed === 60 ? '60×' : '1×';
+  btnSpeed.classList.toggle('active', sim.speed === 60);
+}
+btnSpeed.addEventListener('click', toggleSpeed);
+
+// ============================================================
+// SHOWCASE — deterministic 12 s camera tour
+// ============================================================
+const showPosCurve = new THREE.CatmullRomCurve3([
+  new THREE.Vector3( 2.55, 2.02,  3.55),   // 0    wide establishing
+  new THREE.Vector3( 0.72, 1.92,  1.18),   // 0.18 dial close-up
+  new THREE.Vector3( 0.66, 1.12,  1.32),   // 0.36 down to pendulum & weights
+  new THREE.Vector3( 1.78, 1.92,  0.42),   // 0.52 gear cut-away (right side)
+  new THREE.Vector3(-0.82, 2.06,  0.92),   // 0.70 balcony / cuckoo (left angle)
+  new THREE.Vector3( 0.95, 1.68,  2.15),   // 0.86 pull back
+  new THREE.Vector3( 1.72, 1.88,  2.85)    // 1.00 hero
+]);
+const showTgtCurve = new THREE.CatmullRomCurve3([
+  new THREE.Vector3( 0.00, 1.62, -0.42),
+  new THREE.Vector3( 0.00, 1.83, -0.42),
+  new THREE.Vector3( 0.00, 1.16, -0.42),
+  new THREE.Vector3( 0.26, 1.81, -0.43),
+  new THREE.Vector3( 0.00, 2.02, -0.43),
+  new THREE.Vector3( 0.00, 1.70, -0.42),
+  new THREE.Vector3( 0.00, 1.74, -0.42)
+]);
+function placeShowcaseCamera(t){
+  const u = THREE.MathUtils.clamp(t / SHOW_DURATION, 0, 1);
+  // slight ease shaping so the middle beats breathe
+  camera.position.copy(showPosCurve.getPoint(u));
+  const tgt = showTgtCurve.getPoint(u);
+  controls.target.copy(tgt);
+  camera.lookAt(tgt);
+}
+function runShowcaseFrame(t, withAudio){
+  resetSim();
+  sim.speed = 1;
+  const dt = 1/120;
+  let acc = 0;
+  while (acc < t){
+    const h = Math.min(dt, t - acc);
+    stepSim(h, !withAudio);
+    acc += h;
+  }
+  syncVisuals();
+  placeShowcaseCamera(t);
+  renderFrame();
+}
+window.showcase = {
+  duration: SHOW_DURATION,
+  seek(t){
+    const clamped = THREE.MathUtils.clamp(t || 0, 0, SHOW_DURATION);
+    const keepSpeed = sim.speed, keepHold = sim.userHold;
+    runShowcaseFrame(clamped, false);
+    // restore a sane live state afterward: restart the interactive clock
+    resetSim(); sim.speed = keepSpeed; sim.userHold = keepHold;
+    syncVisuals();
+  }
+};
+
+// ============================================================
+// RECORD BUTTON — captureStream + MediaRecorder (.webm)
+// ============================================================
+const btnRec = document.getElementById('btnRec');
+const recNote = document.getElementById('recNote');
+let recording = false;
+
+function pickMime(){
+  const candidates = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  for (let i=0;i<candidates.length;i++){
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(candidates[i])) return candidates[i];
+  }
+  return 'video/webm';
+}
+btnRec.addEventListener('click', async () => {
+  if (recording) return;
+  audioCtxGet();
+  if (window.__actx && window.__actx.state === 'suspended') { try { await window.__actx.resume(); } catch(e){} }
+  let stream;
+  try { stream = renderer.domElement.captureStream(30); }
+  catch(e){ alert('captureStream is not supported in this browser.'); return; }
+  if (window.__recordDest){
+    const audioTracks = window.__recordDest.stream.getAudioTracks();
+    audioTracks.forEach(t => stream.addTrack(t));
+  }
+  let mime = pickMime();
+  let rec;
+  try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12000000 }); }
+  catch(e){ try { rec = new MediaRecorder(stream); } catch(e2){ alert('MediaRecorder unavailable.'); return; } }
+  const chunks = [];
+  rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+  rec.onstop = () => {
+    const blob = new Blob(chunks, { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'cuckoo-showcase.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    recording = false;
+    recNote.style.display = 'none';
+    btnRec.disabled = false; btnSpeed.disabled = false;
+    controls.enabled = true;
+    // restore interactive scene to a fresh running state
+    resetSim();
+  };
+  const keepSpeed = sim.speed;
+  recording = true;
+  btnRec.disabled = true; btnSpeed.disabled = true;
+  controls.enabled = false;
+  recNote.style.display = 'block';
+  rec.start(200);
+  const startWall = performance.now();
+  function recordFrame(){
+    if (!recording) return;
+    const t = (performance.now() - startWall) / 1000;
+    if (t >= SHOW_DURATION){ runShowcaseFrame(SHOW_DURATION, true); rec.stop(); return; }
+    runShowcaseFrame(t, true);
+    requestAnimationFrame(recordFrame);
+  }
+  requestAnimationFrame(recordFrame);
+});
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+const clock3 = new THREE.Clock();
+const hudTime = document.getElementById('hudTime');
+const hudCuck = document.getElementById('hudCuck');
+const pad = n => (n < 10 ? '0' : '') + n;
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock3.getDelta(), 0.05);
+  if (!recording){
+    stepSim(dt, false);
+    syncVisuals();
+    controls.update();
+    renderFrame();
+  }
+  // HUD
+  const ct = bench.time % 86400;
+  const hh = Math.floor(ct / 3600) % 24, mm = Math.floor((ct % 3600) / 60), ss = Math.floor(ct % 60);
+  hudTime.textContent = pad(hh) + ':' + pad(mm) + ':' + pad(ss);
+  hudCuck.textContent = bench.cuckoos;
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// first-gesture audio unlock
+renderer.domElement.addEventListener('pointerdown', function unlock(){
+  audioCtxGet();
+  if (window.__actx && window.__actx.state === 'suspended') window.__actx.resume();
+  renderer.domElement.removeEventListener('pointerdown', unlock);
+}, { once:false });
+
+syncVisuals();
+animate();
+</script>
+</body>
+</html>

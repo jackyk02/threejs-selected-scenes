@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HURRICANE ORYX — Orbital Feed</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{
+    --accent:#7fd4ff;
+    --accent-dim:rgba(127,212,255,.35);
+    --panel:rgba(8,17,30,.74);
+    --panel2:rgba(5,11,20,.82);
+    --text:#dcecf7;
+    --dim:#7d97ab;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ width:100%; height:100%; overflow:hidden; background:#030711;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color:var(--text); }
+  #scene{ position:fixed; inset:0; display:block; }
+  #vignette{ position:fixed; inset:0; pointer-events:none; z-index:3;
+    background: radial-gradient(ellipse at 50% 42%, transparent 52%, rgba(2,6,14,.38) 78%, rgba(1,4,10,.72) 100%); }
+  #scan{ position:fixed; inset:0; pointer-events:none; z-index:3; opacity:.05;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,.5) 0 1px, transparent 1px 4px); }
+
+  .panel{
+    position:fixed; z-index:6; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    background: linear-gradient(160deg, var(--panel), var(--panel2));
+    border:1px solid rgba(130,200,255,.14);
+    border-left:2px solid var(--accent-dim);
+    border-radius:10px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  #titleBar{ top:22px; left:22px; padding:14px 18px 15px; min-width:300px; }
+  .eyebrow{ font-size:9px; letter-spacing:.32em; color:var(--accent); opacity:.85; display:flex; align-items:center; gap:8px; }
+  .liveDot{ width:6px;height:6px;border-radius:50%; background:#ff5a5a; box-shadow:0 0 8px #ff5a5a; animation:blink 1.15s steps(2,start) infinite; }
+  @keyframes blink{ to{ visibility:hidden; } }
+  h1{ font-size:24px; font-weight:700; letter-spacing:.18em; margin:6px 0 10px;
+      color:#f2f8ff; text-shadow:0 0 22px rgba(127,212,255,.35); }
+  h1 span{ color:var(--accent); }
+  .stats{ display:grid; grid-template-columns:1fr 1fr; gap:8px 18px; }
+  .stat .k{ display:block; font-size:8px; letter-spacing:.24em; color:var(--dim); margin-bottom:2px; }
+  .stat .v{ font-size:12px; color:#eaf4fb; letter-spacing:.06em; }
+  .stat .v.hot{ color:#ffb066; text-shadow:0 0 12px rgba(255,150,80,.5); }
+  #catPips{ display:flex; gap:5px; margin-top:11px; }
+  .pip{ height:4px; flex:1; border-radius:2px; background:rgba(255,255,255,.09); transition: all .35s; }
+  .pip.on{ box-shadow:0 0 8px currentColor; }
+
+  #help{ left:22px; bottom:22px; padding:11px 15px; font-size:9px; letter-spacing:.14em; color:var(--dim); line-height:2.0; }
+  #help b{ color:#cfe6f5; background:rgba(127,212,255,.09); border:1px solid rgba(127,212,255,.22); border-radius:4px; padding:0 5px; margin-right:6px; font-weight:600; }
+
+  #recordBtn{
+    position:fixed; top:22px; right:22px; z-index:7; cursor:pointer;
+    display:flex; align-items:center; gap:10px;
+    font-family:inherit; font-size:10px; letter-spacing:.28em; color:#ffd9d9;
+    padding:12px 18px; border-radius:8px;
+    background: linear-gradient(180deg, rgba(40,12,16,.85), rgba(22,6,10,.9));
+    border:1px solid rgba(255,110,110,.35);
+    box-shadow: 0 6px 30px rgba(255,60,60,.18), inset 0 1px 0 rgba(255,255,255,.08);
+    transition: transform .15s, box-shadow .15s;
+  }
+  #recordBtn:hover{ transform:translateY(-1px); box-shadow:0 8px 36px rgba(255,60,60,.3), inset 0 1px 0 rgba(255,255,255,.1); }
+  #recordBtn:disabled{ cursor:default; opacity:.85; }
+  #recordBtn .dot{ width:11px;height:11px;border-radius:50%; background:#ff4545; box-shadow:0 0 12px #ff4545; animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ transform:scale(1); opacity:1;} 50%{ transform:scale(.72); opacity:.6;} }
+  #recHint{ position:fixed; top:74px; right:22px; z-index:7; font-size:8px; letter-spacing:.2em; color:var(--dim); text-align:right; }
+
+  #stormMarker{
+    position:fixed; z-index:5; pointer-events:none; opacity:0; transition:opacity .35s;
+    display:flex; align-items:center; gap:10px; transform:translate(14px,-50%);
+  }
+  #stormMarker .ring{ width:42px;height:42px;border-radius:50%; border:1px solid rgba(150,225,255,.95);
+    box-shadow:0 0 16px rgba(130,220,255,.35), inset 0 0 14px rgba(130,220,255,.28); position:relative; }
+  #stormMarker .ring::after{ content:''; position:absolute; inset:13px; border-radius:50%; border:1px solid rgba(150,225,255,.75); }
+  #stormMarker .tag{ font-size:9px; letter-spacing:.22em; color:#bfeaff; text-shadow:0 0 10px rgba(90,200,255,.6), 0 1px 3px #000; line-height:1.7; }
+  #stormMarker .tag b{ color:#fff; }
+
+  #loader{
+    position:fixed; inset:0; z-index:20; background:#030711; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; transition:opacity .8s;
+  }
+  #loader.done{ opacity:0; pointer-events:none; }
+  #loader .t{ letter-spacing:.4em; font-size:11px; color:var(--accent); }
+  #loader .bar{ width:260px; height:2px; background:rgba(127,212,255,.12); overflow:hidden; border-radius:2px; }
+  #loader .bar::after{ content:''; display:block; height:100%; width:40%;
+    background:linear-gradient(90deg, transparent, var(--accent), transparent); animation:slide 1.15s linear infinite; }
+  @keyframes slide{ from{ transform:translateX(-100%);} to{ transform:translateX(350%);} }
+
+  #showcaseTag{
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:6; display:none;
+    font-size:9px; letter-spacing:.42em; color:#ffe9b0; padding:8px 22px; border-radius:20px;
+    background:rgba(30,24,6,.6); border:1px solid rgba(255,225,150,.3); backdrop-filter:blur(8px);
+  }
+  body.showcase #showcaseTag{ display:block; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+<div id="vignette"></div>
+<div id="scan"></div>
+
+<div class="panel" id="titleBar">
+  <div class="eyebrow"><span class="liveDot"></span> LIVE ORBITAL FEED · ATLANTIC BASIN</div>
+  <h1>HURRICANE <span>ORYX</span></h1>
+  <div class="stats">
+    <div class="stat"><span class="k">CATEGORY</span><span class="v hot" id="stCat">CATEGORY 3</span></div>
+    <div class="stat"><span class="k">MAX WINDS</span><span class="v" id="stWind">111–129 MPH</span></div>
+    <div class="stat"><span class="k">EYE POSITION</span><span class="v" id="stPos">13.2°N · 54.5°W</span></div>
+    <div class="stat"><span class="k">HEMISPHERE</span><span class="v" id="stHemi">NORTHERN · CCW</span></div>
+    <div class="stat"><span class="k">LIGHTNING STRIKES</span><span class="v" id="stFlash">0</span></div>
+    <div class="stat"><span class="k">STATUS</span><span class="v" id="stTrack">W.N.W. · 26 KM/H</span></div>
+  </div>
+  <div id="catPips"></div>
+</div>
+
+<div class="panel" id="help">
+  <div><b>1–5</b>SAFFIR–SIMPSON CATEGORY</div>
+  <div><b>H</b>FLIP HEMISPHERE · REVERSE SPIN</div>
+  <div><b>DRAG</b>ORBIT &nbsp;<b>SCROLL</b>ZOOM</div>
+</div>
+
+<button id="recordBtn"><span class="dot"></span><span id="recLabel">RECORD VIDEO</span></button>
+<div id="recHint">SHOWCASE REEL · 12s · WEBM</div>
+<div id="showcaseTag">— SHOWCASE REEL —</div>
+
+<div id="stormMarker"><div class="ring"></div><div class="tag"><b>ORYX</b><br><span id="mkCat">CAT 3</span> · EYE</div></div>
+
+<div id="loader"><div class="t">GENERATING PLANET</div><div class="bar"></div></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* ============================================================
+   HURRICANE ORYX — procedural Earth + hurricane from orbit
+   ============================================================ */
+
+// ---------- deterministic PRNG & noise ----------
+function mulberry32(seed){ return function(){ seed|=0; seed=(seed+0x6D2B79F5)|0; let t=Math.imul(seed^(seed>>>15),1|seed); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }; }
+const lerp=(a,b,t)=>a+(b-a)*t;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const smoothstep=(a,b,x)=>{ const t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); };
+const DEG=Math.PI/180;
+
+function makeValueNoise(seed){
+  const rand=mulberry32(seed);
+  const p=[...Array(256).keys()];
+  for(let i=255;i>0;i--){ const j=(rand()*(i+1))|0; const tmp=p[i]; p[i]=p[j]; p[j]=tmp; }
+  const perm=new Uint8Array(512), vals=new Float32Array(256);
+  for(let i=0;i<512;i++) perm[i]=p[i&255];
+  for(let i=0;i<256;i++) vals[i]=rand();
+  const fade=t=>t*t*(3-2*t);
+  function lat(ix,iy){ return vals[perm[(perm[ix&255]+iy)&255]]; }
+  return function noise2(x,y,periodX){
+    const ix=Math.floor(x), iy=Math.floor(y);
+    const fx=x-ix, fy=y-iy, ux=fade(fx), uy=fade(fy);
+    const x0=((ix%periodX)+periodX)%periodX, x1=(x0+1)%periodX;
+    const a=lat(x0,iy), b=lat(x1,iy), c=lat(x0,iy+1), d=lat(x1,iy+1);
+    return a+(b-a)*ux+(c-a)*uy+(a-b-c+d)*ux*uy;
+  };
+}
+const noiseA=makeValueNoise(101), noiseB=makeValueNoise(202), noiseC=makeValueNoise(303);
+function fbm(noise,x,y,oct,periodX){
+  let amp=0.5, freq=1, sum=0, norm=0, px=periodX;
+  for(let i=0;i<oct;i++){ sum+=amp*noise(x*freq,y*freq,px); norm+=amp; amp*=0.5; freq*=2; px*=2; }
+  return sum/norm;
+}
+
+// ---------- continent field ----------
+const SEA=0.335;
+function bump(lonDeg,latDeg,clon,clat,sx,sy){
+  const dx=(lonDeg-clon)*Math.cos(latDeg*DEG)*DEG, dy=(latDeg-clat)*DEG;
+  return Math.exp(-(dx*dx/(sx*sx)+dy*dy/(sy*sy)));
+}
+function continentHeight(lonDeg,latDeg){
+  const base=5;
+  const nx=(lonDeg+180)/360*base, ny=(90-latDeg)/180*base*0.55+11.3;
+  let h=fbm(noiseA,nx,ny,5,base)*0.52-0.30;
+  h+=1.00*bump(lonDeg,latDeg,-96, 43,0.30,0.185); // North America
+  h+=0.92*bump(lonDeg,latDeg,-62,-10,0.145,0.240); // South America
+  h+=1.08*bump(lonDeg,latDeg, 34, 47,0.44,0.210); // Eurasia
+  h+=0.85*bump(lonDeg,latDeg, 21,  5,0.165,0.200); // Africa
+  h+=0.62*bump(lonDeg,latDeg,134,-25,0.115,0.085); // Australia
+  h+=0.72*bump(lonDeg,latDeg,-42, 74,0.115,0.075); // Greenland
+  h+=0.55*bump(lonDeg,latDeg,103, 13,0.160,0.130); // S.E. Asia
+  h+=0.42*bump(lonDeg,latDeg,163, 60,0.090,0.070); // E. Siberia
+  return h;
+}
+
+// ---------- procedural canvas textures ----------
+function makeEarthMaps(){
+  const W=2048,H=1024;
+  const dayC=document.createElement('canvas'); dayC.width=W; dayC.height=H;
+  const glossC=document.createElement('canvas'); glossC.width=W; glossC.height=H;
+  const dctx=dayC.getContext('2d'), gctx=glossC.getContext('2d');
+  const img=dctx.createImageData(W,H), gimg=gctx.createImageData(W,H);
+  const d=img.data, g=gimg.data;
+  for(let y=0;y<H;y++){
+    const latDeg=90-(y+0.5)/H*180, latRad=latDeg*DEG, absLat=Math.abs(latDeg);
+    for(let x=0;x<W;x++){
+      const lonDeg=(x+0.5)/W*360-180;
+      const h=continentHeight(lonDeg,latDeg);
+      const i=(y*W+x)*4;
+      const nv=fbm(noiseB,(x/W)*8+13.7,(y/H)*4+7.1,3,8);
+      let r,gg,b,gl;
+      if(h<SEA){
+        const dep=Math.pow(Math.min(1,(SEA-h)/0.32),0.8);
+        r=lerp(15,4,dep); gg=lerp(72,17,dep); b=lerp(112,44,dep);
+        const rim=smoothstep(SEA-0.03,SEA,h);
+        r=lerp(r,26,rim*0.75); gg=lerp(gg,98,rim*0.75); b=lerp(b,130,rim*0.75);
+        const ice=smoothstep(70+nv*5,80,absLat);
+        r=lerp(r,214,ice); gg=lerp(gg,226,ice); b=lerp(b,232,ice);
+        gl=238-rim*90;
+      } else {
+        const e=h-SEA;
+        const arid=Math.exp(-Math.pow((absLat-23)/10.5,2))*(0.45+0.55*nv);
+        r=lerp(46,176,arid); gg=lerp(96,152,arid); b=lerp(46,104,arid);
+        const veg=fbm(noiseB,(x/W)*14+3.1,(y/H)*7+9.4,3,14);
+        r=lerp(r,34,veg*0.4); gg=lerp(gg,84,veg*0.4); b=lerp(b,36,veg*0.4);
+        const beach=smoothstep(0.045,0.005,e);
+        r=lerp(r,172,beach*0.6); gg=lerp(gg,162,beach*0.6); b=lerp(b,118,beach*0.6);
+        const t1=smoothstep(0.14,0.30,e);
+        r=lerp(r,106,t1); gg=lerp(gg,97,t1); b=lerp(b,89,t1);
+        const t2=smoothstep(0.30,0.50,e);
+        r=lerp(r,208,t2); gg=lerp(gg,210,t2); b=lerp(b,214,t2);
+        const ice=smoothstep(63+nv*7,73+nv*4,absLat);
+        r=lerp(r,234,ice); gg=lerp(gg,240,ice); b=lerp(b,245,ice);
+        gl=18+t2*40;
+      }
+      d[i]=r; d[i+1]=gg; d[i+2]=b; d[i+3]=255;
+      g[i]=gl; g[i+1]=gl; g[i+2]=gl; g[i+3]=255;
+    }
+  }
+  dctx.putImageData(img,0,0); gctx.putImageData(gimg,0,0);
+  return { day:dayC, gloss:glossC };
+}
+function makeNightLights(){
+  const W=1024,H=512,c=document.createElement('canvas'); c.width=W; c.height=H;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation='lighter';
+  const rng=mulberry32(1234);
+  let placed=0, tries=0;
+  while(placed<205 && tries<7000){
+    tries++;
+    const lon=rng()*360-180, lat=Math.asin((rng()*2-1)*0.92)/DEG;
+    const h=continentHeight(lon,lat);
+    if(h<=SEA+0.004) continue;
+    placed++;
+    const cx=(lon+180)/360*W, cy=(90-lat)/180*H;
+    const spread=1.6+rng()*3.6, dots=16+(rng()*64|0);
+    for(let j=0;j<dots;j++){
+      const a=rng()*Math.PI*2, dd=Math.pow(rng(),0.5)*spread*3.4;
+      let px=cx+Math.cos(a)*dd*2.3, py=cy+Math.sin(a)*dd*1.35;
+      px=((px%W)+W)%W; if(py<0||py>=H) continue;
+      const metro=rng()>0.9;
+      const rad=metro? 1.5+rng()*1.9 : 0.45+rng()*1.15;
+      const alpha=metro? 0.75+rng()*0.25 : 0.3+rng()*0.55;
+      ctx.fillStyle='rgba(255,'+(206+((rng()*42)|0))+','+(138+((rng()*66)|0))+','+alpha+')';
+      ctx.beginPath(); ctx.arc(px,py,rad,0,6.2832); ctx.fill();
+    }
+  }
+  return c;
+}
+function makeCloudTexture(){
+  const W=1024,H=512,c=document.createElement('canvas'); c.width=W; c.height=H;
+  const ctx=c.getContext('2d'); const img=ctx.createImageData(W,H); const d=img.data;
+  for(let y=0;y<H;y++){
+    const latN=(y/H)*Math.PI;
+    const cover=0.66+0.42*(0.5+0.5*Math.sin(latN*2.15+0.7))+0.18*Math.cos(latN);
+    for(let x=0;x<W;x++){
+      const n=fbm(noiseC,(x/W)*7,(y/H)*3.6+4.2,5,7);
+      let a=smoothstep(0.53,0.80,n)*cover;
+      a=clamp(a,0,0.95);
+      const i=(y*W+x)*4;
+      d[i]=255; d[i+1]=253; d[i+2]=250; d[i+3]=a*255;
+    }
+  }
+  ctx.putImageData(img,0,0); return c;
+}
+function makePuffTexture(){
+  const s=128,c=document.createElement('canvas'); c.width=s; c.height=s;
+  const ctx=c.getContext('2d'); const rng=mulberry32(555);
+  ctx.clearRect(0,0,s,s);
+  for(let i=0;i<11;i++){
+    const a=rng()*Math.PI*2, dd=rng()*26, r=15+rng()*24;
+    const px=64+Math.cos(a)*dd, py=64+Math.sin(a)*dd;
+    const g=ctx.createRadialGradient(px,py,0,px,py,r);
+    g.addColorStop(0,'rgba(255,255,255,0.9)');
+    g.addColorStop(0.55,'rgba(255,255,255,0.45)');
+    g.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=g; ctx.fillRect(0,0,s,s);
+  }
+  return c;
+}
+function makeBoltTexture(){
+  const W=128,H=256,c=document.createElement('canvas'); c.width=W; c.height=H;
+  const ctx=c.getContext('2d'); const rng=mulberry32(4242);
+  ctx.clearRect(0,0,W,H); ctx.lineJoin='round'; ctx.lineCap='round';
+  function stroke(lw,blur,style){
+    ctx.strokeStyle=style; ctx.lineWidth=lw; ctx.shadowColor='#a8d4ff'; ctx.shadowBlur=blur;
+    ctx.beginPath(); let px=64, py=2; ctx.moveTo(px,py);
+    const pts=[[px,py]];
+    while(py<H-6){ py+=9+rng()*13; px+=(rng()-0.5)*38; px=clamp(px,10,W-10); ctx.lineTo(px,py); pts.push([px,py]); }
+    ctx.stroke();
+    // branches
+    for(let b=0;b<3;b++){
+      const idx=2+((rng()*(pts.length-4))|0); let [bx,by]=pts[idx];
+      ctx.beginPath(); ctx.moveTo(bx,by);
+      for(let s=0;s<4;s++){ by+=8+rng()*12; bx+=(rng()-0.5)*44; ctx.lineTo(bx,by); }
+      ctx.stroke();
+    }
+  }
+  stroke(6.5,16,'rgba(168,212,255,0.55)'); stroke(3.4,9,'#cfe8ff'); stroke(1.3,2,'#ffffff');
+  return c;
+}
+function makeGlowTexture(){
+  const s=256,c=document.createElement('canvas'); c.width=s; c.height=s;
+  const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(255,255,255,1)');
+  g.addColorStop(0.16,'rgba(255,246,220,0.95)');
+  g.addColorStop(0.42,'rgba(214,228,255,0.30)');
+  g.addColorStop(1,'rgba(190,215,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,s,s); return c;
+}
+function makeFlashGlowTexture(){
+  const s=128,c=document.createElement('canvas'); c.width=s; c.height=s;
+  const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(235,244,255,1)');
+  g.addColorStop(0.4,'rgba(170,205,255,0.5)');
+  g.addColorStop(1,'rgba(150,190,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,s,s); return c;
+}
+
+// ---------- constants & state ----------
+const EARTH_R=2.0;
+const SHOWCASE_DURATION=12.0;
+const CATS=[
+  null,
+  { eye:0.165, density:0.78, rot:1.35, wind:'74–95 MPH',  label:'CATEGORY 1', color:'#7ee2a8' },
+  { eye:0.140, density:0.90, rot:1.66, wind:'96–110 MPH', label:'CATEGORY 2', color:'#c4e86e' },
+  { eye:0.118, density:1.02, rot:1.97, wind:'111–129 MPH',label:'CATEGORY 3', color:'#ffd166' },
+  { eye:0.097, density:1.15, rot:2.32, wind:'130–156 MPH',label:'CATEGORY 4', color:'#ff9f5a' },
+  { eye:0.077, density:1.30, rot:2.78, wind:'157+ MPH',   label:'CATEGORY 5', color:'#ff5a5a' }
+];
+let category=3;
+let hemisphereSign=+1;       // +1 northern (CCW), -1 southern (CW)
+let simTime=0;               // interactive clock
+let showcaseMode=false, showcaseElapsed=0, recording=false;
+const TILT=0.34;
+const tiltQuat=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),TILT);
+
+// lightning schedule — deterministic, covers ~2 hours
+const FLASH_TIMES=[];
+{
+  const frand=mulberry32(90210);
+  let t=1.6; while(t<7200){ FLASH_TIMES.push(t); t+=1.1+frand()*3.4; }
+  [3.35,4.15,8.2,8.62,10.9].forEach(ft=>FLASH_TIMES.push(ft));  // showcase drama beats
+  FLASH_TIMES.sort((a,b)=>a-b);
+}
+function flashState(t){
+  let intensity=0,count=0,lastFt=-1,lastIdx=-1;
+  for(let i=0;i<FLASH_TIMES.length;i++){
+    const ft=FLASH_TIMES[i]; if(ft>t) break;
+    count++; lastFt=ft; lastIdx=i;
+    const tau=t-ft;
+    if(tau<1.35) intensity+=Math.exp(-tau*5.0)*(0.55+0.45*Math.sin(tau*34.0+ft*13.7));
+  }
+  return { intensity:clamp(intensity,0,1.6), count, lastFt, lastIdx };
+}
+const trackPos=t=>({ lat:Math.min(33, 13.2+0.165*t+0.0016*t*t), lon:Math.max(-80.5, -54.5-0.34*t) });
+const latLonToDir=(lat,lon)=>{
+  const phi=(lon+180)/180*Math.PI, theta=(90-lat)/180*Math.PI;
+  return new THREE.Vector3(-Math.cos(phi)*Math.sin(theta), Math.cos(theta), Math.sin(phi)*Math.sin(theta));
+};
+const worldDirOf=(lat,lon)=>latLonToDir(lat,lon).applyQuaternion(tiltQuat);
+
+// ---------- boot (synchronous procedural build) ----------
+const canvas=document.getElementById('scene');
+const renderer=new THREE.WebGLRenderer({ canvas, antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.15;
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x030711,1);
+
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 300);
+const sunDir=new THREE.Vector3(-0.6,0.35,0.66).normalize();
+
+const earthMaps=makeEarthMaps();
+const dayTex=new THREE.CanvasTexture(earthMaps.day); dayTex.colorSpace=THREE.SRGBColorSpace; dayTex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+const glossTex=new THREE.CanvasTexture(earthMaps.gloss); glossTex.anisotropy=4;
+const nightTex=new THREE.CanvasTexture(makeNightLights()); nightTex.colorSpace=THREE.SRGBColorSpace; nightTex.anisotropy=4;
+const cloudTex=new THREE.CanvasTexture(makeCloudTexture()); cloudTex.colorSpace=THREE.SRGBColorSpace;
+const puffTex=new THREE.CanvasTexture(makePuffTexture());
+const boltTex=new THREE.CanvasTexture(makeBoltTexture());
+const glowTex=new THREE.CanvasTexture(makeGlowTexture());
+const flashGlowTex=new THREE.CanvasTexture(makeFlashGlowTexture());
+
+const tiltGroup=new THREE.Group();
+tiltGroup.rotation.z=TILT;
+scene.add(tiltGroup);
+
+// ----- Earth (custom shader) -----
+const earthUniforms={
+  uDay:{value:dayTex}, uNight:{value:nightTex}, uGloss:{value:glossTex},
+  uSunDir:{value:sunDir.clone()}
+};
+const earthMat=new THREE.ShaderMaterial({
+  uniforms:earthUniforms,
+  vertexShader:`
+    varying vec2 vUv; varying vec3 vWp;
+    void main(){
+      vUv=uv;
+      vec4 wp=modelMatrix*vec4(position,1.0);
+      vWp=wp.xyz;
+      gl_Position=projectionMatrix*viewMatrix*wp;
+    }`,
+  fragmentShader:`
+    uniform sampler2D uDay,uNight,uGloss; uniform vec3 uSunDir;
+    varying vec2 vUv; varying vec3 vWp;
+    void main(){
+      vec3 N=normalize(vWp);
+      vec3 V=normalize(cameraPosition-vWp);
+      vec3 day=texture2D(uDay,vUv).rgb;
+      vec3 night=texture2D(uNight,vUv).rgb;
+      float ndl=dot(N,uSunDir);
+      float dayF=smoothstep(-0.10,0.32,ndl);
+      // base: day side + faint earthshine
+      vec3 col=day*(0.055+1.18*dayF);
+      // night side: city lights + moonlit ocean
+      col+=night*(1.0-dayF)*2.15;
+      col+=vec3(0.012,0.02,0.04)*(1.0-dayF);
+      // specular sun glint on oceans (Blinn–Phong)
+      vec3 H=normalize(V+uSunDir);
+      float ndh=max(dot(N,H),0.0);
+      float gloss=texture2D(uGloss,vUv).r;
+      col+=vec3(1.0,0.97,0.90)*pow(ndh,140.0)*gloss*dayF*2.4;
+      col+=vec3(0.35,0.42,0.50)*pow(ndh,18.0)*gloss*dayF*0.35;
+      // warm terminator band
+      float term=exp(-abs(ndl)*5.5);
+      col+=vec3(0.42,0.16,0.04)*term*0.5;
+      // fresnel atmosphere haze hugging the limb
+      float fres=pow(1.0-abs(dot(N,V)),3.5);
+      col+=mix(vec3(0.02,0.05,0.12),vec3(0.32,0.55,0.85),dayF)*fres*0.9;
+      gl_FragColor=vec4(col,1.0);
+    }`
+});
+const earthMesh=new THREE.Mesh(new THREE.SphereGeometry(EARTH_R,160,120), earthMat);
+tiltGroup.add(earthMesh);
+
+// ----- drifting general cloud layer -----
+const cloudMat=new THREE.MeshLambertMaterial({
+  map:cloudTex, transparent:true, opacity:0.88, depthWrite:false,
+  emissive:0x0a0f18, side:THREE.FrontSide
+});
+const cloudMesh=new THREE.Mesh(new THREE.SphereGeometry(EARTH_R+0.012,96,72), cloudMat);
+cloudMesh.renderOrder=1;
+tiltGroup.add(cloudMesh);
+
+// ----- atmosphere shell (backside fresnel halo) -----
+const atmoMat=new THREE.ShaderMaterial({
+  uniforms:{ uSunDir:{value:sunDir.clone()} },
+  vertexShader:`
+    varying vec3 vWp; varying vec3 vN;
+    void main(){
+      vN=normalize(mat3(modelMatrix)*normal);
+      vec4 wp=modelMatrix*vec4(position,1.0); vWp=wp.xyz;
+      gl_Position=projectionMatrix*viewMatrix*wp;
+    }`,
+  fragmentShader:`
+    uniform vec3 uSunDir; varying vec3 vWp; varying vec3 vN;
+    void main(){
+      vec3 N=normalize(vN);
+      vec3 V=normalize(cameraPosition-vWp);
+      float rim=1.0-abs(dot(N,V));
+      float glow=pow(rim,3.0);
+      float ndl=dot(normalize(vWp),uSunDir);
+      float sunF=smoothstep(-0.4,0.55,ndl);
+      float halo=pow(max(ndl,0.0)*0.5+0.5,2.0);
+      vec3 tint=mix(vec3(0.05,0.09,0.22),vec3(0.35,0.62,1.05),sunF);
+      vec3 col=tint*glow*(0.55+1.15*halo)*1.35;
+      gl_FragColor=vec4(col,glow*(0.35+0.65*sunF));
+    }`,
+  side:THREE.BackSide, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false
+});
+const atmoMesh=new THREE.Mesh(new THREE.SphereGeometry(EARTH_R*1.055,96,72), atmoMat);
+tiltGroup.add(atmoMesh);
+
+// ----- starfield -----
+{
+  const starCount=2600, pos=new Float32Array(starCount*3), col=new Float32Array(starCount*3);
+  const rng=mulberry32(31415);
+  for(let i=0;i<starCount;i++){
+    const u=rng()*2-1, phi=rng()*Math.PI*2, s=Math.sqrt(1-u*u), r=70+rng()*40;
+    pos[i*3]=Math.cos(phi)*s*r; pos[i*3+1]=u*r; pos[i*3+2]=Math.sin(phi)*s*r;
+    const b=0.35+Math.pow(rng(),2.2)*0.65, tint=rng();
+    col[i*3]=b*(tint>0.82?0.75:1.0); col[i*3+1]=b*0.92; col[i*3+2]=b*(tint<0.18?0.78:1.0);
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({ size:1.55, vertexColors:true, sizeAttenuation:false, transparent:true, opacity:0.95, depthWrite:false })));
+}
+// ----- sun glow sprites -----
+const sunSprite=new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xffffff, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false }));
+sunSprite.scale.set(34,34,1); scene.add(sunSprite);
+const sunCore=new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xfff6dc, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false }));
+sunCore.scale.set(9.5,9.5,1); scene.add(sunCore);
+
+// ----- lights for the Lambert cloud deck -----
+const sunLight=new THREE.DirectionalLight(0xffffff,2.1); scene.add(sunLight); scene.add(sunLight.target);
+scene.add(new THREE.AmbientLight(0x223344,0.85));
+scene.add(new THREE.HemisphereLight(0x8ab6ff,0x0b1020,0.5));
+
+// ----- curved storm-cap geometry (hugs the sphere) -----
+function buildSphereCap(halfSize,seg,Rh){
+  const geo=new THREE.PlaneGeometry(halfSize*2,halfSize*2,seg,seg);
+  const pos=geo.attributes.position;
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i), y=pos.getY(i), r2=x*x+y*y;
+    pos.setZ(i, Math.sqrt(Math.max(Rh*Rh-r2,0.0001)));
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+const stormHalf=1.28, cirrusHalf=1.85;
+const STORM_RH=EARTH_R+0.02, CIRRUS_RH=EARTH_R+0.075;
+const Z_AXIS=new THREE.Vector3(0,0,1);
+
+// ----- hurricane shader (log-spiral bands, eye, eyewall, differential rotation) -----
+const GLSL_NOISE=`
+  float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+  float vnoise(vec2 p){
+    vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
+    float a=hash(i),b=hash(i+vec2(1.0,0.0)),c=hash(i+vec2(0.0,1.0)),d=hash(i+vec2(1.0,1.0));
+    return mix(mix(a,b,u.x),mix(c,d,u.x),u.y);
+  }
+  float fbm2(vec2 p){ float s=0.0,a=0.5; for(int i=0;i<4;i++){ s+=a*vnoise(p); p*=2.03; a*=0.5; } return s; }
+`;
+const stormUniforms={
+  uTime:{value:0}, uSpin:{value:1}, uEyeR:{value:CATS[3].eye}, uStormR:{value:1.05},
+  uRotSpeed:{value:CATS[3].rot}, uDensity:{value:CATS[3].density}, uFlash:{value:0},
+  uArms:{value:5.0}, uSunDir:{value:sunDir.clone()}
+};
+const stormMat=new THREE.ShaderMaterial({
+  uniforms:stormUniforms,
+  vertexShader:`
+    varying vec2 vP; varying vec3 vWp;
+    void main(){ vP=position.xy; vec4 wp=modelMatrix*vec4(position,1.0); vWp=wp.xyz;
+      gl_Position=projectionMatrix*viewMatrix*wp; }`,
+  fragmentShader:`
+    uniform float uTime,uSpin,uEyeR,uStormR,uRotSpeed,uDensity,uFlash,uArms;
+    uniform vec3 uSunDir;
+    varying vec2 vP; varying vec3 vWp;
+    ${GLSL_NOISE}
+    void main(){
+      float r=length(vP);
+      if(r>uStormR) discard;
+      float theta=atan(vP.y,vP.x);
+      // differential rotation — inner wall spins faster
+      float om=uRotSpeed*(uEyeR*1.7)/(r+uEyeR*1.15);
+      float a=theta-uSpin*uTime*om;
+      float lr=log(max(r,0.015));
+      // logarithmic spiral arms
+      float ph=uArms*a+10.5*lr;
+      float arms=pow(0.5+0.5*cos(ph),2.4);
+      float arms2=pow(0.5+0.5*cos(ph*0.5+1.7),6.0);
+      arms=clamp(arms*0.8+arms2*0.55,0.0,1.35);
+      float inner=smoothstep(uStormR,uStormR*0.12,r);
+      float n=fbm2(vP*3.6+vec2(uTime*0.016,-uTime*0.011));
+      float n2=fbm2(vP*9.0-vec2(uTime*0.020,uTime*0.014));
+      float ew=exp(-pow((r-uEyeR)/(uEyeR*0.36),2.0));      // dense eyewall ring
+      float eye=smoothstep(uEyeR*0.60,uEyeR*1.04,r);        // clear eye
+      float body=arms*inner*uDensity*(0.38+0.85*n);
+      float alpha=body+ew*(0.80+0.40*n2);
+      alpha*=eye;
+      alpha+=ew*0.12*n2;
+      alpha*=smoothstep(uStormR,uStormR*0.86,r);
+      // lighting
+      vec3 N=normalize(vWp);
+      float ndl=dot(N,uSunDir);
+      float dayF=smoothstep(-0.16,0.42,ndl);
+      vec3 col=mix(vec3(0.028,0.040,0.075),vec3(1.08,1.09,1.07),dayF);
+      float term=exp(-abs(ndl)*4.5);
+      col+=vec3(0.50,0.30,0.16)*term*0.55;
+      col*=(0.70+0.55*n);
+      // lightning illumination from within
+      col+=vec3(0.50,0.66,1.15)*uFlash*(0.40+ew*1.5+arms*0.75);
+      gl_FragColor=vec4(col,clamp(alpha,0.0,1.0)*0.93);
+    }`,
+  transparent:true, depthWrite:false
+});
+const stormMesh=new THREE.Mesh(buildSphereCap(stormHalf,128,STORM_RH), stormMat);
+stormMesh.renderOrder=2; stormMesh.frustumCulled=false;
+tiltGroup.add(stormMesh);
+
+// cirrus outflow shield — high, faint, additive
+const cirrusUniforms={
+  uTime:{value:0}, uSpin:{value:1}, uEyeR:{value:CATS[3].eye}, uStormR:{value:1.05},
+  uFlash:{value:0}, uSunDir:{value:sunDir.clone()}
+};
+const cirrusMat=new THREE.ShaderMaterial({
+  uniforms:cirrusUniforms,
+  vertexShader:`
+    varying vec2 vP; varying vec3 vWp;
+    void main(){ vP=position.xy; vec4 wp=modelMatrix*vec4(position,1.0); vWp=wp.xyz;
+      gl_Position=projectionMatrix*viewMatrix*wp; }`,
+  fragmentShader:`
+    uniform float uTime,uSpin,uEyeR,uStormR,uFlash; uniform vec3 uSunDir;
+    varying vec2 vP; varying vec3 vWp;
+    ${GLSL_NOISE}
+    void main(){
+      float r=length(vP);
+      if(r>uStormR*1.55) discard;
+      float theta=atan(vP.y,vP.x);
+      float a=theta-uSpin*uTime*0.22;                 // slow outflow rotation
+      float lr=log(max(r,0.02));
+      float streak=pow(0.5+0.5*cos(9.0*a+13.0*lr),7.0);
+      float ring=exp(-pow((r-uEyeR*2.2)/(uEyeR*1.35),2.0));
+      float n=fbm2(vP*2.3+vec2(uTime*0.012,0.0));
+      float alpha=(streak*0.42+ring*0.40)*(0.35+0.65*n);
+      alpha*=smoothstep(uStormR*1.55,uStormR*0.85,r);
+      alpha*=smoothstep(uEyeR*0.4,uEyeR*1.5,r)*0.85+0.15;
+      vec3 N=normalize(vWp);
+      float ndl=dot(N,uSunDir);
+      float dayF=smoothstep(-0.15,0.45,ndl);
+      vec3 col=mix(vec3(0.05,0.07,0.12),vec3(1.15,1.15,1.12),dayF);
+      col+=vec3(0.45,0.6,1.0)*uFlash*0.8;
+      gl_FragColor=vec4(col,alpha*0.55*(0.25+dayF*0.75)+uFlash*alpha*0.3);
+    }`,
+  transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+});
+const cirrusMesh=new THREE.Mesh(buildSphereCap(cirrusHalf,96,CIRRUS_RH), cirrusMat);
+cirrusMesh.renderOrder=3; cirrusMesh.frustumCulled=false;
+tiltGroup.add(cirrusMesh);
+
+// ----- 3D eyewall + spiral-arm cloud puffs (sprites) -----
+const stormSprites=[];
+{
+  const rng=mulberry32(777001);
+  const eyeN=170, armN=230;
+  for(let i=0;i<eyeN;i++){
+    const ang=rng()*Math.PI*2;
+    const m=new THREE.SpriteMaterial({ map:puffTex, transparent:true, depthWrite:false, depthTest:true, opacity:0.72+rng()*0.26, color:0xffffff, rotation:rng()*Math.PI*2 });
+    const s=new THREE.Sprite(m); s.frustumCulled=false;
+    s.userData={ r:CATS[3].eye*(0.82+rng()*0.42), ang, s0:0.16+rng()*0.10, eye:true, op:m.opacity };
+    tiltGroup.add(s); stormSprites.push(s);
+  }
+  for(let i=0;i<armN;i++){
+    const arm=i%5, s=Math.pow(rng(),0.85);
+    const m=new THREE.SpriteMaterial({ map:puffTex, transparent:true, depthWrite:false, depthTest:true, opacity:0.45+rng()*0.4, color:0xffffff, rotation:rng()*Math.PI*2 });
+    const sp=new THREE.Sprite(m); sp.frustumCulled=false;
+    sp.userData={ arm, s, ang0:arm*(Math.PI*2/5)+s*4.6+(rng()-0.5)*0.5, s0:0.13+s*0.24+rng()*0.08, eye:false, op:m.opacity };
+    tiltGroup.add(sp); stormSprites.push(sp);
+  }
+}
+// ----- lightning bolt + intra-cloud flash glow -----
+const boltMat=new THREE.SpriteMaterial({ map:boltTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, depthTest:true, opacity:0 });
+const bolt=new THREE.Sprite(boltMat); bolt.frustumCulled=false; bolt.renderOrder=4; bolt.visible=false;
+tiltGroup.add(bolt);
+const flashGlowMat=new THREE.SpriteMaterial({ map:flashGlowTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, depthTest:true, opacity:0 });
+const flashGlow=new THREE.Sprite(flashGlowMat); flashGlow.frustumCulled=false; flashGlow.renderOrder=4; flashGlow.visible=false;
+tiltGroup.add(flashGlow);
+
+// ----- OrbitControls -----
+const controls=new OrbitControls(camera, renderer.domElement);
+controls.enableDamping=true; controls.dampingFactor=0.06;
+controls.minDistance=2.6; controls.maxDistance=16;
+controls.autoRotate=false;
+const initStormWorld=worldDirOf(13.2,-54.5).multiplyScalar(EARTH_R);
+camera.position.copy(worldDirOf(20,-38).multiplyScalar(6.6)).add(new THREE.Vector3(0,1.5,0));
+controls.target.copy(initStormWorld).multiplyScalar(0.35);
+controls.update();
+
+// ----- post-processing: HDR bloom -----
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloom=new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight), 0.75, 0.55, 0.72);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ---------- HUD ----------
+const $=id=>document.getElementById(id);
+const stCat=$('stCat'), stWind=$('stWind'), stPos=$('stPos'), stHemi=$('stHemi'), stFlash=$('stFlash'), stTrack=$('stTrack'), mkCat=$('mkCat');
+const pipsWrap=$('catPips');
+for(let i=0;i<5;i++){ const p=document.createElement('div'); p.className='pip'; p.style.color=CATS[i+1].color; pipsWrap.appendChild(p); }
+const pips=[...pipsWrap.children];
+const marker=$('stormMarker');
+
+function updateHUD(t,lat,lon,flashes){
+  const cat=CATS[category];
+  stCat.textContent=cat.label; stCat.style.color=cat.color; stCat.style.textShadow='0 0 14px '+cat.color+'66';
+  stWind.textContent=cat.wind;
+  const la=Math.abs(lat).toFixed(1)+'°'+(lat>=0?'N':'S'), lo=Math.abs(lon).toFixed(1)+'°W';
+  stPos.textContent=la+' · '+lo;
+  stHemi.textContent=(hemisphereSign>0?'NORTHERN · CCW':'SOUTHERN · CW');
+  stFlash.textContent=String(flashes);
+  stTrack.textContent='W.N.W. · 26 KM/H';
+  mkCat.textContent='CAT '+category;
+  for(let i=0;i<5;i++){ pips[i].classList.toggle('on', i<category); pips[i].style.background=i<category?CATS[i+1].color:'rgba(255,255,255,.09)'; }
+}
+function updateMarker(stormWorld){
+  const toStorm=stormWorld.clone().sub(camera.position);
+  const facing=toStorm.clone().normalize().dot(stormWorld.clone().normalize());
+  const v=stormWorld.clone().project(camera);
+  if(facing>0.03 && v.z<1){
+    marker.style.opacity='1';
+    marker.style.left=((v.x*0.5+0.5)*window.innerWidth)+'px';
+    marker.style.top=((-v.y*0.5+0.5)*window.innerHeight)+'px';
+  } else marker.style.opacity='0';
+}
+
+// ---------- deterministic world state (shared by interactive + showcase/seek) ----------
+const _dir=new THREE.Vector3(), _u=new THREE.Vector3(), _v=new THREE.Vector3(), _tmp=new THREE.Vector3(), _up=new THREE.Vector3(0,1,0);
+const _darkTint=new THREE.Color(0.055,0.075,0.13), _lightTint=new THREE.Color(1.12,1.12,1.1), _tint=new THREE.Color();
+const stormWorld=new THREE.Vector3();
+
+function applyState(t){
+  // sun azimuth slowly turns — terminator sweeps across the storm
+  const az=2.35+t*0.07, el=0.34;
+  sunDir.set(Math.cos(el)*Math.cos(az), Math.sin(el), Math.cos(el)*Math.sin(az)).normalize();
+  sunSprite.position.copy(sunDir).multiplyScalar(80);
+  sunCore.position.copy(sunDir).multiplyScalar(60);
+  sunLight.position.copy(sunDir).multiplyScalar(10);
+  earthUniforms.uSunDir.value.copy(sunDir);
+  atmoMat.uniforms.uSunDir.value.copy(sunDir);
+  stormUniforms.uSunDir.value.copy(sunDir);
+  cirrusUniforms.uSunDir.value.copy(sunDir);
+
+  // storm track
+  const tr=trackPos(t), eyeLat=tr.lat*hemisphereSign, eyeLon=tr.lon;
+  _dir.copy(latLonToDir(eyeLat,eyeLon));
+  // orient caps to the storm normal
+  stormMesh.quaternion.setFromUnitVectors(Z_AXIS,_dir);
+  cirrusMesh.quaternion.setFromUnitVectors(Z_AXIS,_dir);
+  // tangent basis for sprites
+  _up.set(0,1,0);
+  _u.crossVectors(_up,_dir);
+  if(_u.lengthSq()<1e-4) _u.set(1,0,0); _u.normalize();
+  _v.crossVectors(_dir,_u).normalize();
+
+  // category-driven uniforms
+  const cat=CATS[category], spin=hemisphereSign;
+  stormUniforms.uTime.value=t; stormUniforms.uSpin.value=spin;
+  stormUniforms.uEyeR.value=cat.eye; stormUniforms.uRotSpeed.value=cat.rot; stormUniforms.uDensity.value=cat.density;
+  cirrusUniforms.uTime.value=t; cirrusUniforms.uSpin.value=spin; cirrusUniforms.uEyeR.value=cat.eye;
+
+  // lightning
+  const fs=flashState(t);
+  stormUniforms.uFlash.value=fs.intensity;
+  cirrusUniforms.uFlash.value=fs.intensity;
+
+  // day/night tint for sprites (storm-center lighting)
+  const wDir=_tmp.copy(_dir).applyQuaternion(tiltQuat).normalize();
+  const ndl=wDir.dot(sunDir);
+  const dayF=smoothstep(-0.16,0.42,ndl);
+  _tint.copy(_darkTint).lerp(_lightTint,dayF);
+  const flashBoost=1+fs.intensity*0.85;
+
+  // differential rotation of puffs (fast near the eye)
+  const eyeR=cat.eye, eyeN=170;
+  const RH=EARTH_R+0.035;
+  for(let i=0;i<stormSprites.length;i++){
+    const s=stormSprites[i], ud=s.userData;
+    let r;
+    if(ud.eye){
+      r=ud.r*(cat.eye/CATS[3].eye);
+    } else {
+      const r0=eyeR*1.28, r1=1.05*0.82;
+      r=r0*Math.pow(r1/r0, ud.s);
+    }
+    const om=cat.rot*(eyeR*1.7)/(r+eyeR*1.15);
+    const ang=(ud.eye?ud.ang:ud.ang0)+spin*t*om;
+    const x=Math.cos(ang)*r, y=Math.sin(ang)*r;
+    const z=Math.sqrt(Math.max(RH*RH-r*r,0.01));
+    s.position.set(
+      _dir.x*z+_u.x*x+_v.x*y,
+      _dir.y*z+_u.y*x+_v.y*y,
+      _dir.z*z+_u.z*x+_v.z*y
+    );
+    const sc=ud.s0*(ud.eye?(cat.eye/CATS[3].eye+0.35):1);
+    s.scale.set(sc,sc,1);
+    s.material.color.copy(_tint).multiplyScalar(flashBoost);
+  }
+
+  // active bolt — rides the rotating eyewall
+  if(fs.lastFt>=0 && t-fs.lastFt<1.05){
+    const tau=t-fs.lastFt;
+    const brng=mulberry32(9000+fs.lastIdx*17);
+    const br=eyeR*(1.35+brng()*2.7), bang0=brng()*Math.PI*2;
+    const bom=cat.rot*(eyeR*1.7)/(br+eyeR*1.15);
+    const bang=bang0+spin*t*bom;
+    const x=Math.cos(bang)*br, y=Math.sin(bang)*br, Rh3=EARTH_R+0.055;
+    const z=Math.sqrt(Math.max(Rh3*Rh3-br*br,0.01));
+    const env=Math.exp(-tau*4.6)*clamp(0.62+0.55*Math.sin(tau*36+fs.lastFt*11),0.15,1.35);
+    bolt.visible=true; flashGlow.visible=true;
+    bolt.position.set(_dir.x*z+_u.x*x+_v.x*y, _dir.y*z+_u.y*x+_v.y*y, _dir.z*z+_u.z*x+_v.z*y);
+    flashGlow.position.copy(bolt.position);
+    bolt.material.opacity=clamp(env,0,1);
+    bolt.scale.set(0.42+brng()*0.3, 0.85+brng()*0.6, 1);
+    bolt.material.rotation=(brng()-0.5)*0.6;
+    const boost=2.4*env;
+    bolt.material.color.setRGB(boost*0.85,boost*0.92,boost*1.15);
+    flashGlow.material.opacity=clamp(env*0.9,0,1);
+    const gs=1.1+brng()*0.9;
+    flashGlow.scale.set(gs,gs,1);
+    flashGlow.material.color.setRGB(1.6+env,1.8+env,2.3+env);
+  } else { bolt.visible=false; flashGlow.visible=false; }
+
+  // general cloud deck drift
+  cloudMesh.rotation.y=0.03+t*0.006;
+
+  // bench + HUD
+  stormWorld.copy(_dir).multiplyScalar(EARTH_R).applyQuaternion(tiltQuat);
+  window.__bench.category=category;
+  window.__bench.eyeLat=Math.round(eyeLat*100)/100;
+  window.__bench.eyeLon=Math.round(eyeLon*100)/100;
+  window.__bench.flashes=fs.count;
+  updateHUD(t,eyeLat,eyeLon,fs.count);
+  updateMarker(stormWorld);
+  camera.updateMatrixWorld();
+}
+
+// ---------- showcase camera path (12 s, keyframed Catmull-Rom) ----------
+const camCurve=new THREE.CatmullRomCurve3([
+  worldDirOf(20, -38).multiplyScalar(7.2).add(new THREE.Vector3(0, 1.3,0)),  // 0.0 establishing wide
+  worldDirOf(17, -47).multiplyScalar(4.4).add(new THREE.Vector3(0, 0.75,0)), // 2.2 approach sweep
+  worldDirOf(14.5,-54).multiplyScalar(3.15).add(new THREE.Vector3(0,0.25,0)),// 4.3 descending toward eye
+  worldDirOf(13.2,-58.4).multiplyScalar(2.66).add(new THREE.Vector3(0,0.1,0)),// 6.0 eyewall skim (flashes)
+  worldDirOf(24, -64).multiplyScalar(4.9).add(new THREE.Vector3(0, 1.4,0)),  // 8.2 pull-back, terminator + night
+  worldDirOf(6,  -70).multiplyScalar(5.9).add(new THREE.Vector3(0, 0.6,0)),  // 10.0 dark-side angle, lightning
+  worldDirOf(22, -33).multiplyScalar(7.0).add(new THREE.Vector3(0, 1.15,0))  // 12.0 closing wide
+],false,'centripetal');
+const tgtCurve=new THREE.CatmullRomCurve3([
+  worldDirOf(13.2,-54.5).multiplyScalar(EARTH_R*0.85),
+  worldDirOf(13.7,-55.1).multiplyScalar(EARTH_R*0.9),
+  worldDirOf(14.3,-55.8).multiplyScalar(EARTH_R),
+  worldDirOf(14.8,-56.5).multiplyScalar(EARTH_R),
+  worldDirOf(15.6,-57.3).multiplyScalar(EARTH_R*0.9),
+  worldDirOf(16.2,-57.9).multiplyScalar(EARTH_R*0.9),
+  worldDirOf(12.0,-50.0).multiplyScalar(EARTH_R*0.5)
+],false,'centripetal');
+function placeCamera(u){
+  u=clamp(u,0,1);
+  camera.position.copy(camCurve.getPointAt(u));
+  camera.lookAt(tgtCurve.getPointAt(u));
+  camera.updateMatrixWorld();
+}
+function applyShowcase(t){
+  applyState(t);
+  placeCamera(t/SHOWCASE_DURATION);
+}
+
+// ---------- record video ----------
+const recordBtn=$('recordBtn'), recLabel=$('recLabel');
+let mediaRecorder=null, chunks=[];
+function finishShowcase(){
+  showcaseMode=false; document.body.classList.remove('showcase');
+  controls.enabled=true;
+  controls.target.copy(stormWorld).multiplyScalar(0.35);
+  if(recording){
+    recording=false;
+    try{ if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop(); }catch(e){}
+    recLabel.textContent='RECORD VIDEO'; recordBtn.disabled=false;
+  } else {
+    recLabel.textContent='RECORD VIDEO'; recordBtn.disabled=false;
+  }
+}
+recordBtn.addEventListener('click',()=>{
+  if(showcaseMode) return;
+  const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(m=>window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+  if(!window.MediaRecorder){ alert('MediaRecorder is not available in this browser.'); return; }
+  let stream; try{ stream=canvas.captureStream(60); }catch(e){ alert('canvas.captureStream() failed: '+e.message); return; }
+  mediaRecorder=new MediaRecorder(stream, mime?{ mimeType:mime, videoBitsPerSecond:14_000_000 }:undefined);
+  chunks=[];
+  mediaRecorder.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
+  mediaRecorder.onstop=()=>{
+    const blob=new Blob(chunks,{ type:mime||'video/webm' });
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='hurricane-oryx-showcase.webm'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+  };
+  recording=true; showcaseMode=true; showcaseElapsed=0;
+  controls.enabled=false; document.body.classList.add('showcase');
+  recordBtn.disabled=true; recLabel.textContent='● REC 0.0s';
+  mediaRecorder.start(250);
+});
+
+// ---------- window.showcase API ----------
+window.showcase={ duration:SHOWCASE_DURATION, seek(t){
+  showcaseMode=false; document.body.classList.remove('showcase'); controls.enabled=false;
+  applyShowcase(clamp(t,0,SHOWCASE_DURATION));
+  composer.render();
+  controls.enabled=true;
+}};
+
+// ---------- keys ----------
+window.addEventListener('keydown',e=>{
+  if(e.key>='1' && e.key<='5'){ category=parseInt(e.key,10); }
+  else if(e.key==='h'||e.key==='H'){ hemisphereSign*=-1; }
+});
+
+// ---------- resize ----------
+window.addEventListener('resize',()=>{
+  const w=window.innerWidth,h=window.innerHeight;
+  camera.aspect=w/h; camera.updateProjectionMatrix();
+  renderer.setSize(w,h); composer.setSize(w,h);
+});
+
+// ---------- bench (initial) ----------
+window.__bench={ category, eyeLat:13.2, eyeLon:-54.5, flashes:0 };
+
+// ---------- main loop ----------
+const clock=new THREE.Clock();
+function frame(){
+  requestAnimationFrame(frame);
+  const dt=Math.min(clock.getDelta(),0.05);
+  if(showcaseMode){
+    showcaseElapsed+=dt;
+    const t=Math.min(showcaseElapsed,SHOWCASE_DURATION);
+    applyShowcase(t);
+    recLabel.textContent='● REC '+t.toFixed(1)+'s';
+    if(showcaseElapsed>=SHOWCASE_DURATION) applyShowcase(SHOWCASE_DURATION), finishShowcase();
+  } else {
+    simTime+=dt;
+    applyState(simTime);
+    controls.update();
+  }
+  composer.render();
+}
+frame();
+document.getElementById('loader').classList.add('done');
+</script>
+</body>
+</html>

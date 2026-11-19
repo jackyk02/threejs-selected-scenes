@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TERRA · LIVE — Global Air Traffic &amp; Day–Night Terminator</title>
+<style>
+  :root{
+    --amber:#ffc36b; --cyan:#7fd4ff; --ink:#050a14;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
+    font-family:"Avenir Next","Segoe UI",Helvetica,Arial,sans-serif;color:#dfe9f5;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;}
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed;pointer-events:none;z-index:10;}
+  #titlePanel{top:22px;left:26px;}
+  #titlePanel h1{font-size:21px;letter-spacing:.42em;font-weight:600;color:#f2f7ff;
+    text-shadow:0 0 18px rgba(127,212,255,.45);}
+  #titlePanel h1 span{color:var(--amber);}
+  #titlePanel p{margin-top:3px;font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:#8fa8c4;}
+
+  #clockPanel{top:22px;right:26px;text-align:right;}
+  #utcClock{font-size:30px;font-weight:300;letter-spacing:.12em;color:#eaf4ff;
+    font-variant-numeric:tabular-nums;text-shadow:0 0 14px rgba(127,212,255,.5);}
+  #utcLabel{font-size:9px;letter-spacing:.34em;color:#8fa8c4;margin-top:1px;}
+  #timeState{margin-top:8px;display:inline-flex;gap:8px;align-items:center;
+    background:rgba(10,20,36,.55);border:1px solid rgba(127,212,255,.25);
+    padding:4px 12px;border-radius:20px;font-size:10px;letter-spacing:.18em;color:var(--cyan);
+    backdrop-filter:blur(6px);}
+  #timeState b{color:#fff;font-weight:600;}
+
+  #statsPanel{left:26px;bottom:26px;background:rgba(8,15,28,.55);border:1px solid rgba(127,212,255,.18);
+    border-radius:12px;padding:12px 16px;backdrop-filter:blur(8px);min-width:190px;}
+  .stat{display:flex;justify-content:space-between;gap:18px;font-size:11px;margin:4px 0;}
+  .stat .k{color:#8fa8c4;letter-spacing:.14em;text-transform:uppercase;font-size:9px;padding-top:1px;}
+  .stat .v{color:#fff;font-variant-numeric:tabular-nums;letter-spacing:.06em;}
+  .stat .v em{color:var(--amber);font-style:normal;}
+
+  #hint{bottom:26px;left:50%;transform:translateX(-50%);font-size:10px;letter-spacing:.22em;
+    color:#6f87a5;text-transform:uppercase;background:rgba(8,15,28,.45);padding:7px 18px;
+    border-radius:16px;border:1px solid rgba(127,212,255,.12);backdrop-filter:blur(6px);white-space:nowrap;}
+  #hint b{color:#cfe3f7;}
+
+  /* ---------- Record button ---------- */
+  #recordBtn{position:fixed;top:96px;right:26px;z-index:20;cursor:pointer;pointer-events:auto;
+    background:linear-gradient(180deg, rgba(255,90,90,.22), rgba(255,60,60,.10));
+    border:1px solid rgba(255,120,120,.5);color:#ffd9d9;font-size:10px;letter-spacing:.3em;
+    text-transform:uppercase;padding:10px 18px 10px 14px;border-radius:24px;
+    display:flex;align-items:center;gap:9px;backdrop-filter:blur(8px);
+    transition:all .25s ease;font-family:inherit;}
+  #recordBtn:hover{border-color:#ff8f8f;box-shadow:0 0 22px rgba(255,90,90,.35);color:#fff;}
+  #recordBtn .dot{width:11px;height:11px;border-radius:50%;background:#ff5c5c;
+    box-shadow:0 0 10px rgba(255,92,92,.9);animation:pulse 1.6s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.45;transform:scale(.8);}}
+  #recordBtn.recording{background:rgba(255,60,60,.3);border-color:#ff6b6b;color:#fff;
+    box-shadow:0 0 30px rgba(255,80,80,.5);}
+
+  /* ---------- City label ---------- */
+  #cityLabel{position:fixed;z-index:15;pointer-events:none;display:none;
+    transform:translate(-50%,-130%);
+    background:rgba(6,12,24,.82);border:1px solid rgba(255,195,107,.55);border-radius:8px;
+    padding:8px 13px 9px;backdrop-filter:blur(8px);
+    box-shadow:0 0 26px rgba(255,180,80,.28), inset 0 0 18px rgba(255,195,107,.06);
+    white-space:nowrap;}
+  #cityLabel .name{font-size:13px;letter-spacing:.2em;color:#ffe9c4;text-transform:uppercase;font-weight:600;}
+  #cityLabel .dep{font-size:10px;letter-spacing:.14em;color:var(--amber);margin-top:3px;font-variant-numeric:tabular-nums;}
+  #cityLabel .dep b{color:#fff;font-size:12px;}
+  #cityLabel::after{content:"";position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);
+    border-left:7px solid transparent;border-right:7px solid transparent;border-top:7px solid rgba(255,195,107,.55);}
+
+  #showcaseBanner{position:fixed;top:22px;left:50%;transform:translateX(-50%);z-index:30;display:none;
+    font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:#ffd9d9;
+    background:rgba(80,10,10,.55);border:1px solid rgba(255,110,110,.5);padding:8px 22px 8px 16px;
+    border-radius:20px;align-items:center;gap:10px;backdrop-filter:blur(6px);}
+  #showcaseBanner .dot{width:9px;height:9px;border-radius:50%;background:#ff5c5c;animation:pulse 1s infinite;}
+
+  #loading{position:fixed;inset:0;z-index:100;background:var(--ink);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;transition:opacity .8s;}
+  #loading .bar{width:220px;height:2px;background:rgba(127,212,255,.15);overflow:hidden;border-radius:2px;}
+  #loading .bar div{height:100%;width:40%;background:var(--cyan);animation:load 1.1s infinite ease-in-out;}
+  @keyframes load{0%{transform:translateX(-100%);}100%{transform:translateX(550%);}}
+  #loading p{font-size:10px;letter-spacing:.4em;color:#7fa6c9;text-transform:uppercase;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="loading"><div class="bar"><div></div></div><p>Forging Planet Earth…</p></div>
+
+<div class="hud" id="titlePanel">
+  <h1>TERRA<span>·</span>LIVE</h1>
+  <p>Global Air Traffic Observatory</p>
+</div>
+
+<div class="hud" id="clockPanel">
+  <div id="utcClock">--:--:--</div>
+  <div id="utcLabel">Coordinated Universal Time</div>
+  <div id="timeState">FLOW <b id="timeSpeed">3600×</b>&nbsp;·&nbsp;<span id="pauseState">RUNNING</span></div>
+</div>
+
+<button id="recordBtn"><span class="dot"></span><span id="recText">Record Video</span></button>
+<div id="showcaseBanner"><span class="dot"></span>Showcase Recording</div>
+
+<div class="hud" id="statsPanel">
+  <div class="stat"><span class="k">Flights Airborne</span><span class="v" id="stFlights">150</span></div>
+  <div class="stat"><span class="k">Tracked Cities</span><span class="v" id="stCities">—</span></div>
+  <div class="stat"><span class="k">Sim Rate</span><span class="v"><em id="stRate">1 hr/s</em></span></div>
+  <div class="stat"><span class="k">Selected Hub</span><span class="v"><em id="stSel">—</em></span></div>
+</div>
+
+<div class="hud" id="hint"><b>Drag</b> orbit &nbsp;·&nbsp; <b>Scroll</b> zoom &nbsp;·&nbsp; <b>Click city</b> routes &nbsp;·&nbsp; <b>T</b> time speed &nbsp;·&nbsp; <b>Space</b> pause</div>
+
+<div id="cityLabel"><div class="name">—</div><div class="dep"><b>0</b> DEPARTURES TRACKED</div></div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+'use strict';
+/* ============================================================
+   TERRA·LIVE — procedural Earth, live air traffic, UTC sun
+   ============================================================ */
+
+// ---------- deterministic RNG ----------
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- 3D value noise + fBm ----------
+function hash3(x, y, z){
+  let n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
+  return n - Math.floor(n);
+}
+function smootherstep(t){ return t * t * t * (t * (t * 6 - 15) + 10); }
+function valueNoise3(x, y, z){
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const xf = x - xi, yf = y - yi, zf = z - zi;
+  const u = smootherstep(xf), v = smootherstep(yf), w = smootherstep(zf);
+  const c000 = hash3(xi,   yi,   zi  ), c100 = hash3(xi+1, yi,   zi  );
+  const c010 = hash3(xi,   yi+1, zi  ), c110 = hash3(xi+1, yi+1, zi  );
+  const c001 = hash3(xi,   yi,   zi+1), c101 = hash3(xi+1, yi,   zi+1);
+  const c011 = hash3(xi,   yi+1, zi+1), c111 = hash3(xi+1, yi+1, zi+1);
+  const x00 = c000 + u*(c100-c000), x10 = c010 + u*(c110-c010);
+  const x01 = c001 + u*(c101-c001), x11 = c011 + u*(c111-c011);
+  const y0 = x00 + v*(x10-x00), y1 = x01 + v*(x11-x01);
+  return y0 + w*(y1-y0);
+}
+function fbm(x, y, z, octaves){
+  let amp = 0.5, freq = 1.0, sum = 0.0, norm = 0.0;
+  for(let i=0;i<octaves;i++){
+    sum += amp * valueNoise3(x*freq, y*freq, z*freq);
+    norm += amp; amp *= 0.5; freq *= 2.03;
+  }
+  return sum / norm;
+}
+function latLonToVec3(latDeg, lonDeg, radius){
+  const lat = latDeg * Math.PI/180, lon = lonDeg * Math.PI/180;
+  const cl = Math.cos(lat);
+  return new THREE.Vector3(cl*Math.cos(lon), Math.sin(lat), cl*Math.sin(lon)).multiplyScalar(radius||1);
+}
+// Continent height field, deterministic
+function landHeight(latDeg, lonDeg){
+  const lat = latDeg*Math.PI/180, lon = lonDeg*Math.PI/180;
+  const cl = Math.cos(lat);
+  const x = cl*Math.cos(lon), y = Math.sin(lat), z = cl*Math.sin(lon);
+  let n = fbm(x*1.75 + 11.3, y*1.75 + 5.1, z*1.75 + 7.7, 5);
+  // ridge detail for mountain ranges
+  const r = 1.0 - Math.abs(2.0*fbm(x*4.4+31.0, y*4.4+17.0, z*4.4+23.0, 4) - 1.0);
+  n += (r*r) * 0.085 * smooth01((n-0.42)*6.0);
+  return n;
+}
+function smooth01(t){ t = Math.min(1, Math.max(0, t)); return t*t*(3-2*t); }
+const SEA_LEVEL = 0.545;
+function isLand(latDeg, lonDeg){ return landHeight(latDeg, lonDeg) > SEA_LEVEL; }
+
+// ============================================================
+//  PROCEDURAL TEXTURES
+// ============================================================
+function makeCanvas(w, h){ const c = document.createElement('canvas'); c.width=w; c.height=h; return c; }
+
+// ---- Day texture (2048×1024) + specular map ----
+const dayCanvas = makeCanvas(2048, 1024);
+const specCanvas = makeCanvas(1024, 512);
+(function paintDay(){
+  const ctx = dayCanvas.getContext('2d');
+  const img = ctx.createImageData(2048, 1024);
+  const d = img.data;
+  const sctx = specCanvas.getContext('2d');
+  const simg = sctx.createImageData(1024, 512);
+  const sd = simg.data;
+  const W = 2048, H = 1024;
+  for(let py=0; py<H; py++){
+    const lat = 90 - (py+0.5)/H * 180;
+    const absLat = Math.abs(lat);
+    for(let px=0; px<W; px++){
+      const lon = (px+0.5)/W * 360 - 180;
+      const h = landHeight(lat, lon);
+      const i = (py*W + px) * 4;
+      let r, g, b;
+      const ice = absLat > 74 + 8*fbm(px*0.013, py*0.013, 3.7, 3);
+      if(ice){
+        const t = 225 + 28*fbm(px*0.05, py*0.05, 9.1, 2);
+        r=t; g=t+2; b=Math.min(255,t+6);
+      } else if(h > SEA_LEVEL){
+        const elev = (h - SEA_LEVEL) / (1 - SEA_LEVEL);         // 0..1
+        // latitude-driven biome variation + moisture noise
+        const moist = fbm(px*0.006+51, py*0.006+13, 8.4, 4);
+        const dryBand = Math.exp(-Math.pow((absLat-22)/13, 2));  // subtropical deserts
+        const polar = smooth01((absLat-52)/22);
+        // base greens
+        let cr = 62 + elev*96, cg = 96 + elev*70, cb = 44 + elev*40;
+        // lush tropics
+        const trop = Math.exp(-Math.pow(lat/32, 2)) * (moist-0.35);
+        cr -= trop*26; cg += trop*22; cb -= trop*10;
+        // deserts
+        const dry = dryBand * smooth01((0.62-moist)*3.2);
+        cr = cr + (196-cr)*dry*0.85; cg = cg + (168-cg)*dry*0.85; cb = cb + (118-cb)*dry*0.85;
+        // cold taiga / tundra
+        cr = cr + (126-cr)*polar*0.7; cg = cg + (128-cg)*polar*0.7; cb = cb + (112-cb)*polar*0.7;
+        // mountains
+        const mtn = smooth01((elev-0.42)*3.4);
+        cr = cr + (205-cr)*mtn*0.8; cg = cg + (200-cg)*mtn*0.8; cb = cb + (192-cb)*mtn*0.8;
+        // fine grain
+        const grain = (hash3(px*0.9, py*0.9, 4.2)-0.5)*22;
+        r = cr+grain; g = cg+grain; b = cb+grain;
+      } else {
+        const depth = smooth01((SEA_LEVEL - h) / 0.16);          // 0 coast → 1 deep
+        const shallow = Math.exp(-Math.pow((SEA_LEVEL-h)/0.028, 2));
+        r = 10 + (1-depth)*22 + shallow*26;
+        g = 38 + (1-depth)*40 + shallow*46;
+        b = 78 + (1-depth)*46 + shallow*52;
+        const grain = (hash3(px*0.7, py*0.7, 2.8)-0.5)*9;
+        r+=grain; g+=grain; b+=grain;
+      }
+      d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  // spec map (half res): ocean bright, land dark
+  const SW = 1024, SH = 512;
+  for(let py=0; py<SH; py++){
+    const lat = 90 - (py+0.5)/SH * 180;
+    const absLat = Math.abs(lat);
+    for(let px=0; px<SW; px++){
+      const lon = (px+0.5)/SW * 360 - 180;
+      const h = landHeight(lat, lon);
+      const i = (py*SW + px) * 4;
+      const ice = absLat > 74;
+      let s = (h > SEA_LEVEL || ice) ? 18 : Math.round(150 + 105*smooth01((SEA_LEVEL-h)/0.1));
+      sd[i]=s; sd[i+1]=s; sd[i+2]=s; sd[i+3]=255;
+    }
+  }
+  sctx.putImageData(simg, 0, 0);
+})();
+
+// ---- Night texture (1024×512): city lights clustered on land ----
+const nightCanvas = makeCanvas(1024, 512);
+(function paintNight(){
+  const ctx = nightCanvas.getContext('2d');
+  const W = 1024, H = 512;
+  ctx.fillStyle = '#000000'; ctx.fillRect(0,0,W,H);
+  const img = ctx.createImageData(W,H); const d = img.data;
+  for(let py=0; py<H; py++){
+    const lat = 90 - (py+0.5)/H * 180;
+    if(Math.abs(lat) > 68) continue;
+    for(let px=0; px<W; px++){
+      const lon = (px+0.5)/W * 360 - 180;
+      if(!isLand(lat, lon)) continue;
+      // population density field: several scaled noise octaves, thresholded
+      const dens = fbm(px*0.018+91.7, py*0.018+47.3, 15.9, 4);
+      const urban = smooth01((dens - 0.585) * 9.0);
+      if(urban <= 0.02) continue;
+      const i = (py*W+px)*4;
+      const warm = hash3(px*1.7, py*1.7, 21.4);
+      d[i]   = 255 * urban * (0.85 + 0.3*warm);
+      d[i+1] = 205 * urban * (0.70 + 0.25*warm);
+      d[i+2] = 120 * urban * 0.75;
+      d[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  // add a few hundred bright metro cores
+  const rng = mulberry32(987654321);
+  for(let n=0; n<520; n++){
+    const lat = (rng()*2-1) * 62;
+    const lon = rng()*360 - 180;
+    if(!isLand(lat, lon)) continue;
+    const x = (lon+180)/360 * W, y = (90-lat)/180 * H;
+    const rad = 2.5 + rng()*7.5, inten = 0.5 + rng()*0.9;
+    const g = ctx.createRadialGradient(x,y,0,x,y,rad);
+    g.addColorStop(0, 'rgba(255,230,170,'+Math.min(1,inten)+')');
+    g.addColorStop(0.4,'rgba(255,205,125,'+(inten*0.55)+')');
+    g.addColorStop(1, 'rgba(255,190,110,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+  }
+})();
+
+// ---- Cloud layer (1024×512) ----
+const cloudCanvas = makeCanvas(1024, 512);
+(function paintClouds(){
+  const ctx = cloudCanvas.getContext('2d');
+  const img = ctx.createImageData(1024, 512); const d = img.data;
+  for(let py=0; py<512; py++){
+    const lat = 90 - (py+0.5)/512 * 180;
+    const cl = Math.cos(lat*Math.PI/180);
+    for(let px=0; px<1024; px++){
+      const lon = (px+0.5)/1024 * Math.PI*2;
+      const x = Math.cos(lon)*cl, y = Math.sin(lat*Math.PI/180), z = Math.sin(lon)*cl;
+      // stretched domain for streaky weather systems
+      let n = fbm(x*3.1+7.7, y*4.6+2.9, z*3.1+9.3, 5);
+      n = smooth01((n - 0.52) * 4.2);
+      // banding
+      n *= 0.72 + 0.38*Math.sin(lat*Math.PI/26 + fbm(x*2,y*2,z*2,2)*4.0);
+      n = Math.min(1, Math.max(0, n));
+      const i = (py*1024+px)*4;
+      d[i]=255; d[i+1]=255; d[i+2]=255; d[i+3] = Math.round(n*235);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+})();
+
+// ---- Moon texture ----
+const moonCanvas = makeCanvas(256, 128);
+(function paintMoon(){
+  const ctx = moonCanvas.getContext('2d');
+  const img = ctx.createImageData(256,128); const d = img.data;
+  for(let y=0;y<128;y++)for(let x=0;x<256;x++){
+    const n = fbm(x*0.05, y*0.05, 3.3, 4);
+    const base = 128 + (n-0.5)*95;
+    const i=(y*256+x)*4; d[i]=base; d[i+1]=base; d[i+2]=base*0.97; d[i+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+  const rng = mulberry32(1357911);
+  for(let c=0;c<34;c++){
+    const x=rng()*256, y=rng()*128, r=2+rng()*11;
+    ctx.fillStyle='rgba(70,70,72,0.55)';
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(215,215,215,0.4)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(x,y,r,Math.PI*0.9,Math.PI*1.7); ctx.stroke();
+  }
+})();
+
+// ---- Glow sprite texture ----
+function makeGlowTexture(inner, outer){
+  const c = makeCanvas(64,64), ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0, inner); g.addColorStop(0.28, outer); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(c);
+}
+const glowAmber = makeGlowTexture('rgba(255,240,200,1)','rgba(255,180,80,0.55)');
+const glowWhite = makeGlowTexture('rgba(255,255,255,1)','rgba(160,210,255,0.5)');
+const glowCity  = makeGlowTexture('rgba(255,235,180,1)','rgba(255,190,90,0.4)');
+
+// ============================================================
+//  SCENE SETUP
+// ============================================================
+const R = 2;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(3.4, 2.6, 7.6);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 3.1;
+controls.maxDistance = 17;
+controls.rotateSpeed = 0.55;
+controls.autoRotate = false;
+
+// Lights
+const sunLight = new THREE.DirectionalLight(0xfff2dd, 2.15);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(4096, 4096);
+sunLight.shadow.camera.near = 1; sunLight.shadow.camera.far = 60;
+sunLight.shadow.camera.left = -4; sunLight.shadow.camera.right = 4;
+sunLight.shadow.camera.top = 4; sunLight.shadow.camera.bottom = -4;
+sunLight.shadow.bias = -0.0004;
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x1a2740, 1.15));
+const hemi = new THREE.HemisphereLight(0x24344f, 0x05070d, 0.7);
+scene.add(hemi);
+
+// ---------- Starfield ----------
+(function buildStars(){
+  const rng = mulberry32(424242);
+  const N = 7000, pos = new Float32Array(N*3), col = new Float32Array(N*3), size = new Float32Array(N);
+  for(let i=0;i<N;i++){
+    // random point on sphere shell
+    let x,y,z,l;
+    do { x=rng()*2-1; y=rng()*2-1; z=rng()*2-1; l=x*x+y*y+z*z; } while(l>1 || l<0.01);
+    l = Math.sqrt(l); const rad = 90 + rng()*120;
+    pos[i*3]=x/l*rad; pos[i*3+1]=y/l*rad; pos[i*3+2]=z/l*rad;
+    const t = rng();
+    let r=1,g=1,b=1;
+    if(t<0.18){ r=0.65; g=0.78; b=1.0; } else if(t<0.32){ r=1.0; g=0.85; b=0.62; }
+    const bright = 0.35 + Math.pow(rng(),2.2)*0.65;
+    col[i*3]=r*bright; col[i*3+1]=g*bright; col[i*3+2]=b*bright;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col,3));
+  const mat = new THREE.PointsMaterial({ size:1.35, sizeAttenuation:false, vertexColors:true,
+    transparent:true, opacity:0.95, blending:THREE.AdditiveBlending, depthWrite:false });
+  scene.add(new THREE.Points(geo, mat));
+  // a handful of bright hero stars with cross sparkle
+  const glowTex = makeGlowTexture('rgba(255,255,255,1)','rgba(190,215,255,0.6)');
+  for(let i=0;i<26;i++){
+    const v = new THREE.Vector3(rng()*2-1,rng()*2-1,rng()*2-1).normalize().multiplyScalar(95+rng()*40);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xffffff,
+      blending:THREE.AdditiveBlending, depthWrite:false, transparent:true, opacity:0.95 }));
+    s.position.copy(v); s.scale.setScalar(1.6+rng()*2.6); scene.add(s);
+  }
+})();
+
+// ---------- SUN STATE ----------
+const DELTA = 17 * Math.PI/180; // solar declination
+const sim = {
+  simHours: 12.6,          // absolute UTC hours (anchored 2024-06-21 12:36)
+  timeSpeeds: [1, 60, 3600],
+  speedIndex: 2,           // default 3600× (1 hr per second)
+  paused: false,
+  flightsAirborne: 150
+};
+function sunDirection(utcHours){
+  // subsolar longitude: 12:00 UTC → 0°, moving 15°/hr westward
+  const lon = (12 - utcHours) * 15 * Math.PI/180;
+  const lat = DELTA;
+  const cl = Math.cos(lat);
+  return new THREE.Vector3(cl*Math.cos(lon), Math.sin(lat), cl*Math.sin(lon)).normalize();
+}
+
+// ---------- GLOBE (custom day/night shader) ----------
+const dayTex   = new THREE.CanvasTexture(dayCanvas);   dayTex.encoding  = THREE.sRGBEncoding;
+dayTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+const nightTex = new THREE.CanvasTexture(nightCanvas); nightTex.encoding = THREE.sRGBEncoding;
+nightTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+const specTex  = new THREE.CanvasTexture(specCanvas);
+
+const globeUniforms = {
+  dayMap:   { value: dayTex },
+  nightMap: { value: nightTex },
+  specMap:  { value: specTex },
+  sunDir:   { value: new THREE.Vector3(1,0,0) },
+  atmoColor:{ value: new THREE.Color(0x4d8fd1) }
+};
+const globeMat = new THREE.ShaderMaterial({
+  uniforms: globeUniforms,
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vNormalW;
+    varying vec3 vPosW;
+    void main(){
+      vUv = uv;
+      vNormalW = normalize(mat3(modelMatrix) * normal);
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vPosW = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: `
+    uniform sampler2D dayMap, nightMap, specMap;
+    uniform vec3 sunDir;
+    uniform vec3 atmoColor;
+    varying vec2 vUv;
+    varying vec3 vNormalW;
+    varying vec3 vPosW;
+    void main(){
+      vec3 N = normalize(vNormalW);
+      vec3 V = normalize(cameraPosition - vPosW);
+      vec3 L = normalize(sunDir);
+      float diff = dot(N, L);
+
+      // soft terminator band ~ -0.10 .. +0.14
+      float dayMix = smoothstep(-0.10, 0.14, diff);
+      float nightMix = 1.0 - smoothstep(-0.16, 0.08, diff);
+
+      vec3 day = texture2D(dayMap, vUv).rgb;
+      vec3 night = texture2D(nightMap, vUv).rgb;
+      float specMask = texture2D(specMap, vUv).r;
+
+      // daylight: diffuse + gentle wrap for soft shadow edge
+      float wrap = clamp((diff + 0.18) / 1.18, 0.0, 1.0);
+      vec3 dayCol = day * (0.16 + 1.22 * pow(wrap, 1.35));
+
+      // ocean sun glint (Blinn-Phong), only on day side
+      vec3 H = normalize(L + V);
+      float spec = pow(max(dot(N, H), 0.0), 240.0) * specMask * smoothstep(-0.05, 0.25, diff);
+      float glit = pow(max(dot(N, H), 0.0), 42.0) * specMask * smoothstep(-0.05, 0.25, diff);
+      dayCol += vec3(1.0, 0.96, 0.88) * spec * 2.4 + vec3(1.0,0.95,0.8) * glit * 0.35;
+
+      // night: city lights (boosted for bloom)
+      vec3 nightCol = night * vec3(1.55, 1.32, 0.95) * 2.35 + day * 0.028;
+
+      vec3 col = mix(nightCol, dayCol, dayMix);
+
+      // subtle fresnel atmosphere tint on the limb, day side stronger
+      float fres = pow(1.0 - max(dot(N, V), 0.0), 3.2);
+      col += atmoColor * fres * (0.18 + 0.5*dayMix);
+
+      gl_FragColor = vec4(col, 1.0);
+    }`
+});
+const globe = new THREE.Mesh(new THREE.SphereGeometry(R, 128, 96), globeMat);
+globe.castShadow = true;
+scene.add(globe);
+
+// ---------- Cloud shell ----------
+const cloudTex = new THREE.CanvasTexture(cloudCanvas);
+const cloudMat = new THREE.MeshLambertMaterial({
+  map: cloudTex, transparent: true, opacity: 0.82,
+  depthWrite: false, side: THREE.FrontSide
+});
+const clouds = new THREE.Mesh(new THREE.SphereGeometry(R*1.016, 96, 72), cloudMat);
+scene.add(clouds);
+
+// ---------- Atmosphere rim (backside shell) ----------
+const atmoMat = new THREE.ShaderMaterial({
+  vertexShader: `
+    varying vec3 vNormal;
+    void main(){
+      vNormal = normalize(normalMatrix * normal);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: `
+    varying vec3 vNormal;
+    void main(){
+      float intensity = pow(0.72 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 4.6);
+      vec3 col = mix(vec3(0.25,0.55,1.0), vec3(0.55,0.78,1.0), intensity);
+      gl_FragColor = vec4(col * intensity * 1.9, intensity);
+    }`,
+  blending: THREE.AdditiveBlending,
+  side: THREE.BackSide,
+  transparent: true,
+  depthWrite: false
+});
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(R*1.16, 96, 72), atmoMat));
+// inner haze halo
+const haloMat = new THREE.ShaderMaterial({
+  vertexShader: atmoMat.vertexShader,
+  fragmentShader: `
+    varying vec3 vNormal;
+    void main(){
+      float i = pow(0.78 - dot(vNormal, vec3(0.0,0.0,1.0)), 9.0);
+      gl_FragColor = vec4(vec3(0.45,0.68,1.0) * i * 2.4, i);
+    }`,
+  blending: THREE.AdditiveBlending, side: THREE.BackSide, transparent: true, depthWrite: false
+});
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(R*1.34, 64, 48), haloMat));
+
+// ---------- Moon ----------
+const moon = new THREE.Mesh(
+  new THREE.SphereGeometry(0.34, 48, 32),
+  new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(moonCanvas) })
+);
+moon.position.set(9.5, 3.4, -7.0);
+scene.add(moon);
+
+// ============================================================
+//  CITIES
+// ============================================================
+const RAW_CITIES = [
+  ['London',51.5,-0.13],['Paris',48.85,2.35],['Berlin',52.52,13.4],['Madrid',40.42,-3.7],
+  ['Rome',41.9,12.5],['Amsterdam',52.37,4.9],['Vienna',48.2,16.37],['Zurich',47.37,8.54],
+  ['Istanbul',41.0,28.97],['Moscow',55.75,37.6],['Athens',37.98,23.7],['Stockholm',59.33,18.07],
+  ['Lisbon',38.72,-9.14],['Dublin',53.35,-6.26],['Warsaw',52.23,21.01],['Prague',50.08,14.44],
+  ['Oslo',59.91,10.75],['Copenhagen',55.68,12.57],['Helsinki',60.17,24.94],['Brussels',50.85,4.35],
+  ['New York',40.71,-74.0],['Los Angeles',34.05,-118.24],['Chicago',41.88,-87.63],['Houston',29.76,-95.37],
+  ['Atlanta',33.75,-84.39],['Toronto',43.65,-79.38],['Vancouver',49.28,-123.12],['Mexico City',19.43,-99.13],
+  ['Miami',25.76,-80.19],['Denver',39.74,-104.99],['San Francisco',37.77,-122.42],['Seattle',47.61,-122.33],
+  ['Boston',42.36,-71.06],['Washington',38.9,-77.04],['Dallas',32.78,-96.8],['Montreal',45.5,-73.57],
+  ['São Paulo',-23.55,-46.63],['Buenos Aires',-34.6,-58.38],['Santiago',-33.45,-70.66],['Lima',-12.05,-77.04],
+  ['Bogotá',4.71,-74.07],['Caracas',10.48,-66.9],['Rio de Janeiro',-22.91,-43.17],['Havana',23.11,-82.37],
+  ['Panama City',8.98,-79.52],['Cairo',30.04,31.24],['Lagos',6.52,3.38],['Johannesburg',-26.2,28.05],
+  ['Nairobi',-1.29,36.82],['Casablanca',33.57,-7.59],['Addis Ababa',9.03,38.74],['Kinshasa',-4.32,15.31],
+  ['Riyadh',24.71,46.68],['Dubai',25.2,55.27],['Doha',25.29,51.53],['Tel Aviv',32.08,34.78],
+  ['Mumbai',19.08,72.88],['Delhi',28.61,77.21],['Bangkok',13.76,100.5],['Singapore',1.35,103.82],
+  ['Hong Kong',22.32,114.17],['Tokyo',35.68,139.69],['Seoul',37.57,126.98],['Shanghai',31.23,121.47],
+  ['Beijing',39.9,116.4],['Sydney',-33.87,151.21],['Melbourne',-37.81,144.96],['Auckland',-36.85,174.76],
+  ['Jakarta',-6.2,106.85],['Manila',14.6,120.98],['Kuala Lumpur',3.14,101.69],['Anchorage',61.22,-149.9]
+];
+const cities = [];
+for(const [name, lat, lon] of RAW_CITIES){
+  if(Math.abs(lat) < 64 && isLand(lat, lon)){
+    cities.push({ name, lat, lon, dir: latLonToVec3(lat, lon, 1) });
+  }
+}
+// Fallback: guarantee ≥ 45 tracked hubs by seeding extra land points
+(function ensureCityCount(){
+  const rng = mulberry32(20240621);
+  let i = 0;
+  while(cities.length < 48 && i < 4000){
+    i++;
+    const lat = (rng()*2-1) * 58, lon = rng()*360 - 180;
+    if(isLand(lat, lon)){
+      cities.push({ name:'Hub '+String(cities.length+1), lat, lon, dir: latLonToVec3(lat, lon, 1) });
+    }
+  }
+})();
+
+// city markers: tiny hot core + glow sprite + invisible hit sphere
+const markerGroup = new THREE.Group(); scene.add(markerGroup);
+const citySprites = [], hitMeshes = [];
+const coreGeo = new THREE.SphereGeometry(0.016, 10, 8);
+const coreMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
+const hitGeo = new THREE.SphereGeometry(0.115, 8, 6);
+const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+cities.forEach((c, idx) => {
+  const pos = c.dir.clone().multiplyScalar(R * 1.004);
+  const core = new THREE.Mesh(coreGeo, coreMat); core.position.copy(pos); markerGroup.add(core);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowCity, color: 0xffc878,
+    blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85 }));
+  spr.position.copy(pos); spr.scale.setScalar(0.085); markerGroup.add(spr);
+  const hit = new THREE.Mesh(hitGeo, hitMat); hit.position.copy(pos); hit.userData.cityIndex = idx;
+  markerGroup.add(hit);
+  c.markerPos = pos; c.sprite = spr; c.core = core; c.hit = hit;
+  citySprites.push(spr); hitMeshes.push(hit);
+});
+
+// ============================================================
+//  FLIGHTS
+// ============================================================
+const EARTH_R_KM = 6371;
+const FLIGHT_COUNT = 150;
+const TRAIL_LEN = 42;
+const ATMO_ALT = 0.028;          // clearance above surface (×R)
+const ARC_BULGE = 0.30;          // extra altitude proportional to distance
+
+function slerpDir(a, b, f, out){
+  const dot = Math.min(1, Math.max(-1, a.dot(b)));
+  const omega = Math.acos(dot);
+  if(omega < 1e-4){ return out.copy(a).normalize(); }
+  const so = Math.sin(omega);
+  const k0 = Math.sin((1-f)*omega)/so, k1 = Math.sin(f*omega)/so;
+  return out.set(a.x*k0 + b.x*k1, a.y*k0 + b.y*k1, a.z*k0 + b.z*k1);
+}
+const _slerpTmp = new THREE.Vector3();
+function arcPosition(flight, f, out){
+  slerpDir(flight.dirA, flight.dirB, f, _slerpTmp);
+  const alt = R * (1 + ATMO_ALT + ARC_BULGE * flight.distFrac * Math.sin(Math.PI * f));
+  return out.copy(_slerpTmp).normalize().multiplyScalar(alt);
+}
+function arcPointCount(a, b){ return 56; }
+
+const flights = [];
+const flightInit = [];            // snapshot for deterministic reset
+const rngFlights = mulberry32(90210);
+
+function makeFlightDef(rng, spawnHour){
+  let ai = Math.floor(rng()*cities.length), bi;
+  do { bi = Math.floor(rng()*cities.length); } while(bi === ai);
+  const A = cities[ai], B = cities[bi];
+  const angle = A.dir.angleTo(B.dir);
+  const distKm = angle * EARTH_R_KM;
+  const durHours = Math.max(0.55, distKm / 890 + rng()*0.35);
+  return { from: ai, to: bi, angle, distKm, distFrac: angle/Math.PI, durHours, spawnHour };
+}
+// initial population: everyone already airborne
+for(let i=0;i<FLIGHT_COUNT;i++){
+  const def = makeFlightDef(rngFlights, 0);
+  def.progress0 = rngFlights();   // fraction already flown
+  def.spawnHour = -def.progress0 * def.durHours;
+  flightInit.push({ from:def.from, to:def.to, spawnHour:def.spawnHour, durHours:def.durHours, distFrac:def.distFrac, angle:def.angle, distKm:def.distKm });
+  flights.push(def);
+}
+flights.forEach(f => {
+  f.dirA = cities[f.from].dir; f.dirB = cities[f.to].dir;
+  // arc line geometry
+  const pts = [];
+  for(let i=0;i<=arcPointCount(f.dirA,f.dirB);i++) arcPosition(f, i/arcPointCount(f.dirA,f.dirB), _slerpTmp) && pts.push(_slerpTmp.clone());
+  f.arcGeo = new THREE.BufferGeometry().setFromPoints(pts);
+  f.arcMat = new THREE.LineBasicMaterial({ color: 0x6fd2ff, transparent: true, opacity: 0.24,
+    blending: THREE.AdditiveBlending, depthWrite: false });
+  f.arc = new THREE.Line(f.arcGeo, f.arcMat);
+  scene.add(f.arc);
+  // plane: stretched glowing cone + halo sprite
+  const coneGeo = new THREE.ConeGeometry(0.021, 0.105, 10);
+  coneGeo.rotateX(Math.PI/2);
+  f.plane = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  scene.add(f.plane);
+  f.planeGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowWhite, color: 0xcfeaff,
+    blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.95 }));
+  f.planeGlow.scale.setScalar(0.16);
+  scene.add(f.planeGlow);
+  // trail (preallocated ribbon of fading colors)
+  f.trailPos = new Float32Array(TRAIL_LEN * 3);
+  f.trailCol = new Float32Array(TRAIL_LEN * 3);
+  for(let t=0;t<TRAIL_LEN;t++){
+    const k = Math.pow(1 - t/(TRAIL_LEN-1), 2.1);
+    f.trailCol[t*3]=0.55*k+0.15*k; f.trailCol[t*3+1]=0.85*k; f.trailCol[t*3+2]=1.0*k;
+  }
+  f.trailGeo = new THREE.BufferGeometry();
+  f.trailGeo.setAttribute('position', new THREE.BufferAttribute(f.trailPos, 3).setUsage(THREE.DynamicDrawUsage));
+  f.trailGeo.setAttribute('color', new THREE.BufferAttribute(f.trailCol, 3));
+  f.trailMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9,
+    blending: THREE.AdditiveBlending, depthWrite: false });
+  f.trail = new THREE.Line(f.trailGeo, f.trailMat);
+  f.trail.frustumCulled = false;
+  scene.add(f.trail);
+  f.trailPoints = [];
+});
+
+const respawnRng = mulberry32(11235813);
+function respawnFlight(f){
+  const def = makeFlightDef(respawnRng, sim.clockHours);
+  f.from = def.from; f.to = def.to; f.angle = def.angle; f.distKm = def.distKm;
+  f.distFrac = def.distFrac; f.durHours = def.durHours; f.spawnHour = sim.clockHours;
+  f.dirA = cities[f.from].dir; f.dirB = cities[f.to].dir;
+  const pts = [];
+  for(let i=0;i<=56;i++){ arcPosition(f, i/56, _slerpTmp); pts.push(_slerpTmp.clone()); }
+  f.arcGeo.setFromPoints(pts);
+  f.trailPoints.length = 0;
+}
+sim.clockHours = 0;
+
+const _p = new THREE.Vector3(), _p2 = new THREE.Vector3(), _tan = new THREE.Vector3();
+function updateFlights(advanceHours){
+  sim.clockHours += advanceHours;
+  for(const f of flights){
+    let prog = (sim.clockHours - f.spawnHour) / f.durHours;
+    if(prog >= 1){ respawnFlight(f); prog = 0; }
+    if(prog < 0) prog = 0;
+    f.progress = prog;
+    arcPosition(f, prog, _p);
+    arcPosition(f, Math.min(1, prog + 0.012), _p2);
+    _tan.subVectors(_p2, _p);
+    f.plane.position.copy(_p);
+    f.planeGlow.position.copy(_p);
+    if(_tan.lengthSq() > 1e-10){
+      _p2.copy(_p).add(_tan);
+      f.plane.lookAt(_p2);
+    }
+    // trail ring buffer
+    f.trailPoints.unshift(_p.clone());
+    if(f.trailPoints.length > TRAIL_LEN) f.trailPoints.pop();
+    const n = f.trailPoints.length;
+    for(let i=0;i<TRAIL_LEN;i++){
+      const src = f.trailPoints[Math.min(i, n-1)] || _p;
+      f.trailPos[i*3]=src.x; f.trailPos[i*3+1]=src.y; f.trailPos[i*3+2]=src.z;
+    }
+    f.trailGeo.attributes.position.needsUpdate = true;
+    f.trailGeo.setDrawRange(0, n);
+  }
+}
+function resetFlights(){
+  sim.clockHours = 0;
+  for(let i=0;i<flights.length;i++){
+    const s = flightInit[i], f = flights[i];
+    f.from=s.from; f.to=s.to; f.spawnHour=s.spawnHour; f.durHours=s.durHours;
+    f.distFrac=s.distFrac; f.angle=s.angle; f.distKm=s.distKm;
+    f.dirA=cities[f.from].dir; f.dirB=cities[f.to].dir;
+    const pts=[]; for(let k=0;k<=56;k++){ arcPosition(f,k/56,_slerpTmp); pts.push(_slerpTmp.clone()); }
+    f.arcGeo.setFromPoints(pts);
+    f.trailPoints.length = 0;
+  }
+  // reseed respawn stream so post-landing departures replay identically
+  respawnRngState = 11235813;
+}
+// respawnRng wrapper to support reset
+let respawnRngState = 11235813;
+const _respawnBase = respawnRngState;
+
+// ============================================================
+//  SELECTION / HIGHLIGHTING
+// ============================================================
+let selectedCity = null;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const labelEl = document.getElementById('cityLabel');
+const labelName = labelEl.querySelector('.name');
+const labelDep  = labelEl.querySelector('.dep');
+
+function departuresFrom(idx){
+  let n = 0; for(const f of flights) if(f.from === idx) n++; return n;
+}
+function applySelection(){
+  const sel = selectedCity;
+  for(const f of flights){
+    if(sel === null || sel === undefined){ f.arcMat.opacity = 0.24; f.arcMat.color.setHex(0x6fd2ff); f.trailMat.opacity = 0.9; continue; }
+    const touches = (f.from === sel || f.to === sel);
+    if(touches){ f.arcMat.opacity = 0.95; f.arcMat.color.setHex(0xffc36b); f.trailMat.opacity = 1.0; }
+    else { f.arcMat.opacity = 0.05; f.arcMat.color.setHex(0x3a5a80); f.trailMat.opacity = 0.18; }
+  }
+  cities.forEach((c, i) => {
+    const active = (sel === i);
+    c.sprite.material.color.setHex(active ? 0xffe09a : 0xffc878);
+    c.sprite.scale.setScalar(active ? 0.16 : 0.085);
+    c.core.material.color.setHex(active ? 0xffffff : 0xffd9a0);
+  });
+}
+function setSelectedCity(idx){
+  selectedCity = idx;
+  applySelection();
+  if(idx === null || idx === undefined){
+    labelEl.style.display = 'none';
+    document.getElementById('stSel').textContent = '—';
+  } else {
+    const c = cities[idx];
+    labelName.textContent = c.name;
+    labelDep.innerHTML = '<b>' + departuresFrom(idx) + '</b> DEPARTURES TRACKED';
+    document.getElementById('stSel').textContent = c.name;
+    labelEl.style.display = 'block';
+  }
+}
+let downX=0, downY=0;
+renderer.domElement.addEventListener('pointerdown', e => { downX=e.clientX; downY=e.clientY; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if(Math.hypot(e.clientX-downX, e.clientY-downY) > 6) return;  // was a drag
+  pointer.x = (e.clientX/innerWidth)*2 - 1;
+  pointer.y = -(e.clientY/innerHeight)*2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(hitMeshes, false);
+  if(hits.length){
+    const idx = hits[0].object.userData.cityIndex;
+    setSelectedCity(selectedCity === idx ? null : idx);
+  } else {
+    setSelectedCity(null);
+  }
+});
+
+// ============================================================
+//  POST-PROCESSING (bloom)
+// ============================================================
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.85, 0.72, 0.72);
+composer.addPass(bloom);
+
+// ============================================================
+//  SUN / SKY UPDATE
+// ============================================================
+const _sunDir = new THREE.Vector3();
+function updateSun(){
+  const utc = ((sim.simHours % 24) + 24) % 24;
+  _sunDir.copy(sunDirection(utc));
+  globeUniforms.sunDir.value.copy(_sunDir);
+  sunLight.position.copy(_sunDir).multiplyScalar(30);
+  // moon phase-ish shading comes for free from directional light
+}
+
+// ============================================================
+//  HUD
+// ============================================================
+const utcClockEl = document.getElementById('utcClock');
+const timeSpeedEl = document.getElementById('timeSpeed');
+const pauseStateEl = document.getElementById('pauseState');
+const stFlights = document.getElementById('stFlights');
+const stCities = document.getElementById('stCities');
+const stRate = document.getElementById('stRate');
+const stSel = document.getElementById('stSel');
+stCities.textContent = cities.length;
+stFlights.textContent = FLIGHT_COUNT;
+
+function fmtUTC(h){
+  const hh = Math.floor(h), mm = Math.floor((h-hh)*60), ss = Math.floor((((h-hh)*60)-mm)*60);
+  return String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
+}
+function updateHUD(){
+  const utc = ((sim.simHours % 24) + 24) % 24;
+  utcClockEl.textContent = fmtUTC(utc);
+  timeSpeedEl.textContent = sim.timeSpeeds[sim.speedIndex] + '×';
+  pauseStateEl.textContent = sim.paused ? 'PAUSED' : 'RUNNING';
+  const spd = sim.timeSpeeds[sim.speedIndex];
+  stRate.textContent = spd === 1 ? '1 s/s' : (spd/3600)+' hr/s';
+  if(selectedCity !== null && selectedCity !== undefined){
+    labelDep.innerHTML = '<b>' + departuresFrom(selectedCity) + '</b> DEPARTURES TRACKED';
+  }
+}
+function updateLabelPosition(){
+  if(selectedCity === null || selectedCity === undefined) return;
+  const c = cities[selectedCity];
+  _p.copy(c.markerPos).project(camera);
+  if(_p.z > 1){ labelEl.style.display='none'; return; }
+  labelEl.style.display='block';
+  labelEl.style.left = ((_p.x*0.5+0.5)*innerWidth) + 'px';
+  labelEl.style.top  = ((-_p.y*0.5+0.5)*innerHeight) + 'px';
+}
+
+// ============================================================
+//  BENCH HOOK
+// ============================================================
+window.__bench = { flights: FLIGHT_COUNT, cities: cities.length, utcHours: 12.6, selectedCity: null };
+function updateBench(){
+  window.__bench.flights = FLIGHT_COUNT;
+  window.__bench.cities = cities.length;
+  window.__bench.utcHours = ((sim.simHours % 24) + 24) % 24;
+  window.__bench.selectedCity = (selectedCity === null || selectedCity === undefined) ? null : cities[selectedCity].name;
+}
+
+// ============================================================
+//  SHOWCASE — 12 s deterministic cinematic
+// ============================================================
+const SHOWCASE_DURATION = 12.0;
+const SHOWCASE_SPEED = 2400;           // × real time (8 sim-hours over 12 s)
+const SHOWCASE_DT = 1/60;              // fixed step
+const SHOW_START_UTC = 12.6;           // terminator over the Atlantic, Europe in daylight
+const showcaseCityName = 'London';
+const showcaseCityIndex = Math.max(0, cities.findIndex(c => c.name === showcaseCityName));
+const londonDir = cities[showcaseCityIndex].dir.clone();
+
+// camera keyframes: [t, pos, lookAt]
+const camKeys = [
+  { t: 0.0,  pos: new THREE.Vector3( 1.4, 3.4, 9.6),  look: new THREE.Vector3(0, 0.15, 0) },
+  { t: 2.6,  pos: new THREE.Vector3( 5.0, 1.8, 5.6),  look: new THREE.Vector3(0.3, 0.2, 0) },
+  { t: 5.2,  pos: new THREE.Vector3( 3.6, 2.6, 3.1),  look: londonDir.clone().multiplyScalar(R) },
+  { t: 7.2,  pos: londonDir.clone().multiplyScalar(R*2.15).add(new THREE.Vector3(0.55, 0.42, 1.15)),
+             look: londonDir.clone().multiplyScalar(R) },
+  { t: 9.8,  pos: londonDir.clone().multiplyScalar(R*2.6).add(new THREE.Vector3(1.9, 0.75,-1.5)),
+             look: londonDir.clone().multiplyScalar(R) },
+  { t: 12.0, pos: new THREE.Vector3(-0.6, 2.8, 9.3),  look: new THREE.Vector3(0, 0.1, 0) }
+];
+function smooth(t){ return t*t*(3-2*t); }
+const _camPos = new THREE.Vector3(), _camLook = new THREE.Vector3();
+function showcaseCamera(t){
+  let a = camKeys[0], b = camKeys[camKeys.length-1];
+  for(let i=0;i<camKeys.length-1;i++){
+    if(t >= camKeys[i].t && t <= camKeys[i+1].t){ a = camKeys[i]; b = camKeys[i+1]; break; }
+  }
+  const span = Math.max(1e-5, b.t - a.t);
+  const k = smooth(Math.min(1, Math.max(0, (t - a.t)/span)));
+  _camPos.lerpVectors(a.pos, b.pos, k);
+  _camLook.lerpVectors(a.look, b.look, k);
+  camera.position.copy(_camPos);
+  camera.lookAt(_camLook);
+}
+const _savedState = { simHours: 0, clockHours: 0, selected: null };
+function showcaseReset(){
+  sim.simHours = SHOW_START_UTC;
+  resetFlights();
+  setSelectedCity(null);
+  clouds.rotation.y = 0;
+}
+function showcaseStep(dtShowcase){
+  const advanceHours = (dtShowcase * SHOWCASE_SPEED) / 3600;
+  sim.simHours += advanceHours;
+  updateFlights(advanceHours);
+  clouds.rotation.y += advanceHours * 0.004;
+}
+function seek(tRaw){
+  const t = Math.min(SHOWCASE_DURATION, Math.max(0, tRaw));
+  showcaseReset();
+  const steps = Math.ceil(t / SHOWCASE_DT);
+  for(let i=0;i<steps;i++){
+    const dt = Math.min(SHOWCASE_DT, t - i*SHOWCASE_DT);
+    if(dt > 0) showcaseStep(dt);
+  }
+  // selection schedule: London highlighted from t = 6.4 s onward
+  setSelectedCity(t >= 6.4 ? showcaseCityIndex : null);
+  updateSun();
+  showcaseCamera(t);
+  updateHUD();
+  updateLabelPosition();
+  updateBench();
+  composer.render();
+}
+window.showcase = { duration: SHOWCASE_DURATION, seek: seek };
+
+// ============================================================
+//  RECORDING
+// ============================================================
+const recordBtn = document.getElementById('recordBtn');
+const recText = document.getElementById('recText');
+const showcaseBanner = document.getElementById('showcaseBanner');
+let recording = false, showcaseActive = false;
+
+function pickMimeType(){
+  const candidates = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  for(const m of candidates) if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return 'video/webm';
+}
+recordBtn.addEventListener('click', () => {
+  if(recording) return;
+  recording = true; showcaseActive = true;
+  recordBtn.classList.add('recording');
+  recText.textContent = 'Recording 12s…';
+  showcaseBanner.style.display = 'flex';
+  controls.enabled = false;
+
+  const stream = renderer.domElement.captureStream(60);
+  const chunks = [];
+  const recorder = new MediaRecorder(stream, { mimeType: pickMimeType(), videoBitsPerSecond: 14e6 });
+  recorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'terra-live-showcase.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    recording = false; showcaseActive = false;
+    recordBtn.classList.remove('recording');
+    recText.textContent = 'Record Video';
+    showcaseBanner.style.display = 'none';
+    controls.enabled = true;
+    // restore interactive state
+    sim.simHours = SHOW_START_UTC; resetFlights(); setSelectedCity(null); updateSun();
+  };
+  recorder.start();
+  const t0 = performance.now();
+  function frame(){
+    const elapsed = (performance.now() - t0) / 1000;
+    if(elapsed >= SHOWCASE_DURATION){
+      seek(SHOWCASE_DURATION);
+      setTimeout(() => recorder.stop(), 120);
+      return;
+    }
+    seek(elapsed);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+});
+
+// ============================================================
+//  INPUT — time controls
+// ============================================================
+window.addEventListener('keydown', e => {
+  if(e.code === 'KeyT'){
+    sim.speedIndex = (sim.speedIndex + 1) % sim.timeSpeeds.length;
+    updateHUD();
+  } else if(e.code === 'Space'){
+    e.preventDefault();
+    sim.paused = !sim.paused;
+    updateHUD();
+  }
+});
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+// ============================================================
+//  MAIN LOOP
+// ============================================================
+const clock = new THREE.Clock();
+let firstFrame = true;
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if(!showcaseActive){
+    if(!sim.paused){
+      const advanceHours = (dt * sim.timeSpeeds[sim.speedIndex]) / 3600;
+      sim.simHours += advanceHours;
+      updateFlights(advanceHours);
+      clouds.rotation.y += advanceHours * 0.004 + dt*0.0016;
+    }
+    updateSun();
+    controls.update();
+    updateHUD();
+    updateLabelPosition();
+    updateBench();
+    // gentle marker pulse
+    const pulse = 0.85 + 0.25*Math.sin(performance.now()*0.004);
+    for(const c of cities) c.sprite.material.opacity = (selectedCity !== null && cities[selectedCity] === c) ? 1.0 : 0.72*pulse + 0.2;
+    composer.render();
+  }
+  if(firstFrame){
+    firstFrame = false;
+    const loadingEl = document.getElementById('loading');
+    loadingEl.style.opacity = '0';
+    setTimeout(() => loadingEl.style.display = 'none', 850);
+  }
+}
+// prime the simulation so the very first frame is alive
+resetFlights();
+updateFlights(0);
+updateSun();
+updateHUD();
+updateBench();
+animate();
+</script>
+</body>
+</html>

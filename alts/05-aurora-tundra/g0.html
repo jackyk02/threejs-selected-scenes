@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aurora Borealis — Tundra Field Camp</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #020409;
+    font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #dfe8f4;
+  }
+  canvas { display: block; }
+
+  .overlay { position: absolute; pointer-events: none; z-index: 10; user-select: none; }
+
+  #title {
+    top: 18px; left: 22px;
+    letter-spacing: 0.28em;
+    font-size: 13px; font-weight: 600;
+    color: #bfe8cf;
+    text-shadow: 0 0 12px rgba(64,255,150,0.35), 0 1px 3px #000;
+  }
+  #title small {
+    display: block; letter-spacing: 0.34em; font-size: 9px;
+    color: #7fa8c8; margin-top: 4px; font-weight: 400;
+  }
+
+  #recBtn {
+    position: absolute; top: 16px; right: 20px; z-index: 20;
+    pointer-events: auto; cursor: pointer;
+    background: rgba(16, 28, 40, 0.62);
+    border: 1px solid rgba(150, 220, 255, 0.35);
+    color: #cfe8ff; border-radius: 6px;
+    padding: 9px 16px; font-size: 11px; letter-spacing: 0.16em;
+    font-family: inherit; text-transform: uppercase;
+    backdrop-filter: blur(6px);
+    transition: background .2s, border-color .2s, color .2s;
+  }
+  #recBtn:hover { background: rgba(40, 70, 95, 0.75); border-color: rgba(170,240,255,0.65); color: #ffffff; }
+  #recBtn.recording { background: rgba(120, 20, 25, 0.75); border-color: #ff7a5c; color: #ffd9c9; }
+
+  #hint {
+    bottom: 16px; left: 22px;
+    font-size: 10px; letter-spacing: 0.14em; color: #8fb4cc;
+    text-shadow: 0 1px 2px #000;
+    line-height: 1.9;
+  }
+  #hint b { color: #d8f4e2; font-weight: 600; }
+
+  #badge {
+    bottom: 16px; right: 22px; text-align: right;
+    font-size: 10px; letter-spacing: 0.22em; color: #9fe8bb;
+    text-shadow: 0 0 10px rgba(70,255,150,0.4), 0 1px 2px #000;
+  }
+  #badge span {
+    display: block; font-size: 15px; color: #eaffef; margin-top: 3px;
+    letter-spacing: 0.3em; font-weight: 700;
+  }
+
+  #toast {
+    top: 64px; left: 50%; transform: translateX(-50%);
+    font-size: 13px; letter-spacing: 0.42em; color: #a8ffd0;
+    padding: 8px 26px; border: 1px solid rgba(120,255,180,0.45);
+    border-radius: 4px; background: rgba(8, 40, 26, 0.45);
+    text-shadow: 0 0 16px rgba(90,255,160,0.8);
+    opacity: 0; transition: opacity .18s;
+  }
+</style>
+</head>
+<body>
+
+<div id="title" class="overlay">AURORA&nbsp;BOREALIS<small>TUNDRA FIELD CAMP · 69°N</small></div>
+<button id="recBtn">● Record Video</button>
+<div id="hint" class="overlay"><b>DRAG</b> orbit &nbsp;·&nbsp; <b>1</b> quiet &nbsp; <b>2</b> active &nbsp; <b>3</b> storm<br><b>SPACE</b> substorm burst</div>
+<div id="badge" class="overlay">AURORA ACTIVITY<span id="actLabel">ACTIVE</span></div>
+<div id="toast" class="overlay">SUBSTORM · AURORAL SURGE</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Reflector.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+/* =========================================================
+   AURORA BOREALIS — snowy tundra field camp
+   All geometry, textures and simulation are generated in code.
+   ========================================================= */
+'use strict';
+
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------- JS value noise (for terrain) ---------- */
+function makeNoise2D(seed) {
+  const rng = mulberry32(seed);
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) { const j = (rng() * (i + 1)) | 0; const tmp = p[i]; p[i] = p[j]; p[j] = tmp; }
+  const perm = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+  const fade = t => t * t * (3 - 2 * t);
+  const gv = (ix, iy) => perm[(ix & 255) + perm[iy & 255]] / 255;
+  function noise(x, y) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = x - ix, fy = y - iy;
+    const a = gv(ix, iy), b = gv(ix + 1, iy), c = gv(ix, iy + 1), d = gv(ix + 1, iy + 1);
+    const ux = fade(fx), uy = fade(fy);
+    return lerp(lerp(a, b, ux), lerp(c, d, ux), uy);
+  }
+  function fbm(x, y, oct) {
+    let v = 0, amp = 0.5, fr = 1, tot = 0;
+    for (let o = 0; o < oct; o++) { v += noise(x * fr, y * fr) * amp; tot += amp; amp *= 0.5; fr *= 2.03; }
+    return v / tot;
+  }
+  return { noise, fbm };
+}
+const TN = makeNoise2D(1337);
+
+/* ---------- Tundra layout constants ---------- */
+const LAKE = { x: 0, z: 5, rx: 46, rz: 31.5 };
+const RING = Math.hypot(LAKE.rx, LAKE.rz);
+
+function terrainH(x, z) {
+  let h = (TN.fbm(x * 0.012 + 13.7, z * 0.012 + 7.3, 4) - 0.5) * 9.0;
+  h += (TN.fbm(x * 0.045 + 3.1,  z * 0.045 + 9.4,  3) - 0.5) * 2.1;
+  // wind-carved sastrugi ridges
+  const wx = Math.cos(0.35), wz = Math.sin(0.35);
+  const a = x * wx + z * wz, b = -x * wz + z * wx;
+  const r = Math.abs(TN.noise(a * 0.20, b * 0.045) - 0.5) * 2;
+  h += Math.pow(1 - r, 3.2) * 0.42;
+  // far rim hills
+  const dc = Math.sqrt(x * x + z * z);
+  h += sstep(130, 215, dc) * 9.0 * (0.4 + TN.fbm(x * 0.02 + 5, z * 0.02 + 8, 3));
+  // lake basin depression
+  const dx = (x - LAKE.x) / LAKE.rx, dz = (z - LAKE.z) / LAKE.rz;
+  const d = Math.sqrt(dx * dx + dz * dz);
+  const lake = sstep(1.28, 0.72, d);
+  h = lerp(h, -1.7, lake);
+  return h;
+}
+function lakeDist(x, z) {
+  const dx = (x - LAKE.x) / LAKE.rx, dz = (z - LAKE.z) / LAKE.rz;
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+/* ---------- Renderer / Scene / Camera ---------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x020409);
+scene.fog = new THREE.FogExp2(0x060b14, 0.0015);
+
+const DEF_POS = new THREE.Vector3(-27, 6.4, 55);
+const DEF_TGT = new THREE.Vector3(2, 13, -22);
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 2200);
+camera.position.copy(DEF_POS);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.copy(DEF_TGT);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 5;
+controls.maxDistance = 170;
+controls.maxPolarAngle = 1.52;
+controls.update();
+
+/* ---------- GLSL shared noise ---------- */
+const NOISE_GLSL = `
+float hash21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i), b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0)), d = hash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+float fbm2(vec2 p){
+  float v = 0.0, a = 0.5;
+  for(int i = 0; i < 5; i++){ v += a * vnoise(p); p = p * 2.03 + vec2(19.7, 7.3); a *= 0.5; }
+  return v;
+}`;
+
+/* ---------- Lights ---------- */
+const hemi = new THREE.HemisphereLight(0x24344e, 0x090c08, 0.62);
+scene.add(hemi);
+
+const moonLight = new THREE.DirectionalLight(0xbdd4e8, 1.15);
+moonLight.position.set(62, 95, 44);
+moonLight.castShadow = true;
+moonLight.shadow.mapSize.set(4096, 4096);
+moonLight.shadow.camera.left = -75; moonLight.shadow.camera.right = 75;
+moonLight.shadow.camera.top = 75;  moonLight.shadow.camera.bottom = -75;
+moonLight.shadow.camera.near = 10; moonLight.shadow.camera.far = 260;
+moonLight.shadow.bias = -0.00055;
+scene.add(moonLight);
+
+const auroraLight = new THREE.DirectionalLight(0x49ff8e, 0.6);   // green aurora wash
+auroraLight.position.set(-10, 80, -90);
+scene.add(auroraLight);
+
+const magentaLight = new THREE.DirectionalLight(0xb45cff, 0.28); // magenta fringe tint
+magentaLight.position.set(25, 70, -110);
+scene.add(magentaLight);
+
+/* ---------- Sky dome (gradient + Milky Way band + airglow) ---------- */
+const skyUniforms = {
+  uTime: { value: 0 }, uBoost: { value: 0 }, uAct: { value: 2 }
+};
+const MW_N = new THREE.Vector3(0.90, 0.0, -0.44).normalize();   // band axis (perpendicular to band plane)
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: {
+    uTime: skyUniforms.uTime, uBoost: skyUniforms.uBoost, uAct: skyUniforms.uAct,
+    uMwn: { value: MW_N }
+  },
+  vertexShader: `
+    varying vec3 vDir;
+    void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform float uTime, uBoost, uAct;
+    uniform vec3 uMwn;
+    varying vec3 vDir;
+    ${NOISE_GLSL}
+    void main(){
+      vec3 d = normalize(vDir);
+      float h = d.y;
+      // base vertical gradient
+      vec3 zen = vec3(0.006, 0.010, 0.030);
+      vec3 mid = vec3(0.020, 0.038, 0.075);
+      vec3 hor = vec3(0.055, 0.085, 0.115);
+      vec3 col = mix(hor, mid, smoothstep(0.0, 0.16, h));
+      col = mix(col, zen, smoothstep(0.12, 0.72, h));
+      // Milky Way band
+      float bd = dot(d, uMwn);
+      float band = exp(-pow(bd / 0.155, 2.0));
+      float cl = fbm2(d.xz * 9.0 + d.y * 7.0 + 3.7);
+      float core = exp(-pow(bd / 0.055, 2.0));
+      col += vec3(0.085, 0.095, 0.135) * band * (0.45 + 0.85 * cl);
+      col += vec3(0.16, 0.16, 0.20) * core * (0.35 + 0.9 * cl * cl);
+      // faint dark dust lane
+      col -= vec3(0.05, 0.05, 0.06) * core * smoothstep(0.55, 0.85, fbm2(d.xy * 14.0 + 9.1));
+      // airglow: green band slightly above horizon, faint orange right at horizon
+      float ag = exp(-abs(h - 0.065) * 26.0);
+      col += vec3(0.075, 0.155, 0.105) * ag * 0.85;
+      col += vec3(0.14, 0.085, 0.055) * exp(-abs(h - 0.012) * 45.0) * 0.6;
+      // north sky aurora ambient tint (pulses with activity / bursts)
+      float north = max(0.0, -d.z);
+      col += vec3(0.045, 0.16, 0.09) * exp(-abs(h - 0.30) * 5.0) * north * (0.35 + 0.22 * uAct + uBoost * 1.35);
+      col += vec3(0.10, 0.05, 0.11) * exp(-abs(h - 0.46) * 7.0) * north * (0.25 + 0.18 * uAct + uBoost * 1.1);
+      if (h < -0.02) col = mix(col, vec3(0.02, 0.03, 0.05), smoothstep(-0.02, -0.2, h));
+      gl_FragColor = vec4(col, 1.0);
+    }`
+});
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(900, 48, 32), skyMat);
+scene.add(skyDome);
+
+/* ---------- Stars (6000 twinkling) + Milky Way band points ---------- */
+const STAR_COUNT = 6000;
+const MW_COUNT = 2400;
+const starUniforms = { uTime: { value: 0 } };
+
+function buildStars() {
+  const pos = new Float32Array(STAR_COUNT * 3);
+  const size = new Float32Array(STAR_COUNT);
+  const phase = new Float32Array(STAR_COUNT);
+  const speed = new Float32Array(STAR_COUNT);
+  const warm = new Float32Array(STAR_COUNT);
+  const rng = mulberry32(90210);
+  let i = 0;
+  while (i < STAR_COUNT) {
+    // random direction on upper hemisphere
+    const u = rng() * 2 - 1;
+    const th = rng() * Math.PI * 2;
+    const s = Math.sqrt(1 - u * u);
+    const y = Math.abs(u) * 0.96 + 0.04;      // bias above horizon
+    const x = s * Math.cos(th), z = s * Math.sin(th);
+    pos[i*3] = x * 780; pos[i*3+1] = y * 780; pos[i*3+2] = z * 780;
+    // few bright stars, many faint
+    size[i] = rng() < 0.06 ? 2.6 + rng() * 2.4 : 0.8 + Math.pow(rng(), 2.2) * 2.0;
+    phase[i] = rng() * Math.PI * 2;
+    speed[i] = 1.2 + rng() * 3.1;
+    warm[i] = rng();
+    i++;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+  g.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+  g.setAttribute('aSpeed', new THREE.BufferAttribute(speed, 1));
+  g.setAttribute('aWarm', new THREE.BufferAttribute(warm, 1));
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    uniforms: starUniforms,
+    vertexShader: `
+      attribute float aSize, aPhase, aSpeed, aWarm;
+      uniform float uTime;
+      varying float vA; varying vec3 vCol;
+      void main(){
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float tw = 0.5 + 0.5 * sin(uTime * aSpeed + aPhase);
+        tw = pow(tw, 1.6);
+        vA = 0.28 + 0.72 * tw;
+        vCol = mix(vec3(0.72, 0.83, 1.0), vec3(1.0, 0.90, 0.74), aWarm);
+        gl_PointSize = aSize * (640.0 / max(1.0, -mv.z)) * (0.75 + 0.5 * tw);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying float vA; varying vec3 vCol;
+      void main(){
+        vec2 d = gl_PointCoord - 0.5;
+        float r = length(d);
+        float a = smoothstep(0.5, 0.04, r); a *= a;
+        gl_FragColor = vec4(vCol, a * vA);
+      }`
+  });
+  return new THREE.Points(g, m);
+}
+scene.add(buildStars());
+
+function buildMilkyWay() {
+  // band: axis n perpendicular; sweep dir b perpendicular to n
+  const b = new THREE.Vector3(-0.42, 0.34, -0.84).normalize();
+  const n = MW_N.clone();
+  const u = new THREE.Vector3().crossVectors(n, b).normalize();
+  const pos = new Float32Array(MW_COUNT * 3);
+  const size = new Float32Array(MW_COUNT);
+  const phase = new Float32Array(MW_COUNT);
+  const speed = new Float32Array(MW_COUNT);
+  const warm = new Float32Array(MW_COUNT);
+  const rng = mulberry32(4711);
+  const gauss = () => (rng() + rng() + rng() + rng() - 2) * 0.5;
+  let i = 0, guard = 0;
+  while (i < MW_COUNT && guard++ < MW_COUNT * 30) {
+    const th = rng() * Math.PI * 2;
+    const base = b.clone().multiplyScalar(Math.cos(th)).addScaledVector(u, Math.sin(th));
+    const dir = base.addScaledVector(n, gauss() * 0.30).normalize();
+    if (dir.y < 0.05) continue;
+    pos[i*3] = dir.x * 770; pos[i*3+1] = dir.y * 770; pos[i*3+2] = dir.z * 770;
+    size[i] = 0.55 + Math.pow(rng(), 2.6) * 1.7;
+    phase[i] = rng() * Math.PI * 2;
+    speed[i] = 0.9 + rng() * 2.2;
+    warm[i] = 0.35 + rng() * 0.4;
+    i++;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+  g.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+  g.setAttribute('aSpeed', new THREE.BufferAttribute(speed, 1));
+  g.setAttribute('aWarm', new THREE.BufferAttribute(warm, 1));
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    uniforms: starUniforms,
+    vertexShader: `
+      attribute float aSize, aPhase, aSpeed, aWarm;
+      uniform float uTime;
+      varying float vA; varying vec3 vCol;
+      void main(){
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float tw = 0.5 + 0.5 * sin(uTime * aSpeed + aPhase);
+        vA = 0.16 + 0.4 * tw;
+        vCol = mix(vec3(0.82, 0.86, 1.0), vec3(0.95, 0.92, 0.85), aWarm);
+        gl_PointSize = aSize * (640.0 / max(1.0, -mv.z));
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying float vA; varying vec3 vCol;
+      void main(){
+        vec2 d = gl_PointCoord - 0.5;
+        float r = length(d);
+        float a = smoothstep(0.5, 0.05, r); a *= a;
+        gl_FragColor = vec4(vCol, a * vA);
+      }`
+  });
+  return new THREE.Points(g, m);
+}
+scene.add(buildMilkyWay());
+
+/* ---------- Tundra heightfield (256 x 256 segments) ---------- */
+function buildGround() {
+  const SIZE = 460, SEG = 256;
+  const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
+  geo.rotateX(-Math.PI / 2);
+  const posAttr = geo.attributes.position;
+  const colors = new Float32Array(posAttr.count * 3);
+  for (let i = 0; i < posAttr.count; i++) {
+    const x = posAttr.getX(i), z = posAttr.getZ(i);
+    const h = terrainH(x, z);
+    posAttr.setY(i, h);
+    // vertex colours: wind-drifted snow
+    const hn = clamp01((h + 2.5) / 8.5);
+    let r = lerp(0.60, 0.93, hn), g = lerp(0.68, 0.95, hn), b2 = lerp(0.85, 1.02, hn);
+    const mottle = TN.fbm(x * 0.075 + 40, z * 0.075 + 11, 3);
+    const dim = 0.88 + mottle * 0.22;
+    r *= dim; g *= dim; b2 *= dim;
+    // sparkle-ish bright crests on sastrugi
+    const wx = Math.cos(0.35), wz = Math.sin(0.35);
+    const a2 = x * wx + z * wz, b3 = -x * wz + z * wx;
+    const rr = Math.abs(TN.noise(a2 * 0.20, b3 * 0.045) - 0.5) * 2;
+    const crest = Math.pow(1 - rr, 6.0) * 0.07;
+    r += crest; g += crest; b2 += crest;
+    // dark lake bed under ice
+    const ld = lakeDist(x, z);
+    const wet = sstep(1.25, 0.85, ld);
+    r = lerp(r, 0.13, wet * 0.85); g = lerp(g, 0.17, wet * 0.85); b2 = lerp(b2, 0.22, wet * 0.85);
+    colors[i*3] = r; colors[i*3+1] = g; colors[i*3+2] = b2;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.02 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return mesh;
+}
+buildGround();
+
+/* ---------- Frozen lake: planar reflection + procedural ice ---------- */
+function makeIceTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 1024;
+  const g = c.getContext('2d');
+  const rng = mulberry32(777);
+  const grad = g.createLinearGradient(0, 0, 1024, 1024);
+  grad.addColorStop(0.0, 'rgba(17,27,40,0.70)');
+  grad.addColorStop(0.45, 'rgba(12,20,33,0.62)');
+  grad.addColorStop(1.0, 'rgba(19,31,46,0.70)');
+  g.fillStyle = grad; g.fillRect(0, 0, 1024, 1024);
+  // snow dust patches
+  for (let i = 0; i < 150; i++) {
+    const x = rng() * 1024, y = rng() * 1024, rad = 18 + rng() * 130;
+    const a = 0.08 + rng() * 0.22;
+    const rg = g.createRadialGradient(x, y, 0, x, y, rad);
+    rg.addColorStop(0, 'rgba(228,238,250,' + a.toFixed(3) + ')');
+    rg.addColorStop(1, 'rgba(228,238,250,0)');
+    g.fillStyle = rg; g.beginPath(); g.arc(x, y, rad, 0, 6.3); g.fill();
+  }
+  // darker refrozen patches
+  for (let i = 0; i < 45; i++) {
+    const x = rng() * 1024, y = rng() * 1024, rad = 25 + rng() * 110;
+    const rg = g.createRadialGradient(x, y, 0, x, y, rad);
+    rg.addColorStop(0, 'rgba(4,8,16,0.35)'); rg.addColorStop(1, 'rgba(4,8,16,0)');
+    g.fillStyle = rg; g.beginPath(); g.arc(x, y, rad, 0, 6.3); g.fill();
+  }
+  // pressure cracks (branching random walkers)
+  g.lineCap = 'round';
+  for (let i = 0; i < 17; i++) {
+    let x = rng() * 1024, y = rng() * 1024, ang = rng() * Math.PI * 2;
+    g.strokeStyle = 'rgba(214,233,248,0.6)';
+    g.lineWidth = 1.6 + rng() * 1.8;
+    g.shadowColor = 'rgba(170,225,255,0.9)'; g.shadowBlur = 7;
+    g.beginPath(); g.moveTo(x, y);
+    const steps = (46 + rng() * 60) | 0, pts = [];
+    for (let s = 0; s < steps; s++) {
+      ang += (rng() - 0.5) * 0.55;
+      const st = 8 + rng() * 14;
+      x += Math.cos(ang) * st; y += Math.sin(ang) * st;
+      g.lineTo(x, y); pts.push([x, y]);
+    }
+    g.stroke();
+    g.shadowBlur = 2;
+    for (let k = 4; k < pts.length; k += 5) {
+      if (rng() < 0.55) {
+        let bx = pts[k][0], by = pts[k][1], bang = rng() * Math.PI * 2;
+        g.lineWidth = 0.7 + rng() * 0.9;
+        g.strokeStyle = 'rgba(205,226,242,0.42)';
+        g.beginPath(); g.moveTo(bx, by);
+        const bl = (6 + rng() * 15) | 0;
+        for (let s = 0; s < bl; s++) {
+          bang += (rng() - 0.5) * 0.7;
+          const st = 5 + rng() * 9;
+          bx += Math.cos(bang) * st; by += Math.sin(bang) * st;
+          g.lineTo(bx, by);
+        }
+        g.stroke();
+      }
+    }
+    g.shadowBlur = 0;
+  }
+  // trapped air specks
+  for (let i = 0; i < 1100; i++) {
+    g.fillStyle = 'rgba(232,242,252,' + (0.12 + rng() * 0.4).toFixed(3) + ')';
+    const s = rng() < 0.85 ? 1.4 : 3.0;
+    g.fillRect(rng() * 1024, rng() * 1024, s, s);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 8;
+  return tex;
+}
+const iceGeo = new THREE.CircleGeometry(1, 72);
+const reflector = new THREE.Reflector(iceGeo, {
+  clipBias: 0.0035,
+  textureWidth: 2048,
+  textureHeight: 2048,
+  color: 0x6a7683
+});
+reflector.rotation.x = -Math.PI / 2;
+reflector.scale.set(LAKE.rx, LAKE.rz, 1);
+reflector.position.set(LAKE.x, -0.42, LAKE.z);
+scene.add(reflector);
+
+const iceOverlay = new THREE.Mesh(
+  new THREE.CircleGeometry(1, 72),
+  new THREE.MeshBasicMaterial({ map: makeIceTexture(), transparent: true, depthWrite: false, fog: false })
+);
+iceOverlay.rotation.x = -Math.PI / 2;
+iceOverlay.scale.set(LAKE.rx, LAKE.rz, 1);
+iceOverlay.position.set(LAKE.x, -0.36, LAKE.z);
+iceOverlay.renderOrder = 2;
+scene.add(iceOverlay);
+
+/* ---------- Rocks & dwarf shrubs (instanced) ---------- */
+const dummy = new THREE.Object3D();
+function scatterInstanced(mesh, count, placeFn) {
+  for (let i = 0; i < count; i++) { placeFn(i); mesh.setMatrixAt(i, dummy.matrix); }
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.castShadow = true;
+  scene.add(mesh);
+}
+{ // rocks
+  const rockGeo = new THREE.DodecahedronGeometry(0.72, 0);
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x49505a, roughness: 0.96, metalness: 0.04, flatShading: true });
+  const rocks = new THREE.InstancedMesh(rockGeo, rockMat, 118);
+  const rng = mulberry32(31415);
+  scatterInstanced(rocks, 118, (i) => {
+    let x, z, tries = 0;
+    do {
+      const ang = rng() * Math.PI * 2, rad = 12 + Math.pow(rng(), 0.7) * 155;
+      x = Math.cos(ang) * rad; z = Math.sin(ang) * rad - 8;
+    } while (lakeDist(x, z) < 1.18 && ++tries < 40);
+    const s = 0.35 + Math.pow(rng(), 1.6) * 2.1;
+    dummy.position.set(x, terrainH(x, z) + s * 0.28, z);
+    dummy.rotation.set(rng() * 3, rng() * 6.3, rng() * 3);
+    dummy.scale.set(s, s * (0.55 + rng() * 0.6), s * (0.7 + rng() * 0.6));
+    dummy.updateMatrix();
+  });
+}
+{ // shoreline boulders ringing the lake
+  const rockGeo = new THREE.DodecahedronGeometry(0.6, 0);
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x3f464f, roughness: 0.95, flatShading: true });
+  const shore = new THREE.InstancedMesh(rockGeo, rockMat, 46);
+  const rng = mulberry32(2718);
+  scatterInstanced(shore, 46, (i) => {
+    const ang = (i / 46) * Math.PI * 2 + rng() * 0.22;
+    const rr = 1.03 + rng() * 0.09;
+    const x = LAKE.x + Math.cos(ang) * LAKE.rx * rr;
+    const z = LAKE.z + Math.sin(ang) * LAKE.rz * rr;
+    const s = 0.3 + rng() * 0.85;
+    dummy.position.set(x, terrainH(x, z) + s * 0.3, z);
+    dummy.rotation.set(rng() * 3, rng() * 6.3, rng() * 3);
+    dummy.scale.set(s, s * 0.7, s);
+    dummy.updateMatrix();
+  });
+}
+{ // dwarf shrubs
+  const shrubGeo = new THREE.IcosahedronGeometry(0.34, 0);
+  const shrubMat = new THREE.MeshStandardMaterial({ color: 0x33241a, roughness: 1.0, flatShading: true });
+  const shrubs = new THREE.InstancedMesh(shrubGeo, shrubMat, 460);
+  const rng = mulberry32(161803);
+  scatterInstanced(shrubs, 460, (i) => {
+    let x, z, tries = 0;
+    do {
+      const ang = rng() * Math.PI * 2, rad = 15 + Math.pow(rng(), 0.8) * 165;
+      x = Math.cos(ang) * rad; z = Math.sin(ang) * rad - 6;
+    } while (lakeDist(x, z) < 1.15 && ++tries < 40);
+    const s = 0.5 + rng() * 1.25;
+    dummy.position.set(x, terrainH(x, z) + 0.12 * s, z);
+    dummy.rotation.set(0, rng() * 6.3, 0);
+    dummy.scale.set(s, s * 0.55, s);
+    dummy.updateMatrix();
+  });
+}
+
+/* ---------- Canvas glow texture for lantern sprite ---------- */
+function makeGlowTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const rg = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  rg.addColorStop(0, 'rgba(255,235,190,1)');
+  rg.addColorStop(0.22, 'rgba(255,205,125,0.85)');
+  rg.addColorStop(0.55, 'rgba(255,160,70,0.28)');
+  rg.addColorStop(1, 'rgba(255,140,50,0)');
+  g.fillStyle = rg; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const glowTex = makeGlowTexture();
+
+/* ---------- Camp: tent (lantern-lit) + sled ---------- */
+const camp = new THREE.Group();
+const CAMP_POS = new THREE.Vector3(37, 0, 28.5);
+CAMP_POS.y = terrainH(CAMP_POS.x, CAMP_POS.z);
+
+function rod(a, b, r, mat) {
+  const dir = b.clone().sub(a);
+  const len = dir.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 6), mat);
+  m.position.copy(a).addScaledVector(dir, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  return m;
+}
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 0.9 });
+const darkWood = new THREE.MeshStandardMaterial({ color: 0x2e1f12, roughness: 0.95 });
+
+{ // --- tent ---
+  const W = 1.5, H = 2.05, L = 1.75;
+  const verts = new Float32Array([
+    // left slope
+    -W, 0, -L,   0, H, -L,   0, H, L,   -W, 0, -L,   0, H, L,   -W, 0, L,
+    // right slope
+     W, 0, -L,   0, H, L,    0, H, -L,   W, 0, -L,   W, 0, L,    0, H, L,
+    // front cap
+    -W, 0,  L,   W, 0, L,    0, H, L,
+    // back cap
+     W, 0, -L,  -W, 0, -L,   0, H, -L
+  ]);
+  const tg = new THREE.BufferGeometry();
+  tg.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  tg.computeVertexNormals();
+  const tentMat = new THREE.MeshStandardMaterial({
+    color: 0xa8512c, roughness: 0.82, metalness: 0.0,
+    emissive: 0xff7a30, emissiveIntensity: 0.38, side: THREE.DoubleSide
+  });
+  const tent = new THREE.Mesh(tg, tentMat);
+  tent.castShadow = true;
+  camp.add(tent);
+  // dark doorway (front, +z)
+  const door = new THREE.BufferGeometry();
+  door.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    -0.62, 0.03, L + 0.012,   0.62, 0.03, L + 0.012,   0, 1.25, L + 0.012
+  ]), 3));
+  door.computeVertexNormals();
+  camp.add(new THREE.Mesh(door, new THREE.MeshStandardMaterial({ color: 0x140a05, roughness: 1 })));
+  // warm lantern bulb glowing in the doorway
+  const bulb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.115, 12, 10),
+    new THREE.MeshStandardMaterial({ color: 0xffc577, emissive: 0xffb457, emissiveIntensity: 2.6 })
+  );
+  bulb.position.set(0, 0.52, L + 0.05);
+  camp.add(bulb);
+  // lantern point light
+  const lantern = new THREE.PointLight(0xffb066, 2.1, 15, 2);
+  lantern.position.set(0, 1.05, 0);
+  lantern.name = 'lantern';
+  camp.add(lantern);
+  // glow sprite spilling out the door
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTex, color: 0xffc98a, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.95
+  }));
+  sprite.position.set(0, 0.75, L + 0.35);
+  sprite.scale.set(2.4, 2.4, 1);
+  sprite.name = 'lanternGlow';
+  camp.add(sprite);
+  // ridge pole + side ropes + stakes
+  camp.add(rod(new THREE.Vector3(0, H + 0.02, -L - 0.28), new THREE.Vector3(0, H + 0.02, L + 0.28), 0.045, darkWood));
+  const stakeMat = new THREE.MeshStandardMaterial({ color: 0x241a10, roughness: 1 });
+  const stakeTops = [
+    new THREE.Vector3(-W - 0.85, 0.03,  L + 0.55), new THREE.Vector3(W + 0.85, 0.03,  L + 0.55),
+    new THREE.Vector3(-W - 0.85, 0.03, -L - 0.55), new THREE.Vector3(W + 0.85, 0.03, -L - 0.55)
+  ];
+  const ropeTops = [
+    new THREE.Vector3(0, H, L), new THREE.Vector3(0, H, L),
+    new THREE.Vector3(0, H, -L), new THREE.Vector3(0, H, -L)
+  ];
+  for (let i = 0; i < 4; i++) {
+    camp.add(rod(ropeTops[i], stakeTops[i], 0.016, stakeMat));
+    const stake = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.3, 6), stakeMat);
+    stake.position.copy(stakeTops[i]).add(new THREE.Vector3(0, 0.1, 0));
+    camp.add(stake);
+  }
+}
+{ // --- sled (to the left of the tent) ---
+  const sled = new THREE.Group();
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.09, 0.86), woodMat);
+  bed.position.y = 0.42; bed.castShadow = true; sled.add(bed);
+  for (let i = -1; i <= 1; i++) {
+    const slat = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.05, 0.16), darkWood);
+    slat.position.set(0, 0.50, i * 0.27); slat.castShadow = true; sled.add(slat);
+  }
+  for (const side of [-1, 1]) {
+    // runner with upturned front curl
+    const runner = new THREE.Mesh(new THREE.BoxGeometry(2.45, 0.09, 0.09), darkWood);
+    runner.position.set(0, 0.10, side * 0.40); runner.castShadow = true; sled.add(runner);
+    const curl = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.09, 10, 1, false, 0, Math.PI * 0.85), darkWood);
+    curl.rotation.z = Math.PI / 2; curl.rotation.y = Math.PI / 2;
+    curl.position.set(1.22, 0.22, side * 0.40);
+    sled.add(curl);
+    // posts
+    for (const px of [-0.75, 0.0, 0.75]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.34, 0.08), woodMat);
+      post.position.set(px, 0.28, side * 0.40); sled.add(post);
+    }
+  }
+  // pull handles at back
+  sled.add(rod(new THREE.Vector3(-1.05, 0.45, -0.3), new THREE.Vector3(-1.55, 0.95, -0.42), 0.035, woodMat));
+  sled.add(rod(new THREE.Vector3(-1.05, 0.45,  0.3), new THREE.Vector3(-1.55, 0.95,  0.42), 0.035, woodMat));
+  sled.add(rod(new THREE.Vector3(-1.55, 0.95, -0.42), new THREE.Vector3(-1.55, 0.95, 0.42), 0.035, woodMat));
+  // coiled rope on the bed
+  const rope = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.045, 6, 18), new THREE.MeshStandardMaterial({ color: 0x8a6f4d, roughness: 1 }));
+  rope.rotation.x = Math.PI / 2; rope.position.set(0.35, 0.56, 0); sled.add(rope);
+  sled.position.set(-2.6, 0.02, 1.6);
+  sled.rotation.y = 0.55;
+  camp.add(sled);
+  // a chopped log beside the tent
+  const log = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 1.5, 9), woodMat);
+  log.rotation.z = Math.PI / 2; log.rotation.y = 0.4;
+  log.position.set(2.3, 0.17, 0.8); log.castShadow = true;
+  camp.add(log);
+}
+camp.position.set(CAMP_POS.x, CAMP_POS.y - 0.06, CAMP_POS.z);
+camp.rotation.y = Math.atan2(LAKE.x - CAMP_POS.x, LAKE.z - CAMP_POS.z); // face the lake
+scene.add(camp);
+
+/* =========================================================
+   AURORA CURTAINS — 5 ribbons, 400x48 segments each
+   ========================================================= */
+const auroraUniforms = {
+  uTime: { value: 0 },
+  uActivity: { value: 2 },
+  uBoost: { value: 0 }
+};
+const curtVert = `
+  uniform float uTime, uActivity, uSeed;
+  varying vec2 vUv;
+  ${NOISE_GLSL}
+  void main(){
+    vUv = uv;
+    vec3 p = position;
+    float t = uTime * (0.50 + 0.30 * uActivity);      // fold travel accelerates with activity
+    float x = position.x;
+    float sway = 0.30 + 0.70 * (1.0 - uv.y);          // lower edge swings freely, top anchored
+    float f = 0.0;
+    f += sin(x * 0.055 + t * 0.9 + uSeed * 6.28) * 2.6;
+    f += sin(x * 0.113 - t * 1.35 + uSeed * 12.0) * 1.35;
+    f += (vnoise(vec2(x * 0.045 + t * 0.38, uSeed * 7.0)) - 0.5) * 9.5;
+    f += (vnoise(vec2(x * 0.128 - t * 0.52, uSeed * 3.0 + 5.0)) - 0.5) * 3.6;
+    p.z += f * sway;
+    p.x += sin(t * 0.52 + uSeed * 2.0 + uv.y * 3.1 + uTime * 0.12) * 1.25 * sway;
+    p.z += sin(x * 0.021 + uTime * 0.21 + uSeed * 9.0) * 3.2;   // large slow billow
+    p.z += sin(x * 0.30 + uTime * 1.9 + uSeed * 4.0) * 0.22 * (1.0 - uv.y); // fine flutter at hem
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  }`;
+const curtFrag = `
+  uniform float uTime, uActivity, uBoost, uSeed;
+  varying vec2 vUv;
+  ${NOISE_GLSL}
+  void main(){
+    float y = vUv.y;
+    // vertical spectral gradient: green hem -> teal -> magenta -> red crown
+    vec3 col = mix(vec3(0.14, 1.00, 0.42), vec3(0.10, 0.92, 0.72), smoothstep(0.02, 0.34, y));
+    col = mix(col, vec3(0.78, 0.26, 0.98), smoothstep(0.30, 0.74, y));
+    col = mix(col, vec3(1.00, 0.28, 0.38), smoothstep(0.72, 1.00, y));
+    // fine vertical ray striations (two scales)
+    float ray1 = pow(vnoise(vec2(vUv.x * 235.0 + uSeed * 17.0, uSeed * 31.0)), 3.1) * 2.6;
+    float ray2 = pow(vnoise(vec2(vUv.x * 68.0 - uTime * 0.22, uSeed * 13.0 + 2.0)), 2.6) * 2.1;
+    // ray length modulation so rays have different heights
+    float rayLen = 0.55 + 0.75 * vnoise(vec2(vUv.x * 9.0 + uSeed * 5.0, uSeed * 11.0));
+    ray1 *= mix(0.35, 1.15, clamp(rayLen + (0.5 - y), 0.0, 1.0));
+    // travelling shimmer bands
+    float shimmer = 0.55 + 0.80 * vnoise(vec2(vUv.x * 24.0 + uTime * (0.45 + 0.22 * uActivity), uTime * 0.38 + uSeed * 5.0));
+    // vertical envelope: strong hem, dissolve upward
+    float env = smoothstep(0.0, 0.05, y) * (1.0 - smoothstep(0.28, 0.97, y));
+    env = pow(env, 1.22);
+    float hem = exp(-y * 5.5) * 1.55;                  // brilliant lower border
+    float intensity = (ray1 * 0.72 + ray2 * 0.62 + 0.32) * shimmer * env + hem * env * 0.72;
+    intensity *= 0.36 + 0.29 * uActivity;              // 1 quiet -> 3 storm
+    intensity *= (1.0 + uBoost * 2.5);                 // substorm surge
+    vec3 c = col * intensity * 1.55;
+    gl_FragColor = vec4(c, 1.0);
+  }`;
+
+function makeCurtain(w, h, px, py, pz, rotY, seed) {
+  const geo = new THREE.PlaneGeometry(w, h, 400, 48);   // 400 segments along the ribbon
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: curtVert, fragmentShader: curtFrag,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending, fog: false,
+    uniforms: {
+      uTime: auroraUniforms.uTime, uActivity: auroraUniforms.uActivity, uBoost: auroraUniforms.uBoost,
+      uSeed: { value: seed }
+    }
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(px, py, pz);
+  mesh.rotation.y = rotY;
+  mesh.renderOrder = 5;
+  scene.add(mesh);
+  return mesh;
+}
+const auroraCurtains = [
+  makeCurtain(125, 30,  -6, 30,  -98,  0.05, 1.3),   // grand central arc
+  makeCurtain( 88, 25, -56, 25,  -74,  0.55, 2.7),   // west sweep
+  makeCurtain( 92, 24,  50, 24.5,-76, -0.52, 4.1),   // east sweep
+  makeCurtain( 78, 36,   6, 36, -132, -0.10, 5.6),   // towering rear curtain
+  makeCurtain( 58, 19, -27, 19,  -56,  0.32, 8.3)    // low front wisp
+];
+
+/* ---------- Storm corona (overhead crown, storm only) ---------- */
+const coronaUniforms = { uTime: { value: 0 }, uCorona: { value: 0 } };
+const corona = new THREE.Mesh(
+  new THREE.CircleGeometry(34, 48, 0, Math.PI * 2),
+  new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending, fog: false,
+    uniforms: coronaUniforms,
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform float uTime, uCorona;
+      varying vec2 vUv;
+      ${NOISE_GLSL}
+      void main(){
+        vec2 p = vUv * 2.0 - 1.0;
+        float r = length(p);
+        if (r > 1.0) discard;
+        float ang = atan(p.y, p.x);
+        // ray spokes swirling slowly
+        float spokes = pow(0.5 + 0.5 * sin(ang * 17.0 + fbm2(vec2(ang * 2.0, r * 3.0 - uTime * 0.35)) * 6.0 + uTime * 0.6), 3.0);
+        float rings = 0.6 + 0.4 * sin(r * 26.0 - uTime * 2.4);
+        float core = exp(-r * 3.2) * 1.6;
+        vec3 col = mix(vec3(0.2, 1.0, 0.5), vec3(0.75, 0.3, 1.0), smoothstep(0.08, 0.85, r));
+        col = mix(col, vec3(1.0, 0.35, 0.45), smoothstep(0.72, 1.0, r));
+        float a = smoothstep(1.0, 0.12, r) * (spokes * 0.75 + 0.25) * rings + core;
+        gl_FragColor = vec4(col * a * uCorona * 1.7, 1.0);
+      }`
+  })
+);
+corona.rotation.x = Math.PI / 2;   // face downward
+corona.position.set(0, 96, -18);
+corona.renderOrder = 6;
+scene.add(corona);
+
+/* ---------- Drifting snow (3300 particles, shader-animated) ---------- */
+const SNOW_COUNT = 3300;
+const snowUniforms = { uTime: { value: 0 }, uGust: { value: 1 } };
+{
+  const pos = new Float32Array(SNOW_COUNT * 3);
+  const seed = new Float32Array(SNOW_COUNT);
+  const rng = mulberry32(8888);
+  for (let i = 0; i < SNOW_COUNT; i++) {
+    pos[i*3]   = (rng() * 2 - 1) * 85;
+    pos[i*3+1] = rng() * 5.2;
+    pos[i*3+2] = (rng() * 2 - 1) * 80 - 6;
+    seed[i] = rng() * 100;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    uniforms: snowUniforms,
+    vertexShader: `
+      attribute float aSeed;
+      uniform float uTime, uGust;
+      varying float vA;
+      void main(){
+        vec3 p = position;
+        float speed = 0.55 + fract(aSeed * 0.713) * 0.55;
+        float fall = uTime * speed;
+        p.y = mod(p.y - fall, 5.2) + 0.12;
+        // wind gusts sweeping horizontally across the tundra
+        float gust = (sin(uTime * 0.62 + p.z * 0.045) * 2.3 + sin(uTime * 1.63 + p.x * 0.10) * 0.8) * uGust;
+        p.x += fall * 0.55 + gust + sin(uTime * 2.3 + aSeed * 1.7) * 0.35;
+        p.x = mod(p.x + 85.0, 170.0) - 85.0;
+        p.z += sin(uTime * 0.85 + aSeed * 2.3) * 0.9;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        float dist = max(1.0, -mv.z);
+        gl_PointSize = (1.5 + fract(aSeed * 0.371) * 1.9) * (250.0 / dist);
+        vA = clamp(1.6 - dist * 0.012, 0.25, 0.9);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying float vA;
+      void main(){
+        vec2 d = gl_PointCoord - 0.5;
+        float a = smoothstep(0.5, 0.08, length(d));
+        gl_FragColor = vec4(vec3(0.92, 0.96, 1.0), a * vA);
+      }`
+  });
+  const pts = new THREE.Points(g, m);
+  pts.renderOrder = 7;
+  scene.add(pts);
+}
+
+/* =========================================================
+   POST-PROCESSING — Unreal bloom
+   ========================================================= */
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloomPass = new THREE.UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight), 0.72, 0.62, 0.55
+);
+composer.addPass(bloomPass);
+
+/* =========================================================
+   STATE, BENCH, INPUT, SHOWCASE
+   ========================================================= */
+const SHOWCASE_DURATION = 12.0;
+const SHOW_SUBSTORM_T = 5.4;
+const ACT_LABELS = { 1: 'QUIET', 2: 'ACTIVE', 3: 'STORM' };
+
+let mode = 'interactive';            // 'interactive' | 'seek' | 'play'
+let simTime = 0;
+const state = {
+  activity: 2,
+  subT0: null,                       // interactive substorm start (simTime)
+  storm: 0                           // damped storm factor (interactive)
+};
+const showcaseCamCurvePos = new THREE.CatmullRomCurve3([
+  new THREE.Vector3(-34, 6.0, 54),
+  new THREE.Vector3(-22, 4.3, 38),
+  new THREE.Vector3(  8, 2.7, 33),
+  new THREE.Vector3( 17.5, 3.7, 30),
+  new THREE.Vector3(  4, 25, 8),
+  new THREE.Vector3(-18, 10.5, 44),
+  new THREE.Vector3(-32, 6.6, 55)
+]);
+const showcaseCamCurveTgt = new THREE.CatmullRomCurve3([
+  new THREE.Vector3(  4, 17, -22),
+  new THREE.Vector3(  2, 18.5, -28),
+  new THREE.Vector3( 33, 2.2, 26.5),
+  new THREE.Vector3(  8, 32, -45),
+  new THREE.Vector3( -2, 80, -18),
+  new THREE.Vector3(  2, 23, -24),
+  new THREE.Vector3(  6, 17, -20)
+]);
+const tmpV1 = new THREE.Vector3(), tmpV2 = new THREE.Vector3();
+
+const actLabel = document.getElementById('actLabel');
+const toast = document.getElementById('toast');
+const recBtn = document.getElementById('recBtn');
+
+window.__bench = { activity: 2, curtains: auroraCurtains.length, stars: STAR_COUNT, brightness: 0.42 };
+
+function substormBoost(t) {
+  const t0 = (mode === 'interactive') ? state.subT0 : SHOW_SUBSTORM_T;
+  if (t0 === null || t <= t0) return 0;
+  const x = t - t0;
+  return Math.exp(-x * 0.55) * (1.0 + 0.35 * Math.sin(x * 6.0) * Math.exp(-x * 0.8));
+}
+function flicker(t) { return 0.82 + 0.26 * (0.6 * Math.sin(t * 1.9 + Math.sin(t * 0.77) * 2.0) + 0.4 * Math.sin(t * 4.3 + 1.7)); }
+function showcaseActivity(t) { return t < 7.2 ? 2 : 3; }
+function showcaseStorm(t) { return sstep(0, 1, clamp01((t - 7.0) / 1.5)); }
+function currentActivity(t) { return mode === 'interactive' ? state.activity : showcaseActivity(t); }
+function currentStorm(t, dt) {
+  if (mode === 'interactive') {
+    const target = state.activity >= 3 ? 1 : 0;
+    state.storm += (target - state.storm) * Math.min(1, dt * 1.4);
+    return state.storm;
+  }
+  return showcaseStorm(t);
+}
+function brightnessMetric(t) {
+  const act = currentActivity(t);
+  const boost = substormBoost(t);
+  const base = [0, 0.23, 0.44, 0.66][act];
+  return clamp01(base * flicker(t) * (1 + boost * 1.45) + boost * 0.16);
+}
+
+function applyFrame(t, dt) {
+  const act = currentActivity(t);
+  const boost = substormBoost(t);
+  const storm = currentStorm(t, dt);
+  const flick = flicker(t);
+
+  // shader clocks & uniforms
+  auroraUniforms.uTime.value = t;
+  auroraUniforms.uActivity.value = act;
+  auroraUniforms.uBoost.value = boost;
+  skyUniforms.uTime.value = t;
+  skyUniforms.uBoost.value = boost;
+  skyUniforms.uAct.value = act;
+  starUniforms.uTime.value = t;
+  snowUniforms.uTime.value = t;
+  snowUniforms.uGust.value = 0.8 + 0.7 * storm + boost * 0.9;
+  coronaUniforms.uTime.value = t;
+  coronaUniforms.uCorona.value = storm * (0.75 + 0.45 * flick) + boost * 0.35;
+
+  // aurora light spill on the snow
+  auroraLight.intensity = (0.30 + 0.24 * act) * (0.75 + 0.45 * flick) * (1 + boost * 1.7);
+  magentaLight.intensity = (0.14 + 0.10 * act) * (0.7 + 0.5 * (1 - flick * 0.5)) * (1 + boost * 1.4);
+
+  // lantern flicker (deterministic function of t)
+  const lantern = camp.getObjectByName('lantern');
+  const glow = camp.getObjectByName('lanternGlow');
+  const lf = 0.82 + 0.28 * Math.sin(t * 9.3 + Math.sin(t * 3.1) * 1.8) + 0.1 * Math.sin(t * 23.7);
+  if (lantern) lantern.intensity = 2.1 * lf * (1 + boost * 0.3);
+  if (glow) glow.material.opacity = 0.62 + 0.34 * lf;
+
+  // toast for substorm surge
+  toast.style.opacity = boost > 0.32 ? String(clamp01((boost - 0.32) * 2.2)) : '0';
+
+  // HUD
+  actLabel.textContent = ACT_LABELS[act];
+  actLabel.style.color = act === 3 ? '#ffb3e2' : (act === 2 ? '#eaffef' : '#a8c8e0');
+
+  // bench export
+  window.__bench.activity = act;
+  window.__bench.curtains = auroraCurtains.length;
+  window.__bench.stars = STAR_COUNT;
+  window.__bench.brightness = brightnessMetric(t);
+}
+
+function renderFrame() { composer.render(); }
+
+function setShowcaseCamera(t) {
+  const u = clamp01(t / SHOWCASE_DURATION);
+  showcaseCamCurvePos.getPoint(u, tmpV1);
+  showcaseCamCurveTgt.getPoint(u, tmpV2);
+  camera.position.copy(tmpV1);
+  camera.lookAt(tmpV2);
+}
+
+window.showcase = {
+  duration: SHOWCASE_DURATION,
+  seek(t) {
+    t = Math.min(Math.max(t, 0), SHOWCASE_DURATION);
+    const prevMode = mode;
+    mode = 'seek';
+    state.storm = showcaseStorm(t);   // deterministic
+    setShowcaseCamera(t);
+    applyFrame(t, 1 / 60);
+    renderFrame();
+    mode = prevMode === 'seek' ? 'interactive' : prevMode;
+  }
+};
+
+/* ---------- Input: activity keys + substorm ---------- */
+const STORM_TOAST = () => {};
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Digit1') { if (mode === 'interactive') state.activity = 1; }
+  else if (e.code === 'Digit2') { if (mode === 'interactive') state.activity = 2; }
+  else if (e.code === 'Digit3') { if (mode === 'interactive') state.activity = 3; }
+  else if (e.code === 'Space') {
+    e.preventDefault();
+    if (mode === 'interactive') { state.subT0 = simTime; }
+  }
+});
+
+/* ---------- Record video button ---------- */
+let mediaRecorder = null, recordedChunks = [], playT = 0;
+
+function startRecording() {
+  if (mode === 'play') return;
+  let stream;
+  try { stream = renderer.domElement.captureStream(60); }
+  catch (err) { alert('captureStream not supported in this browser'); return; }
+  let mime = 'video/webm;codecs=vp9';
+  if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+  try { mediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 14000000 }); }
+  catch (err) { mediaRecorder = new MediaRecorder(stream); }
+  recordedChunks = [];
+  mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) recordedChunks.push(ev.data); };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'aurora-borealis-showcase.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    recBtn.textContent = '● Record Video';
+    recBtn.classList.remove('recording');
+  };
+  mode = 'play';
+  playT = 0;
+  controls.enabled = false;
+  recBtn.textContent = '■ Recording…';
+  recBtn.classList.add('recording');
+  mediaRecorder.start(250);
+}
+recBtn.addEventListener('click', startRecording);
+
+function restoreInteractive() {
+  mode = 'interactive';
+  camera.position.copy(DEF_POS);
+  controls.target.copy(DEF_TGT);
+  controls.enabled = true;
+  controls.update();
+  simTime = 0;
+  state.subT0 = null;
+  state.storm = 0;
+  state.activity = 2;
+}
+
+/* ---------- Main loop ---------- */
+const clock = new THREE.Clock();
+function frame() {
+  requestAnimationFrame(frame);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (mode === 'play') {
+    playT += dt;
+    const t = Math.min(playT, SHOWCASE_DURATION);
+    state.storm = showcaseStorm(t);
+    setShowcaseCamera(t);
+    applyFrame(t, dt);
+    renderFrame();
+    if (playT >= SHOWCASE_DURATION) {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      restoreInteractive();
+    }
+    return;
+  }
+  simTime += dt;
+  applyFrame(simTime, dt);
+  controls.update();
+  renderFrame();
+}
+
+/* ---------- Resize ---------- */
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+});
+
+frame();
+</script>
+</body>
+</html>
+

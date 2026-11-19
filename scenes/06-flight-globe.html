@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TERRA · Live Air Traffic — Procedural Earth</title>
+<style>
+  :root{
+    --ink:#eaf6ff;
+    --dim:#8fb6cf;
+    --cyan:#6ee7ff;
+    --amber:#ffd27a;
+    --panel:rgba(10,18,30,.62);
+    --edge:rgba(140,220,255,.22);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#04070d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink)}
+  #app{position:fixed;inset:0}
+  canvas{display:block}
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed;z-index:10;pointer-events:none;user-select:none}
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--edge);
+    border-radius:14px;
+    backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+    box-shadow:0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  #titleCard{top:18px;left:18px;padding:14px 18px 12px;pointer-events:auto}
+  #titleCard h1{
+    font-size:19px;letter-spacing:.34em;font-weight:800;color:var(--ink);
+    display:flex;align-items:center;gap:12px;
+  }
+  #titleCard h1 .dot{width:10px;height:10px;border-radius:50%;background:var(--cyan);box-shadow:0 0 12px 3px rgba(110,231,255,.8);animation:pulse 2.1s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.7);opacity:.6}}
+  #titleCard .sub{font-size:10px;letter-spacing:.28em;color:var(--dim);margin-top:5px;text-transform:uppercase}
+
+  #clockCard{top:18px;left:50%;transform:translateX(-50%);padding:10px 26px 12px;text-align:center;pointer-events:auto;min-width:250px}
+  #utcClock{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:.14em;color:#fff;line-height:1;text-shadow:0 0 18px rgba(110,231,255,.45)}
+  #utcClock small{font-size:13px;color:var(--cyan);letter-spacing:.3em;margin-left:6px}
+  #clockMeta{margin-top:6px;display:flex;gap:10px;justify-content:center;align-items:center}
+  .pill{font-size:10px;letter-spacing:.16em;padding:3px 10px;border-radius:999px;border:1px solid var(--edge);color:var(--dim);text-transform:uppercase}
+  .pill.on{color:#04121a;background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 14px rgba(110,231,255,.5)}
+  .pill.warn{color:#1a0d00;background:var(--amber);border-color:var(--amber);box-shadow:0 0 14px rgba(255,210,122,.5)}
+  .pill.speed{color:var(--ink);border-color:rgba(255,255,255,.28)}
+
+  #controlsCard{bottom:18px;left:50%;transform:translateX(-50%);padding:9px 20px;display:flex;gap:18px;align-items:center;pointer-events:auto;font-size:11px;color:var(--dim);letter-spacing:.06em}
+  #controlsCard b{color:var(--ink);font-weight:700}
+  kbd{font-family:ui-monospace,Menlo,monospace;font-size:10px;border:1px solid rgba(255,255,255,.25);border-bottom-width:2px;border-radius:5px;padding:1px 6px;color:#fff;background:rgba(255,255,255,.06)}
+
+  #statsCard{bottom:18px;left:18px;padding:12px 16px;pointer-events:auto;min-width:158px}
+  #statsCard .row{display:flex;justify-content:space-between;gap:14px;font-size:10px;letter-spacing:.18em;color:var(--dim);text-transform:uppercase;margin:3px 0}
+  #statsCard .row span:last-child{color:var(--cyan);font-family:ui-monospace,Menlo,monospace;font-size:12px;letter-spacing:.05em}
+
+  #rightCol{top:18px;right:18px;display:flex;flex-direction:column;gap:10px;pointer-events:auto;align-items:flex-end}
+  .btn{
+    cursor:pointer;border:1px solid var(--edge);color:var(--ink);
+    background:var(--panel);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    padding:10px 18px;border-radius:12px;font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+    transition:all .18s ease;display:flex;align-items:center;gap:10px;font-weight:700;
+    box-shadow:0 6px 24px rgba(0,0,0,.4);
+  }
+  .btn:hover{border-color:var(--cyan);color:#04121a;background:var(--cyan);box-shadow:0 0 26px rgba(110,231,255,.45)}
+  .btn:disabled{opacity:.45;pointer-events:none}
+  .btn .rec{width:11px;height:11px;border-radius:50%;background:#ff4d4d;box-shadow:0 0 10px rgba(255,77,77,.9)}
+  .btn .play{width:0;height:0;border-left:11px solid currentColor;border-top:7px solid transparent;border-bottom:7px solid transparent}
+  #recStatus{font-size:10px;letter-spacing:.24em;color:#ff8b8b;height:14px;text-transform:uppercase;text-shadow:0 0 10px rgba(255,60,60,.6)}
+
+  /* ---------- City label ---------- */
+  #cityLabel{
+    position:fixed;z-index:9;pointer-events:none;transform:translate(-50%,-120%);
+    background:rgba(8,16,26,.85);border:1px solid rgba(255,210,122,.5);
+    border-radius:10px;padding:7px 13px 8px;text-align:center;
+    box-shadow:0 0 24px rgba(255,190,90,.25), inset 0 1px 0 rgba(255,255,255,.08);
+    backdrop-filter:blur(6px);display:none;white-space:nowrap;
+  }
+  #cityLabel .nm{font-size:13px;font-weight:800;letter-spacing:.22em;color:var(--amber);text-transform:uppercase}
+  #cityLabel .dp{font-size:10px;color:var(--ink);letter-spacing:.12em;margin-top:2px}
+  #cityLabel .dp b{color:#fff;font-family:ui-monospace,Menlo,monospace}
+
+  /* ---------- Loading / error ---------- */
+  #loader{
+    position:fixed;inset:0;z-index:50;background:radial-gradient(ellipse at 50% 40%, #0a1626 0%, #04070d 70%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .8s ease;
+  }
+  #loader h1{font-size:26px;letter-spacing:.5em;font-weight:800;color:var(--ink);text-shadow:0 0 30px rgba(110,231,255,.5)}
+  #loader .bar{width:280px;height:2px;background:rgba(255,255,255,.1);overflow:hidden;border-radius:2px}
+  #loader .bar i{display:block;height:100%;width:40%;background:var(--cyan);box-shadow:0 0 12px var(--cyan);animation:scan 1.15s ease-in-out infinite}
+  @keyframes scan{0%{transform:translateX(-120%)}100%{transform:translateX(720%)}}
+  #loader p{font-size:10px;letter-spacing:.35em;color:var(--dim);text-transform:uppercase}
+  #loader.gone{opacity:0;pointer-events:none}
+  #fatal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:#0b0505;color:#ffb0a0;font-family:monospace;padding:30px;text-align:center}
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<!-- HUD -->
+<div id="titleCard" class="hud panel">
+  <h1><span class="dot"></span>TERRA</h1>
+  <div class="sub">Live Air Traffic · Procedural Earth</div>
+</div>
+
+<div id="clockCard" class="hud panel">
+  <div id="utcClock">--:--<small>UTC</small></div>
+  <div id="clockMeta">
+    <span id="speedPill" class="pill speed">3600×</span>
+    <span id="livePill" class="pill on">LIVE</span>
+    <span id="pausePill" class="pill warn" style="display:none">PAUSED</span>
+  </div>
+</div>
+
+<div id="statsCard" class="hud panel">
+  <div class="row"><span>Flights</span><span id="statFlights">0</span></div>
+  <div class="row"><span>Cities</span><span id="statCities">0</span></div>
+  <div class="row"><span>Arc Routes</span><span id="statRoutes">0</span></div>
+</div>
+
+<div id="rightCol" class="hud">
+  <button id="recordBtn" class="btn"><span class="rec"></span>Record video</button>
+  <button id="showcaseBtn" class="btn"><span class="play"></span>Play showcase</button>
+  <div id="recStatus"></div>
+</div>
+
+<div id="controlsCard" class="hud panel">
+  <span><b>DRAG</b> rotate</span>
+  <span><b>SCROLL</b> zoom</span>
+  <span><b>CLICK CITY</b> routes</span>
+  <span><kbd>T</kbd> speed</span>
+  <span><kbd>SPACE</kbd> pause</span>
+</div>
+
+<div id="cityLabel"><div class="nm">City</div><div class="dp"><b>0</b> DEPARTURES</div></div>
+
+<!-- Loader -->
+<div id="loader">
+  <h1>TERRA</h1>
+  <div class="bar"><i></i></div>
+  <p>Generating procedural planet…</p>
+</div>
+<div id="fatal"></div>
+
+<!-- Three.js + addons (CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+'use strict';
+/* ============================================================
+   TERRA — Live Air Traffic over a Procedural Earth
+   Single file, zero downloaded assets. All textures are
+   generated at runtime from seeded noise.
+   ============================================================ */
+window.addEventListener('error', e => {
+  const f = document.getElementById('fatal');
+  f.style.display = 'flex';
+  f.textContent = 'Startup error: ' + (e.message || e.error || 'unknown');
+});
+
+/* ---------------- Deterministic RNG ---------------- */
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const SEED = 20240817;
+let rng = mulberry32(SEED);
+
+/* ---------------- Fast integer-hash value noise ---------------- */
+const NOISE_SEED = 911133;
+function vhash(ix, iy, iz){
+  let h = Math.imul(ix, 374761393) ^ Math.imul(iy, 668265263) ^ Math.imul(iz, 1440662683) ^ Math.imul(NOISE_SEED, 982451653);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function vnoise(x, y, z){
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const xf = x - xi, yf = y - yi, zf = z - zi;
+  const u = xf*xf*(3-2*xf), v = yf*yf*(3-2*yf), w = zf*zf*(3-2*zf);
+  const c000 = vhash(xi,yi,zi),   c100 = vhash(xi+1,yi,zi);
+  const c010 = vhash(xi,yi+1,zi), c110 = vhash(xi+1,yi+1,zi);
+  const c001 = vhash(xi,yi,zi+1), c101 = vhash(xi+1,yi,zi+1);
+  const c011 = vhash(xi,yi+1,zi+1), c111 = vhash(xi+1,yi+1,zi+1);
+  const x00 = c000 + (c100-c000)*u, x10 = c010 + (c110-c010)*u;
+  const x01 = c001 + (c101-c001)*u, x11 = c011 + (c111-c011)*u;
+  const y0 = x00 + (x10-x00)*v, y1 = x01 + (x11-x01)*v;
+  return y0 + (y1-y0)*w;
+}
+function fbm(x, y, z, oct){
+  let amp = 0.5, freq = 1, sum = 0, norm = 0;
+  for (let i = 0; i < oct; i++){
+    sum += amp * vnoise(x*freq, y*freq, z*freq);
+    norm += amp; amp *= 0.5; freq *= 2.03;
+  }
+  return sum / norm;
+}
+/* Continent field — shared by texture painting & city placement */
+function landField(x, y, z){
+  const wx = fbm(x*1.7 + 11.3, y*1.7 + 5.9,  z*1.7 + 7.1, 4);
+  const wy = fbm(x*1.7 + 3.1,  y*1.7 + 17.7, z*1.7 + 13.9, 4);
+  const wz = fbm(x*1.7 + 23.7, y*1.7 + 29.3, z*1.7 + 2.5, 4);
+  return fbm((x + (wx-0.5)*0.9)*2.35, (y + (wy-0.5)*0.9)*2.35, (z + (wz-0.5)*0.9)*2.35, 6);
+}
+const SEA = 0.555;
+function isIce(y, x, z){
+  const cap = 0.815 + (fbm(x*3.1+40, y*3.1+40, z*3.1+40, 3) - 0.5) * 0.14;
+  return Math.abs(y) > cap;
+}
+/* Sphere point from uv — must match the custom geometry below */
+function spherePoint(u, v, out){
+  const theta = v * Math.PI;
+  const phi = u * Math.PI * 2;
+  out.set(Math.sin(theta)*Math.cos(phi), Math.cos(theta), Math.sin(theta)*Math.sin(phi));
+  return out;
+}
+
+/* ---------------- Globals (required top-level) ---------------- */
+let scene, camera, renderer, controls, composer, bloomPass;
+const R = 1;
+const FLIGHT_COUNT = 160;
+const SHOWCASE_DURATION = 12;
+
+let earthMesh, cloudMesh, atmoMesh, atmoInnerMesh, sunGlow, moonMesh, starPoints;
+let sunLight;
+let cities = [];            // {name, u, v, dir:Vector3, dep:int, mesh?}
+let flights = [];           // pure data + synced meshes
+let cityGlowPoints;
+let selectedCity = null;
+let flightClock = 0;        // real-time flight clock (deterministic)
+let utcHours = 12.0;        // simulated UTC (hours)
+let timeSpeed = 3600;       // sim-seconds per real second
+const SPEED_CYCLE = [1, 60, 3600];
+const SPEED_LABEL = {1:'1×', 60:'60×', 3600:'3600×'};
+let paused = false;
+let showcasing = false;
+let showcaseElapsed = 0;
+
+/* DOM refs */
+const $ = id => document.getElementById(id);
+const loaderEl = $('loader'), clockEl = $('utcClock'), speedPill = $('speedPill');
+const statFlights = $('statFlights'), statCities = $('statCities'), statRoutes = $('statRoutes');
+const cityLabel = $('cityLabel');
+const recBtn = $('recordBtn'), showcaseBtn = $('showcaseBtn'), recStatus = $('recStatus');
+
+/* ============================================================
+   TEXTURE GENERATION (canvas, fully procedural)
+   ============================================================ */
+function makeCanvas(w, h){
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  return [c, c.getContext('2d')];
+}
+
+function buildEarthMaps(){
+  const W = 2048, H = 1024;
+  const [dayC, dayX] = makeCanvas(W, H);
+  const [maskC, maskX] = makeCanvas(1024, 512);
+  const dayImg = dayX.createImageData(W, H);
+  const mW = 1024, mH = 512;
+  const maskImg = maskX.createImageData(mW, mH);
+  const p = new THREE.Vector3();
+
+  const lerp = (a,b,t) => a + (b-a)*t;
+  const mix3 = (c1,c2,t) => [lerp(c1[0],c2[0],t), lerp(c1[1],c2[1],t), lerp(c1[2],c2[2],t)];
+
+  // Palette
+  const deep=[6,32,58], midO=[10,52,82], shal=[21,88,116], coast=[38,116,146];
+  const low=[74,92,50], grass=[86,112,58], dry=[140,124,74], desert=[186,158,96];
+  const rock=[106,98,88], snow=[233,238,241], ice=[219,232,236], forest=[52,74,40];
+
+  for (let iy = 0; iy < H; iy++){
+    const v = iy / H;
+    for (let ix = 0; ix < W; ix++){
+      const u = ix / W;
+      spherePoint(u, v, p);
+      const f = landField(p.x, p.y, p.z);
+      const moist = fbm(p.x*3.4+90, p.y*3.4+33, p.z*3.4+61, 4);
+      const detail = fbm(p.x*9.0+7, p.y*9.0+21, p.z*9.0+15, 3);
+      let col;
+      const iceHere = isIce(p.y, p.x, p.z);
+      if (iceHere){
+        const s = 0.92 + detail*0.14;
+        col = [ice[0]*s, ice[1]*s, ice[2]*s];
+      } else if (f > SEA){
+        const e = (f - SEA) / (1 - SEA);              // 0 coast → 1 peak
+        // base vegetation by moisture
+        col = mix3(dry, grass, Math.min(1, Math.max(0, (moist-0.30)*1.9)));
+        col = mix3(col, forest, Math.min(1, Math.max(0, (moist-0.52)*1.8)) * (1-e));
+        if (moist > 0.60 && Math.abs(p.y) < 0.62)      // desert belts
+          col = mix3(col, desert, Math.min(1, (moist-0.60)*4.2) * (1-e*0.8));
+        col = mix3(mix3(low, col, 0.55), dry, Math.min(1, Math.max(0,(0.42-moist))*1.4)*0.5);
+        if (e > 0.42) col = mix3(col, rock, Math.min(1,(e-0.42)*2.6));
+        if (e > 0.68) col = mix3(col, snow, Math.min(1,(e-0.68)*3.4));
+        const shade = 0.82 + detail*0.40;
+        col = [col[0]*shade, col[1]*shade, col[2]*shade];
+        // sandy shoreline ring
+        if (e < 0.035) col = mix3([176,164,116], col, e/0.035);
+      } else {
+        const d = (SEA - f) / SEA;
+        col = mix3(shal, midO, Math.min(1, d*3.2));
+        col = mix3(col, deep, Math.min(1, Math.max(0, d-0.28)*2.0));
+        if (f > SEA - 0.012) col = mix3(coast, col, (SEA - f)/0.012); // bright coastline
+        const shimmer = 0.9 + detail*0.22;
+        col = [col[0]*shimmer, col[1]*shimmer, col[2]*shimmer];
+      }
+      const idx = (iy*W + ix) * 4;
+      dayImg.data[idx]   = Math.max(0, Math.min(255, col[0]));
+      dayImg.data[idx+1] = Math.max(0, Math.min(255, col[1]));
+      dayImg.data[idx+2] = Math.max(0, Math.min(255, col[2]));
+      dayImg.data[idx+3] = 255;
+    }
+  }
+  dayX.putImageData(dayImg, 0, 0);
+
+  for (let iy = 0; iy < mH; iy++){
+    const v = iy / mH;
+    for (let ix = 0; ix < mW; ix++){
+      const u = ix / mW;
+      spherePoint(u, v, p);
+      const f = landField(p.x, p.y, p.z);
+      const land = (f > SEA || isIce(p.y, p.x, p.z)) ? 255 : 0;
+      const idx = (iy*mW + ix) * 4;
+      maskImg.data[idx] = land; maskImg.data[idx+1] = land; maskImg.data[idx+2] = land; maskImg.data[idx+3] = 255;
+    }
+  }
+  maskX.putImageData(maskImg, 0, 0);
+
+  const dayTex = new THREE.CanvasTexture(dayC);
+  dayTex.encoding = THREE.sRGBEncoding;
+  dayTex.anisotropy = 8;
+  const maskTex = new THREE.CanvasTexture(maskC);
+  return { dayTex, maskTex };
+}
+
+function buildNightLights(cityList){
+  const W = 2048, H = 1024;
+  const [c, ctx] = makeCanvas(W, H);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+  const glowDot = (x, y, r, a, warm) => {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,236,190,' + a + ')');
+    g.addColorStop(0.35, warm ? 'rgba(255,196,110,' + (a*0.75) + ')' : 'rgba(255,220,160,' + (a*0.6) + ')');
+    g.addColorStop(1, 'rgba(255,180,90,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
+  };
+  const paintCluster = (u, v, strength) => {
+    const cx = u * W, cy = v * H;
+    const p = spherePoint(u, v, new THREE.Vector3());
+    const latScale = Math.max(0.25, Math.cos(Math.asin(Math.max(-1, Math.min(1, p.y)))));
+    const spread = (5 + strength * 13) * latScale;
+    const dots = Math.floor(14 + strength * 46);
+    for (let i = 0; i < dots; i++){
+      const ang = rng() * Math.PI * 2;
+      const rad = Math.pow(rng(), 1.8) * spread;
+      glowDot(cx + Math.cos(ang)*rad, cy + Math.sin(ang)*rad*0.8,
+              1.1 + rng()*2.6*(strength+0.5), 0.35 + rng()*0.6, rng() < 0.6);
+    }
+    glowDot(cx, cy, 4.5 + strength*4.5, 0.95, true); // bright core
+  };
+  // Major cities blaze brightest
+  for (const c2 of cityList) paintCluster(c2.u, c2.v, c2.lightWeight);
+  // Scattered towns & industrial regions on land
+  const tmp = new THREE.Vector3();
+  let placed = 0, guard = 0;
+  while (placed < 150 && guard++ < 20000){
+    const u = rng(), v = 0.08 + rng()*0.84;
+    spherePoint(u, v, tmp);
+    const f = landField(tmp.x, tmp.y, tmp.z);
+    if (f > SEA + 0.008 && !isIce(tmp.y, tmp.x, tmp.z)){
+      paintCluster(u, v, 0.15 + rng()*0.45);
+      placed++;
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+function buildCloudTexture(){
+  const W = 1024, H = 512;
+  const [c, ctx] = makeCanvas(W, H);
+  const img = ctx.createImageData(W, H);
+  const p = new THREE.Vector3();
+  for (let iy = 0; iy < H; iy++){
+    const v = iy / H;
+    for (let ix = 0; ix < W; ix++){
+      const u = ix / W;
+      spherePoint(u, v, p);
+      // billowed coverage: two fbm layers, thresholded
+      const base = fbm(p.x*3.1+31, p.y*3.1+7, p.z*3.1+57, 5);
+      const billow = 1 - Math.abs(2*fbm(p.x*6.5+91, p.y*6.5+13, p.z*6.5+71, 4) - 1);
+      let cov = base*0.62 + billow*0.48 - 0.60;
+      cov = Math.max(0, Math.min(1, cov * 3.4));
+      const idx = (iy*W + ix) * 4;
+      img.data[idx] = 255; img.data[idx+1] = 255; img.data[idx+2] = 255;
+      img.data[idx+3] = Math.floor(Math.pow(cov, 1.35) * 235);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(c);
+}
+
+function buildMoonTexture(){
+  const S = 256;
+  const [c, ctx] = makeCanvas(S, S);
+  ctx.fillStyle = '#8d8d8a'; ctx.fillRect(0, 0, S, S);
+  const imgRnd = mulberry32(777);
+  for (let i = 0; i < 2600; i++){
+    const x = imgRnd()*S, y = imgRnd()*S, r = imgRnd()*imgRnd()*9+0.6;
+    const sh = 96 + imgRnd()*110;
+    ctx.fillStyle = 'rgba(' + sh + ',' + sh + ',' + (sh-4) + ',' + (0.35+imgRnd()*0.4) + ')';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
+  }
+  for (let i = 0; i < 26; i++){ // craters with rims
+    const x = imgRnd()*S, y = imgRnd()*S, r = 3 + imgRnd()*11;
+    ctx.fillStyle = 'rgba(58,58,56,0.85)';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,200,196,0.55)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(x, y, r, -0.6, 2.1); ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+
+function buildGlowSprite(inner, outer){
+  const S = 128;
+  const [c, ctx] = makeCanvas(S, S);
+  const g = ctx.createRadialGradient(S/2, S/2, 0, S/2, S/2, S/2);
+  g.addColorStop(0, inner);
+  g.addColorStop(0.35, outer);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+  return new THREE.CanvasTexture(c);
+}
+
+function buildStarField(){
+  const COUNT = 3200;
+  const pos = new Float32Array(COUNT * 3);
+  const col = new Float32Array(COUNT * 3);
+  const starRnd = mulberry32(424242);
+  const v = new THREE.Vector3();
+  const palette = [[1,1,1],[0.72,0.82,1],[1,0.9,0.75],[0.85,0.92,1],[1,0.78,0.6]];
+  for (let i = 0; i < COUNT; i++){
+    // uniform random direction
+    const z = starRnd()*2-1, a = starRnd()*Math.PI*2;
+    const s = Math.sqrt(1 - z*z);
+    v.set(s*Math.cos(a), z, s*Math.sin(a)).multiplyScalar(80 + starRnd()*40);
+    pos.set([v.x, v.y, v.z], i*3);
+    const bright = Math.pow(starRnd(), 2.6)*0.9 + 0.1;
+    const tint = palette[Math.floor(starRnd()*palette.length)];
+    col.set([tint[0]*bright, tint[1]*bright, tint[2]*bright], i*3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const m = new THREE.PointsMaterial({ size: 0.55, vertexColors: true, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  return new THREE.Points(g, m);
+}
+
+/* Custom UV sphere — guarantees texture ↔ marker consistency */
+function buildSphereGeometry(radius, wSegs, hSegs){
+  const positions = [], normals = [], uvs = [], indices = [];
+  for (let iy = 0; iy <= hSegs; iy++){
+    const v = iy / hSegs;
+    const theta = v * Math.PI;
+    for (let ix = 0; ix <= wSegs; ix++){
+      const u = ix / wSegs;
+      const phi = u * Math.PI * 2;
+      const x = Math.sin(theta)*Math.cos(phi), y = Math.cos(theta), z = Math.sin(theta)*Math.sin(phi);
+      positions.push(x*radius, y*radius, z*radius);
+      normals.push(x, y, z);
+      uvs.push(u, 1 - v);
+    }
+  }
+  const stride = wSegs + 1;
+  for (let iy = 0; iy < hSegs; iy++){
+    for (let ix = 0; ix < wSegs; ix++){
+      const a = iy*stride + ix, b = a + 1, c = a + stride, d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  g.setIndex(indices);
+  return g;
+}
+
+/* ============================================================
+   CITIES
+   ============================================================ */
+const CITY_NAMES = ['New York','Los Angeles','Chicago','Toronto','Mexico City','Miami','Seattle',
+  'São Paulo','Buenos Aires','Lima','Santiago','Bogotá','London','Paris','Madrid','Berlin','Rome',
+  'Amsterdam','Vienna','Zurich','Istanbul','Athens','Cairo','Lagos','Nairobi','Johannesburg',
+  'Dubai','Doha','Riyadh','Mumbai','Delhi','Bangkok','Singapore','Hong Kong','Shanghai','Beijing',
+  'Seoul','Tokyo','Osaka','Sydney','Melbourne','Auckland','Reykjavik','Oslo','Stockholm','Vancouver','Jakarta'];
+
+function placeCities(){
+  const list = [];
+  const tmp = new THREE.Vector3();
+  const minSep = 0.30; // radians
+  let guard = 0;
+  while (list.length < 46 && guard++ < 60000){
+    const u = rng(), v = 0.09 + rng()*0.82;
+    spherePoint(u, v, tmp);
+    if (landField(tmp.x, tmp.y, tmp.z) <= SEA + 0.012) continue;
+    if (isIce(tmp.y, tmp.x, tmp.z)) continue;
+    let ok = true;
+    for (const c of list){
+      if (c.dir.dot(tmp) > Math.cos(minSep)) { ok = false; break; }
+    }
+    if (!ok) continue;
+    // equatorial-ish bias so more cities are in the dense mid-latitudes
+    if (Math.abs(tmp.y) > 0.86) continue;
+    list.push({
+      name: CITY_NAMES[list.length % CITY_NAMES.length],
+      u, v, dir: tmp.clone(),
+      dep: Math.floor(40 + rng()*130),
+      lightWeight: 0.35 + rng()*0.65
+    });
+  }
+  return list;
+}
+
+/* ============================================================
+   FLIGHTS — routes, arcs, planes, trails
+   ============================================================ */
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
+
+function arcParams(a, b){
+  const dot = Math.max(-1, Math.min(1, a.dir.dot(b.dir)));
+  const ang = Math.acos(dot);
+  const h = Math.min(0.40, 0.035 + ang * 0.135);
+  return { ang, h };
+}
+function arcPoint(a, b, ang, h, u, out){
+  const so = Math.sin(ang);
+  const s0 = Math.sin((1-u)*ang)/so, s1 = Math.sin(u*ang)/so;
+  out.set(
+    a.dir.x*s0 + b.dir.x*s1,
+    a.dir.y*s0 + b.dir.y*s1,
+    a.dir.z*s0 + b.dir.z*s1
+  );
+  out.multiplyScalar(R * (1.004 + Math.sin(u*Math.PI)*h));
+  return out;
+}
+function arcTangent(a, b, ang, h, u, out){
+  const e = 0.012;
+  const u0 = Math.max(0, u - e), u1 = Math.min(1, u + e);
+  arcPoint(a, b, ang, h, u0, _v3);
+  arcPoint(a, b, ang, h, u1, _v4);
+  out.subVectors(_v4, _v3).normalize();
+  return out;
+}
+
+let planeGeo, glowTexCyan, glowTexAmber, trailHeadColor;
+const TRAIL_N = 26;
+
+function buildFlightAssets(){
+  planeGeo = new THREE.ConeGeometry(0.0085, 0.034, 6);
+  planeGeo.rotateX(Math.PI / 2); // nose → +Z
+  glowTexCyan = buildGlowSprite('rgba(190,250,255,1)', 'rgba(90,210,255,0.55)');
+  glowTexAmber = buildGlowSprite('rgba(255,244,214,1)', 'rgba(255,200,110,0.6)');
+}
+
+function setFlightRoute(f, aIdx, bIdx, startT){
+  f.a = aIdx; f.b = bIdx;
+  const A = cities[aIdx], B = cities[bIdx];
+  const pr = arcParams(A, B);
+  f.ang = pr.ang; f.h = pr.h;
+  f.t = startT;
+  f.dur = 6.5 + pr.ang * 5.5 + rng() * 3.0;
+  // fill arc line
+  const posAttr = f.arcLine.geometry.getAttribute('position');
+  for (let i = 0; i < 33; i++){
+    arcPoint(A, B, f.ang, f.h, i/32, _v1);
+    posAttr.setXYZ(i, _v1.x, _v1.y, _v1.z);
+  }
+  posAttr.needsUpdate = true;
+  f.arcLine.geometry.computeBoundingSphere();
+}
+
+function createFlight(i){
+  const arcGeo = new THREE.BufferGeometry();
+  arcGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(33*3), 3));
+  const arcMat = new THREE.LineBasicMaterial({ color: 0x59d6ff, transparent: true, opacity: 0.20, blending: THREE.AdditiveBlending, depthWrite: false });
+  const arcLine = new THREE.Line(arcGeo, arcMat);
+  arcLine.frustumCulled = false;
+  scene.add(arcLine);
+
+  const trailGeo = new THREE.BufferGeometry();
+  trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_N*3), 3));
+  const cols = new Float32Array(TRAIL_N*3);
+  for (let k = 0; k < TRAIL_N; k++){
+    const fade = Math.pow(1 - k/(TRAIL_N-1), 2.1);
+    cols[k*3] = 0.55*fade; cols[k*3+1] = 0.92*fade; cols[k*3+2] = 1.0*fade;
+  }
+  trailGeo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  const trailMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.95 });
+  const trail = new THREE.Line(trailGeo, trailMat);
+  trail.frustumCulled = false;
+  scene.add(trail);
+
+  const planeMat = new THREE.MeshBasicMaterial({ color: 0xffe9a8 });
+  const plane = new THREE.Mesh(planeGeo, planeMat);
+  scene.add(plane);
+
+  const glowMat = new THREE.SpriteMaterial({ map: glowTexCyan, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.9 });
+  const glow = new THREE.Sprite(glowMat);
+  glow.scale.set(0.062, 0.062, 1);
+  scene.add(glow);
+
+  return {
+    arcLine, trail, plane, glow,
+    a: 0, b: 1, ang: 1, h: 0.1, t: 0, dur: 10, depCounted: false
+  };
+}
+
+function initFlights(){
+  for (let i = 0; i < FLIGHT_COUNT; i++){
+    const f = createFlight(i);
+    let a = Math.floor(rng()*cities.length), b = Math.floor(rng()*cities.length);
+    while (b === a) b = Math.floor(rng()*cities.length);
+    setFlightRoute(f, a, b, rng()*0.92);
+    flights.push(f);
+  }
+}
+function advanceFlight(f, dt){
+  f.t += dt / f.dur;
+  if (f.t >= 1){
+    const from = f.a;
+    cities[from].dep += 1;
+    let a = from, b = Math.floor(rng()*cities.length);
+    while (b === a) b = Math.floor(rng()*cities.length);
+    setFlightRoute(f, a, b, f.t - 1);
+  }
+}
+function syncFlightVisual(f){
+  const A = cities[f.a], B = cities[f.b];
+  arcPoint(A, B, f.ang, f.h, f.t, _v1);
+  arcTangent(A, B, f.ang, f.h, f.t, _v2);
+  f.plane.position.copy(_v1);
+  _v2.add(_v1);
+  f.plane.lookAt(_v2);
+  f.glow.position.copy(_v1);
+  const attr = f.trail.geometry.getAttribute('position');
+  for (let k = 0; k < TRAIL_N; k++){
+    const tt = Math.max(0, f.t - k*0.011);
+    arcPoint(A, B, f.ang, f.h, tt, _v1);
+    attr.setXYZ(k, _v1.x, _v1.y, _v1.z);
+  }
+  attr.needsUpdate = true;
+}
+
+/* Selection highlight */
+const COL_ARC = new THREE.Color(0x59d6ff);
+const COL_ARC_HI = new THREE.Color(0xffd27a);
+const COL_ARC_DIM = new THREE.Color(0x59d6ff);
+function applySelection(){
+  for (const f of flights){
+    const involved = selectedCity && (f.a === selectedCity || f.b === selectedCity);
+    const other = selectedCity && !involved;
+    f.arcLine.material.color.copy(involved ? COL_ARC_HI : COL_ARC_DIM);
+    f.arcLine.material.opacity = involved ? 0.9 : (other ? 0.045 : 0.20);
+    f.trail.material.opacity = involved ? 1.0 : (other ? 0.18 : 0.95);
+    f.glow.material.opacity = involved ? 1.0 : (other ? 0.25 : 0.9);
+    f.plane.material.color.setHex(involved ? 0xffd894 : 0xffe9a8);
+  }
+}
+
+/* ============================================================
+   SCENE CONSTRUCTION
+   ============================================================ */
+function sunDirectionFromUTC(hours, out){
+  // subsolar longitude: 15°/h, zero at UTC noon; fixed pleasant declination
+  const lonDeg = (12 - hours) * 15;
+  const decl = 14 * Math.PI/180;
+  const lon = lonDeg * Math.PI/180;
+  // Three.js sphere convention: phi from +X toward +Z
+  out.set(
+    Math.cos(decl)*Math.cos(lon),
+    Math.sin(decl),
+    Math.cos(decl)*Math.sin(lon)
+  );
+  return out.normalize();
+}
+const sunDir = new THREE.Vector3(1, 0.3, 0.4);
+
+function buildScene(){
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.05, 300);
+  camera.position.set(0, 0.55, 3.4);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x04070d, 1);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.08;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  $('app').appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.enablePan = false;
+  controls.minDistance = 1.55;
+  controls.maxDistance = 9;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.35;
+  controls.target.set(0, 0, 0);
+
+  /* Lights (moon + subtle fill) */
+  sunLight = new THREE.DirectionalLight(0xfff2dd, 1.35);
+  sunLight.position.copy(sunDir).multiplyScalar(10);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(4096, 4096);
+  sunLight.shadow.camera.near = 1; sunLight.shadow.camera.far = 30;
+  sunLight.shadow.camera.left = -2; sunLight.shadow.camera.right = 2;
+  sunLight.shadow.camera.top = 2; sunLight.shadow.camera.bottom = -2;
+  sunLight.shadow.radius = 6;
+  scene.add(sunLight);
+  scene.add(new THREE.AmbientLight(0x36435c, 0.55));
+
+  /* Stars */
+  starPoints = buildStarField();
+  scene.add(starPoints);
+
+  /* ---- Procedural textures ---- */
+  const maps = buildEarthMaps();                 // heavy — ~1-3 s
+  const nightTex = buildNightLights(cities);
+  const cloudTex = buildCloudTexture();
+
+  /* ---- Earth: custom-shader day/night globe ---- */
+  const earthGeo = buildSphereGeometry(R, 128, 96);
+  const earthMat = new THREE.ShaderMaterial({
+    uniforms: {
+      dayMap:   { value: maps.dayTex },
+      nightMap: { value: nightTex },
+      maskMap:  { value: maps.maskTex },
+      sunDir:   { value: sunDir }
+    },
+    vertexShader: `
+      varying vec3 vN; varying vec3 vWorld; varying vec2 vUv;
+      void main(){
+        vUv = uv;
+        vN = normalize(mat3(modelMatrix) * normal);
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: `
+      uniform sampler2D dayMap, nightMap, maskMap;
+      uniform vec3 sunDir;
+      varying vec3 vN; varying vec3 vWorld; varying vec2 vUv;
+      void main(){
+        vec3 n = normalize(vN);
+        vec3 viewDir = normalize(cameraPosition - vWorld);
+        float ndl = dot(n, sunDir);
+        float dayF = smoothstep(-0.14, 0.30, ndl);           // soft terminator
+
+        vec3 dayCol = texture2D(dayMap, vUv).rgb;
+        float land = texture2D(maskMap, vUv).r;
+        float ocean = 1.0 - land;
+
+        // Ocean sun glint — tight specular + broad sheen
+        vec3 refl = reflect(-sunDir, n);
+        float rv = max(dot(refl, viewDir), 0.0);
+        float dayMask = smoothstep(-0.03, 0.22, ndl);
+        float glint = pow(rv, 140.0) * ocean * dayMask * 2.1;
+        float sheen = pow(rv, 9.0)  * ocean * dayMask * 0.16;
+
+        // Night side — city lights
+        vec3 nightCol = texture2D(nightMap, vUv).rgb;
+        float nightDepth = 1.0 - dayF;
+        nightCol *= (0.12 + 2.1 * nightDepth * nightDepth);
+
+        // Day lighting: warm noon, cool limb
+        float diff = pow(clamp(ndl, 0.0, 1.0), 0.72);
+        vec3 dayLit = dayCol * (0.10 + 1.28 * diff);
+
+        // Terminator atmosphere kiss
+        float term = exp(-abs(ndl) * 8.5);
+        dayLit += vec3(0.42, 0.52, 0.62) * term * 0.30;
+
+        vec3 col = mix(nightCol, dayLit, dayF);
+        col += vec3(1.0, 0.96, 0.88) * (glint + sheen);
+        gl_FragColor = vec4(col, 1.0);
+      }`
+  });
+  earthMesh = new THREE.Mesh(earthGeo, earthMat);
+  earthMesh.receiveShadow = true;
+  scene.add(earthMesh);
+
+  /* ---- Cloud layer ---- */
+  const cloudGeo = buildSphereGeometry(R*1.012, 96, 72);
+  const cloudMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { map: { value: cloudTex }, sunDir: { value: sunDir } },
+    vertexShader: `
+      varying vec3 vN; varying vec2 vUv;
+      void main(){
+        vUv = uv; vN = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform sampler2D map; uniform vec3 sunDir;
+      varying vec3 vN; varying vec2 vUv;
+      void main(){
+        vec4 tex = texture2D(map, vUv);
+        float ndl = dot(normalize(vN), sunDir);
+        float lit = smoothstep(-0.18, 0.34, ndl);
+        float shade = 0.05 + 1.05 * lit;
+        // warm kiss at the terminator
+        float term = exp(-abs(ndl) * 9.0);
+        vec3 col = vec3(shade) + vec3(0.45, 0.34, 0.24) * term * 0.6;
+        gl_FragColor = vec4(col, tex.a * (0.28 + 0.72 * lit));
+      }`
+  });
+  cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+  scene.add(cloudMesh);
+
+  /* ---- Atmosphere: outer halo + inner limb haze ---- */
+  const atmoGeo = new THREE.SphereGeometry(R*1.045, 64, 48);
+  const atmoMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    uniforms: { sunDir: { value: sunDir } },
+    vertexShader: `
+      varying vec3 vN; varying vec3 vWorld;
+      void main(){
+        vN = normalize(mat3(modelMatrix) * normal);
+        vWorld = (modelMatrix * vec4(position,1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 sunDir;
+      varying vec3 vN; varying vec3 vWorld;
+      void main(){
+        vec3 viewDir = normalize(cameraPosition - vWorld);
+        float rim = pow(1.0 - abs(dot(normalize(vN), viewDir)), 3.4);
+        float ndl = dot(normalize(vN), sunDir);
+        float dayAmt = smoothstep(-0.35, 0.45, ndl);
+        vec3 dayCol = vec3(0.42, 0.72, 1.05);
+        vec3 nightCol = vec3(0.05, 0.10, 0.22);
+        vec3 termCol = vec3(0.95, 0.55, 0.30);
+        float term = exp(-abs(ndl) * 6.0);
+        vec3 col = mix(nightCol, dayCol, dayAmt);
+        col = mix(col, termCol, term * 0.55);
+        gl_FragColor = vec4(col * rim * 1.55, rim);
+      }`
+  });
+  atmoMesh = new THREE.Mesh(atmoGeo, atmoMat);
+  scene.add(atmoMesh);
+
+  const atmoInGeo = new THREE.SphereGeometry(R*1.018, 64, 48);
+  const atmoInMat = new THREE.ShaderMaterial({
+    side: THREE.FrontSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    uniforms: { sunDir: { value: sunDir } },
+    vertexShader: atmoMat.vertexShader,
+    fragmentShader: `
+      uniform vec3 sunDir;
+      varying vec3 vN; varying vec3 vWorld;
+      void main(){
+        vec3 viewDir = normalize(cameraPosition - vWorld);
+        float rim = pow(1.0 - max(dot(normalize(vN), viewDir), 0.0), 5.0);
+        float ndl = dot(normalize(vN), sunDir);
+        float dayAmt = smoothstep(-0.25, 0.4, ndl);
+        vec3 col = mix(vec3(0.03,0.06,0.14), vec3(0.5,0.78,1.1), dayAmt);
+        gl_FragColor = vec4(col * rim, rim * 0.8);
+      }`
+  });
+  atmoInnerMesh = new THREE.Mesh(atmoInGeo, atmoInMat);
+  scene.add(atmoInnerMesh);
+
+  /* ---- Sun glow sprite (bloom flares on it) ---- */
+  sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: buildGlowSprite('rgba(255,252,238,1)', 'rgba(255,226,150,0.5)'),
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 1
+  }));
+  sunGlow.scale.set(7.5, 7.5, 1);
+  scene.add(sunGlow);
+
+  /* ---- Moon ---- */
+  const moonTex = buildMoonTexture();
+  moonMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.24, 48, 32),
+    new THREE.MeshLambertMaterial({ map: moonTex })
+  );
+  moonMesh.position.set(5.2, 1.6, -3.6);
+  moonMesh.castShadow = true;
+  scene.add(moonMesh);
+
+  /* ---- City light markers ---- */
+  const cityPos = new Float32Array(cities.length * 3);
+  cities.forEach((c, i) => cityPos.set([c.dir.x*R*1.006, c.dir.y*R*1.006, c.dir.z*R*1.006], i*3));
+  const cityGeo = new THREE.BufferGeometry();
+  cityGeo.setAttribute('position', new THREE.BufferAttribute(cityPos, 3));
+  cityGlowPoints = new THREE.Points(cityGeo, new THREE.PointsMaterial({
+    map: glowTexAmber, color: 0xffffff, size: 0.024, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true, opacity: 0.95
+  }));
+  scene.add(cityGlowPoints);
+
+  /* ---- Flights ---- */
+  buildFlightAssets();
+  initFlights();
+
+  /* ---- Bloom ---- */
+  composer = new THREE.EffectComposer(renderer);
+  composer.addPass(new THREE.RenderPass(scene, camera));
+  bloomPass = new THREE.UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.85,  // strength
+    0.72,  // radius
+    0.74   // threshold — only lights & planes bloom
+  );
+  composer.addPass(bloomPass);
+}
+
+/* ============================================================
+   SIMULATION STEP
+   ============================================================ */
+function simTick(dt){
+  flightClock += dt;
+  for (const f of flights) advanceFlight(f, dt);
+  for (const f of flights) syncFlightVisual(f);
+}
+function syncEnvironment(){
+  sunDirectionFromUTC(utcHours, sunDir);
+  sunLight.position.copy(sunDir).multiplyScalar(10);
+  sunGlow.position.copy(sunDir).multiplyScalar(60);
+  if (cloudMesh) cloudMesh.rotation.y = 0.6 + utcHours * 0.0045;
+}
+
+/* ============================================================
+   CITY PICKING + LABEL
+   ============================================================ */
+const _proj = new THREE.Vector3();
+function pickCityAt(clientX, clientY){
+  let best = null, bestD = 22; // px
+  const w = window.innerWidth, h = window.innerHeight;
+  for (let i = 0; i < cities.length; i++){
+    _proj.copy(cities[i].dir).multiplyScalar(R).project(camera);
+    if (_proj.z > 1) continue;
+    const sx = (_proj.x*0.5 + 0.5)*w, sy = (-_proj.y*0.5 + 0.5)*h;
+    const d = Math.hypot(sx - clientX, sy - clientY);
+    if (d < bestD){ bestD = d; best = i; }
+  }
+  return best;
+}
+function updateCityLabel(){
+  if (selectedCity == null){ cityLabel.style.display = 'none'; return; }
+  const c = cities[selectedCity];
+  _proj.copy(c.dir).multiplyScalar(R*1.02).project(camera);
+  if (_proj.z > 1){ cityLabel.style.display = 'none'; return; }
+  const w = window.innerWidth, h = window.innerHeight;
+  cityLabel.style.left = ((_proj.x*0.5 + 0.5)*w) + 'px';
+  cityLabel.style.top = ((-_proj.y*0.5 + 0.5)*h) + 'px';
+  cityLabel.innerHTML = '<div class="nm">' + c.name + '</div><div class="dp"><b>' + c.dep + '</b> DEPARTURES</div>';
+  cityLabel.style.display = 'block';
+}
+
+/* Pointer handling — distinguish click from drag */
+let downX = 0, downY = 0;
+function bindPointer(){
+  const el = renderer.domElement;
+  el.addEventListener('pointerdown', e => { downX = e.clientX; downY = e.clientY; });
+  el.addEventListener('pointerup', e => {
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return; // was a drag
+    const hit = pickCityAt(e.clientX, e.clientY);
+    selectedCity = (hit === null) ? null : hit;
+    applySelection();
+    updateCityLabel();
+  });
+}
+
+/* ============================================================
+   HUD
+   ============================================================ */
+function formatUTC(h){
+  h = ((h % 24) + 24) % 24;
+  const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
+  return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+}
+function updateHUD(){
+  clockEl.innerHTML = formatUTC(utcHours) + '<small>UTC</small>';
+  speedPill.textContent = SPEED_LABEL[timeSpeed] || (timeSpeed + '×');
+  $('pausePill').style.display = paused ? 'inline-block' : 'none';
+  $('livePill').style.display = paused ? 'none' : 'inline-block';
+  statFlights.textContent = flights.length;
+  statCities.textContent = cities.length;
+  statRoutes.textContent = new Set(flights.map(f => f.a + '-' + f.b)).size;
+}
+
+/* ============================================================
+   SHOWCASE — deterministic 12 s cinematic
+   ============================================================ */
+const camKeys = [
+  { t: 0.0,  p: [ 0.00,  0.55,  3.45] },
+  { t: 1.5,  p: [ 1.45,  0.95,  2.75] },
+  { t: 3.1,  p: [ 2.52,  0.12,  1.80] },
+  { t: 4.6,  p: [ 2.15,  1.02,  1.30] },
+  { t: 6.2,  p: [ 0.72,  2.10,  2.10] },
+  { t: 7.8,  p: [-1.78,  0.72,  2.15] },
+  { t: 9.2,  p: [-2.55,  0.02, -1.12] },
+  { t: 10.6, p: [-1.02,  0.85, -2.82] },
+  { t: 12.0, p: [ 0.00,  0.55,  3.45] }
+];
+const _camA = new THREE.Vector3(), _camB = new THREE.Vector3();
+function cameraAt(t, out){
+  let i = 0;
+  while (i < camKeys.length - 2 && t > camKeys[i+1].t) i++;
+  const a = camKeys[i], b = camKeys[i+1];
+  let u = (t - a.t) / Math.max(0.0001, b.t - a.t);
+  u = Math.max(0, Math.min(1, u));
+  u = u*u*(3 - 2*u); // smoothstep easing
+  _camA.fromArray(a.p); _camB.fromArray(b.p);
+  out.copy(_camA).lerp(_camB, u);
+  return out;
+}
+/* Reset the whole simulation deterministically (seeded) */
+function simReset(){
+  rng = mulberry32(SEED);
+  // re-seed city stats deterministically
+  const r2 = mulberry32(SEED ^ 0x9e3779b9);
+  for (const c of cities) c.dep = Math.floor(40 + r2()*130);
+  // recreate flight data in a fixed order
+  for (let i = 0; i < flights.length; i++){
+    let a = Math.floor(rng()*cities.length), b = Math.floor(rng()*cities.length);
+    while (b === a) b = Math.floor(rng()*cities.length);
+    setFlightRoute(flights[i], a, b, rng()*0.92);
+  }
+  flightClock = 0;
+}
+function busiestCityIndex(){
+  let best = 0, bd = -1;
+  for (let i = 0; i < cities.length; i++) if (cities[i].dep > bd){ bd = cities[i].dep; best = i; }
+  return best;
+}
+const _showCam = new THREE.Vector3();
+function seek(t){
+  t = Math.max(0, Math.min(SHOWCASE_DURATION, t));
+  /* Deterministic re-simulation from t = 0 */
+  simReset();
+  const STEP = 1/60;
+  for (let s = 0; s < t; s += STEP) simTick(Math.min(STEP, t - s));
+  /* Showcase environment: starts 13:00 UTC, 1 h per second */
+  utcHours = 13.0 + t;
+  timeSpeed = 3600;
+  paused = false;
+  syncEnvironment();
+  /* Cinematic camera */
+  cameraAt(t, _showCam);
+  camera.position.copy(_showCam);
+  camera.lookAt(0, 0, 0);
+  /* Auto-select the busiest hub mid-showcase, release before the finale */
+  if (t > 4.3 && t < 8.6){
+    selectedCity = busiestCityIndex();
+  } else {
+    selectedCity = null;
+  }
+  applySelection();
+  updateCityLabel();
+  updateHUD();
+  composer.render();
+  window.__bench.flights = flights.length;
+  window.__bench.cities = cities.length;
+  window.__bench.utcHours = ((utcHours % 24) + 24) % 24;
+  window.__bench.selectedCity = (selectedCity == null) ? null : cities[selectedCity].name;
+}
+window.showcase = { duration: SHOWCASE_DURATION, seek };
+
+/* ============================================================
+   RECORDING — captureStream + MediaRecorder → .webm
+   ============================================================ */
+let mediaRecorder = null, recChunks = [], recStart = 0, recActive = false;
+function startRecording(){
+  if (recActive) return;
+  try {
+    const stream = renderer.domElement.captureStream(60);
+    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+      .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    mediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10000000 });
+  } catch (err) {
+    recStatus.textContent = 'Capture unavailable';
+    return;
+  }
+  recChunks = [];
+  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recChunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'terra-air-traffic-showcase.webm';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    recStatus.textContent = 'Saved .webm ✓';
+    recActive = false;
+    recBtn.disabled = false;
+    showcaseBtn.disabled = false;
+  };
+  controls.enabled = false;
+  controls.autoRotate = false;
+  showcasing = true;
+  recActive = true;
+  recBtn.disabled = true;
+  showcaseBtn.disabled = true;
+  recStatus.textContent = '● Recording…';
+  recStart = performance.now();
+  mediaRecorder.start(250);
+}
+function playShowcaseOnly(){
+  if (showcasing) return;
+  controls.enabled = false;
+  controls.autoRotate = false;
+  showcasing = true;
+  recBtn.disabled = true;
+  showcaseBtn.disabled = true;
+  recStart = performance.now();
+}
+recBtn.addEventListener('click', startRecording);
+showcaseBtn.addEventListener('click', playShowcaseOnly);
+
+/* ============================================================
+   KEYBOARD
+   ============================================================ */
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyT'){
+    const idx = SPEED_CYCLE.indexOf(timeSpeed);
+    timeSpeed = SPEED_CYCLE[(idx + 1) % SPEED_CYCLE.length];
+    updateHUD();
+  } else if (e.code === 'Space'){
+    e.preventDefault();
+    paused = !paused;
+    updateHUD();
+  }
+});
+
+/* ============================================================
+   RESIZE
+   ============================================================ */
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  if (composer) composer.setSize(w, h);
+});
+
+/* ============================================================
+   MAIN LOOP
+   ============================================================ */
+let lastT = 0;
+function animate(now){
+  requestAnimationFrame(animate);
+  if (!lastT) lastT = now;
+  let dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+
+  if (showcasing){
+    const t = (now - recStart) / 1000;
+    if (t >= SHOWCASE_DURATION){
+      seek(SHOWCASE_DURATION);
+      showcasing = false;
+      controls.enabled = true;
+      controls.autoRotate = true;
+      recBtn.disabled = false;
+      showcaseBtn.disabled = false;
+      if (recActive && mediaRecorder && mediaRecorder.state !== 'inactive'){
+        mediaRecorder.stop(); // triggers save + recActive=false
+      }
+    } else {
+      seek(t);
+    }
+    return; // seek() already rendered
+  }
+
+  if (!paused){
+    utcHours = (utcHours + dt * timeSpeed / 3600) % 24;
+    simTick(dt);
+  }
+  syncEnvironment();
+  controls.update();
+  updateCityLabel();
+  updateHUD();
+  composer.render();
+
+  window.__bench.flights = flights.length;
+  window.__bench.cities = cities.length;
+  window.__bench.utcHours = ((utcHours % 24) + 24) % 24;
+  window.__bench.selectedCity = (selectedCity == null) ? null : cities[selectedCity].name;
+}
+
+/* Benchmark handle — updated every frame */
+window.__bench = { flights: 0, cities: 0, utcHours: 0, selectedCity: null };
+
+/* ============================================================
+   BOOT — let the loader paint, then generate the world
+   ============================================================ */
+setTimeout(() => {
+  try {
+    /* Start from the real current UTC time */
+    const now = new Date();
+    utcHours = now.getUTCHours() + now.getUTCMinutes()/60 + now.getUTCSeconds()/3600;
+
+    rng = mulberry32(SEED);
+    cities = placeCities();
+
+    buildScene();
+    bindPointer();
+    syncEnvironment();
+    for (const f of flights) syncFlightVisual(f);
+
+    loaderEl.classList.add('gone');
+    setTimeout(() => loaderEl.remove(), 900);
+
+    updateHUD();
+    requestAnimationFrame(animate);
+  } catch (err) {
+    loaderEl.classList.add('gone');
+    const f = $('fatal');
+    f.style.display = 'flex';
+    f.textContent = 'Startup error: ' + (err && err.message ? err.message : err);
+    throw err;
+  }
+}, 60);
+</script>
+</body>
+</html>

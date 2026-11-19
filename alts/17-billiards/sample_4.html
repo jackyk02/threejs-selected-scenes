@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Nine-Foot Billiard Hall — Interactive 3D Pool</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#070503;font-family:Georgia,'Times New Roman',serif;color:#eadfc8;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;}
+  .panel{position:fixed;z-index:10;background:linear-gradient(180deg,rgba(24,15,8,.82),rgba(12,8,5,.78));border:1px solid rgba(218,185,120,.32);box-shadow:0 18px 60px rgba(0,0,0,.55), inset 0 0 28px rgba(255,210,130,.06);border-radius:14px;backdrop-filter:blur(6px);}
+  #hud{left:18px;top:16px;padding:14px 16px 12px;min-width:250px;max-width:330px;}
+  #title{font-size:19px;letter-spacing:.12em;text-transform:uppercase;color:#f4d88a;text-shadow:0 0 18px rgba(255,190,80,.35);}
+  #sub{font-size:11px;letter-spacing:.09em;color:#bda87a;margin-top:2px;text-transform:uppercase;}
+  .row{display:flex;align-items:center;gap:10px;margin-top:10px;}
+  .stat{display:flex;justify-content:space-between;border-top:1px solid rgba(230,200,140,.18);padding-top:8px;margin-top:8px;font-size:12px;color:#d8c89a;}
+  #pocketed{min-height:30px;display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;}
+  .chip{width:25px;height:25px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:700 12px/1 Georgia,serif;color:#111;border:1px solid rgba(255,255,255,.55);box-shadow:inset -4px -5px 8px rgba(0,0,0,.35),inset 3px 4px 7px rgba(255,255,255,.45),0 2px 5px #000;}
+  .chip.stripe{color:#111;background-repeat:repeat-x !important;background-size:100% 100% !important;}
+  #message{min-height:16px;font-size:12px;color:#ffd98b;margin-top:8px;letter-spacing:.04em;}
+  #powerWrap{height:10px;background:#24140a;border:1px solid rgba(230,190,110,.35);border-radius:8px;overflow:hidden;margin-top:8px;}
+  #power{height:100%;width:0%;background:linear-gradient(90deg,#2f9d52,#ffd95a,#ff5a2e);box-shadow:0 0 14px rgba(255,190,60,.7);}
+  #keys{font-size:11px;color:#b9a77d;line-height:1.45;margin-top:10px;border-top:1px solid rgba(230,200,140,.16);padding-top:8px;}
+  #spinPanel{right:18px;top:16px;padding:11px 13px;text-align:center;}
+  #spinCanvas{width:92px;height:92px;display:block;}
+  #spinText{font-size:10px;color:#cbb77e;letter-spacing:.12em;text-transform:uppercase;margin-top:6px;}
+  #recordBtn{position:fixed;z-index:11;right:18px;bottom:18px;padding:13px 20px;border-radius:999px;border:1px solid #ffd477;color:#2a1707;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:radial-gradient(circle at 50% 30%,#ffe89a,#d49a3b 62%,#8a4c18);box-shadow:0 0 28px rgba(255,190,80,.45),0 10px 35px rgba(0,0,0,.6);cursor:pointer;}
+  #recordBtn:hover{filter:brightness(1.12);} #recordBtn:disabled{opacity:.55;cursor:wait;}
+  #hint{position:fixed;z-index:9;left:50%;bottom:16px;transform:translateX(-50%);font-size:11px;letter-spacing:.14em;color:rgba(238,220,170,.72);text-transform:uppercase;text-shadow:0 2px 8px #000;pointer-events:none;}
+  @media(max-width:760px){#hud{max-width:220px;min-width:190px}#spinPanel{right:8px;top:8px}#hud{left:8px;top:8px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="hud" class="panel">
+  <div id="title">Billiard Hall</div>
+  <div id="sub">Regulation 9 ft · live physics</div>
+  <div class="stat"><span>Shot</span><b id="shots">0</b></div>
+  <div class="stat"><span>State</span><b id="state">Ready</b></div>
+  <div style="font-size:11px;color:#c9b275;margin-top:8px;letter-spacing:.09em;text-transform:uppercase;">Pocketed</div>
+  <div id="pocketed"></div>
+  <div id="powerWrap" title="Hold left mouse, release to shoot"><div id="power"></div></div>
+  <div id="message">Move mouse to aim · hold LMB for power</div>
+  <div id="keys"><b>W/S</b> tip high/low (top/draw) · <b>A/D</b> english left/right<br><b>R</b> re-rack / return from showcase · Right-drag orbit · wheel zoom</div>
+</div>
+<div id="spinPanel" class="panel">
+  <canvas id="spinCanvas" width="184" height="184"></canvas>
+  <div id="spinText">Cue tip offset</div>
+</div>
+<button id="recordBtn">● Record video</button>
+<div id="hint">Break the rack · sink balls · mind the scratch</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script>
+'use strict';
+/* ============================================================
+   REGULATION 9-FOOT BILLIARD HALL — own models + own physics
+   Units: meters. Table plays along X, width along Z, Y up.
+   ============================================================ */
+let scene, camera, renderer, controls, composer, bloomPass;
+const TABLE = {
+  playL: 2.54, playW: 1.27, feltY: 0.82,
+  railH: 0.085, cushionH: 0.056,
+  ballR: 0.0286, ballMass: 1, gravity: 9.80665,
+  limitX: 2.54/2 - 0.0286, limitZ: 1.27/2 - 0.0286,
+  headX: -2.54/4
+};
+const CENTER_Y = TABLE.feltY + TABLE.ballR;
+const FOOT_X = TABLE.playL/4;
+const pockets = [
+  {x:-TABLE.playL/2-0.012,z:-TABLE.playW/2-0.012,r:0.067,side:false},
+  {x: TABLE.playL/2+0.012,z:-TABLE.playW/2-0.012,r:0.067,side:false},
+  {x:-TABLE.playL/2-0.012,z: TABLE.playW/2+0.012,r:0.067,side:false},
+  {x: TABLE.playL/2+0.012,z: TABLE.playW/2+0.012,r:0.067,side:false},
+  {x:0,z:-TABLE.playW/2-0.006,r:0.057,side:true},
+  {x:0,z: TABLE.playW/2+0.006,r:0.057,side:true}
+];
+const BALL_COLORS = {1:'#f2c230',2:'#2456d6',3:'#d53028',4:'#7434c7',5:'#ee7a22',6:'#1f7a3a',7:'#8a3324',8:'#101010',9:'#f2c230',10:'#2456d6',11:'#d53028',12:'#7434c7',13:'#ee7a22',14:'#1f7a3a',15:'#8a3324'};
+const RACK_ROWS = [[1],[9,2],[10,8,3],[11,4,12],[5,13,6,14,7,15]];
+
+/* deterministic random for procedural art */
+let seed = 1234567;
+function rnd(){ seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+function canvas2D(w,h,fn){ const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d'); fn(ctx,w,h); return c; }
+function tex(c, repeatX=1, repeatY=1){ const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(repeatX,repeatY); t.anisotropy=8; t.encoding=THREE.sRGBEncoding; return t; }
+
+/* ---------- procedural textures ---------- */
+const feltTex = tex(canvas2D(1024,1024,(ctx,w,h)=>{
+  const g=ctx.createRadialGradient(w/2,h/2,50,w/2,h/2,w*.72); g.addColorStop(0,'#237a43'); g.addColorStop(.65,'#185d33'); g.addColorStop(1,'#103f25'); ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  for(let i=0;i<42000;i++){ const a=.025+rnd()*.05; ctx.fillStyle=rnd()<.5?`rgba(255,255,255,${a})`:`rgba(0,0,0,${a})`; ctx.fillRect(rnd()*w,rnd()*h,1+rnd()*1.7,1+rnd()*1.7); }
+  ctx.strokeStyle='rgba(255,255,255,.025)'; for(let x=0;x<w;x+=8){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+}),2.4,1.3);
+const woodTex = tex(canvas2D(1024,512,(ctx,w,h)=>{
+  const g=ctx.createLinearGradient(0,0,w,0); g.addColorStop(0,'#3a1f0d'); g.addColorStop(.48,'#5a3417'); g.addColorStop(.52,'#2b170a'); g.addColorStop(1,'#4a2912'); ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  for(let i=0;i<150;i++){ const y=rnd()*h, amp=6+rnd()*22, per=90+rnd()*220, alpha=.12+rnd()*.32; ctx.strokeStyle=`rgba(${rnd()<.5?'18,9,3':'124,78,35'},${alpha})`; ctx.lineWidth=.6+rnd()*2.4; ctx.beginPath(); for(let x=0;x<=w;x+=8){ const yy=y+Math.sin((x+rnd()*7)/per)*amp+Math.sin(x/37)*2; if(x===0)ctx.moveTo(x,yy); else ctx.lineTo(x,yy);} ctx.stroke(); }
+  for(let i=0;i<22;i++){ ctx.fillStyle='rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(rnd()*w,rnd()*h,7+rnd()*20,2+rnd()*5,rnd()*Math.PI,0,Math.PI*2); ctx.fill(); }
+}),1,1);
+const wallTex = tex(canvas2D(1024,1024,(ctx,w,h)=>{
+  ctx.fillStyle='#1d120b'; ctx.fillRect(0,0,w,h);
+  for(let px=0;px<w;px+=128){ for(let py=0;py<h;py+=256){ const grad=ctx.createLinearGradient(px,py,px+128,py+256); grad.addColorStop(0,'#2c1a10'); grad.addColorStop(.5,'#20130c'); grad.addColorStop(1,'#170d08'); ctx.fillStyle=grad; ctx.fillRect(px+7,py+7,114,242); ctx.strokeStyle='rgba(198,154,82,.20)'; ctx.lineWidth=3; ctx.strokeRect(px+13,py+13,102,230); ctx.strokeStyle='rgba(0,0,0,.5)'; ctx.strokeRect(px+7,py+7,114,242); }}
+  for(let i=0;i<9000;i++){ ctx.fillStyle=`rgba(255,225,160,${rnd()*.025})`; ctx.fillRect(rnd()*w,rnd()*h,1,1); }
+}),4,2);
+const floorTex = tex(canvas2D(1024,1024,(ctx,w,h)=>{
+  ctx.fillStyle='#120a06'; ctx.fillRect(0,0,w,h); const plank=128;
+  for(let y=0;y<h;y+=plank){ for(let x=0;x<w;x+=256){ const off=((y/plank)%2)*128; const px=(x+off)%w; const g=ctx.createLinearGradient(px,y,px+256,y+plank); g.addColorStop(0,'#24120a'); g.addColorStop(.5,'#351d10'); g.addColorStop(1,'#1c0e08'); ctx.fillStyle=g; ctx.fillRect(px,y,254,plank-2); ctx.strokeStyle='rgba(0,0,0,.5)'; ctx.strokeRect(px,y,254,plank-2); }}
+  for(let i=0;i<16000;i++){ ctx.fillStyle=`rgba(210,160,95,${rnd()*.045})`; ctx.fillRect(rnd()*w,rnd()*h,1+rnd()*2,1); }
+}),3,3);
+const netTex = tex(canvas2D(256,256,(ctx,w,h)=>{ ctx.clearRect(0,0,w,h); ctx.strokeStyle='rgba(74,39,19,.95)'; ctx.lineWidth=7; for(let d=-h;d<w+h;d+=28){ ctx.beginPath(); ctx.moveTo(d,0); ctx.lineTo(d+h,h); ctx.stroke(); ctx.beginPath(); ctx.moveTo(d+h,0); ctx.lineTo(d,h); ctx.stroke(); }}),2,2); netTex.encoding=THREE.LinearEncoding;
+const shadowTex = tex(canvas2D(128,128,(ctx,w,h)=>{ const g=ctx.createRadialGradient(w/2,h/2,2,w/2,h/2,w/2); g.addColorStop(0,'rgba(0,0,0,.62)'); g.addColorStop(.55,'rgba(0,0,0,.26)'); g.addColorStop(1,'rgba(0,0,0,0)'); ctx.fillStyle=g; ctx.fillRect(0,0,w,h); })); shadowTex.encoding=THREE.LinearEncoding;
+
+/* ---------- materials ---------- */
+const matFelt = new THREE.MeshStandardMaterial({map:feltTex,roughness:.98,metalness:0});
+const matWood = new THREE.MeshStandardMaterial({map:woodTex,roughness:.43,metalness:.06});
+const matWoodDark = new THREE.MeshStandardMaterial({color:'#241209',roughness:.62,metalness:.04,map:woodTex});
+const matRubber = new THREE.MeshStandardMaterial({color:'#173d29',roughness:.92,metalness:0});
+const matBrass = new THREE.MeshStandardMaterial({color:'#c79b45',roughness:.24,metalness:.86,emissive:'#3a2408',emissiveIntensity:.45});
+const matIvory = new THREE.MeshStandardMaterial({color:'#f2e7cf',roughness:.28,metalness:.02});
+const matBlack = new THREE.MeshStandardMaterial({color:'#050505',roughness:.8});
+const matLeather = new THREE.MeshStandardMaterial({color:'#3a1d10',roughness:.7,map:woodTex});
+const matNet = new THREE.MeshStandardMaterial({map:netTex,color:'#5a2c15',transparent:true,opacity:.88,side:THREE.DoubleSide,roughness:.9,depthWrite:false});
+const matGlow = new THREE.MeshStandardMaterial({color:'#ffd88a',emissive:'#ffb84d',emissiveIntensity:3.2,roughness:.25});
+
+/* ---------- renderer / scene / camera / controls ---------- */
+scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070503);
+scene.fog = new THREE.FogExp2(0x070503, 0.055);
+camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.05, 40);
+camera.position.set(4.35, 3.25, 4.45);
+const app = document.getElementById('app');
+renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+app.appendChild(renderer.domElement);
+controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, TABLE.feltY, 0);
+controls.enableDamping = true; controls.dampingFactor = .06;
+controls.minDistance = 1.6; controls.maxDistance = 7.2; controls.maxPolarAngle = Math.PI*0.43; controls.minPolarAngle = Math.PI*0.16;
+controls.mouseButtons = { LEFT:-1, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+
+/* bloom */
+if (THREE.EffectComposer && THREE.RenderPass && THREE.UnrealBloomPass){
+  composer = new THREE.EffectComposer(renderer);
+  composer.addPass(new THREE.RenderPass(scene,camera));
+  bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), .62, .78, .72);
+  composer.addPass(bloomPass);
+} 
+
+/* ---------- lights ---------- */
+scene.add(new THREE.HemisphereLight(0x2c241a, 0x050302, .36));
+const amb = new THREE.AmbientLight(0x1a1410, .55); scene.add(amb);
+const spotTarget = new THREE.Object3D(); spotTarget.position.set(0,TABLE.feltY,0); scene.add(spotTarget);
+const key = new THREE.SpotLight(0xffc375, 3.05, 8.5, 0.72, 0.48, 1.55);
+key.position.set(0, 2.62, 0); key.target = spotTarget; key.castShadow = true;
+key.shadow.mapSize.set(4096,4096); key.shadow.camera.near=.45; key.shadow.camera.far=5.0; key.shadow.bias=-0.00022; key.shadow.radius=5;
+scene.add(key);
+const warmPoint = new THREE.PointLight(0xff9f4a, .75, 3.4, 2); warmPoint.position.set(0,1.75,0); scene.add(warmPoint);
+const rim = new THREE.DirectionalLight(0x6d7ba8, .32); rim.position.set(-3.5,3.2,-3.0); scene.add(rim);
+
+/* ---------- room ---------- */
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(13,13), new THREE.MeshStandardMaterial({map:floorTex,roughness:.72,metalness:.02}));
+floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+function wall(w,h,x,y,z,ry){ const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshStandardMaterial({map:wallTex,roughness:.86,metalness:0})); m.position.set(x,y,z); m.rotation.y=ry; m.receiveShadow=true; scene.add(m); }
+wall(13,4.2, 0,2.1,-4.8, 0); wall(13,4.2, 0,2.1, 4.8, Math.PI); wall(9.6,4.2, -6.5,2.1,0, Math.PI/2); wall(9.6,4.2, 6.5,2.1,0,-Math.PI/2);
+const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(13,9.6), new THREE.MeshStandardMaterial({color:'#0d0805',roughness:.95})); ceiling.rotation.x=Math.PI/2; ceiling.position.y=4.25; scene.add(ceiling);
+for(let i=-2;i<=2;i++){ const beam=new THREE.Mesh(new THREE.BoxGeometry(.22,.24,9.6),matWoodDark); beam.position.set(i*2.35,3.92,0); beam.castShadow=true; scene.add(beam); }
+/* back bar silhouette and framed art — procedural only */
+const bar = new THREE.Mesh(new THREE.BoxGeometry(4.6,.78,.42), matWoodDark); bar.position.set(0,.39,-4.02); bar.castShadow=bar.receiveShadow=true; scene.add(bar);
+for(const x of [-1.7,0,1.7]){ const bottle=new THREE.Mesh(new THREE.CylinderGeometry(.055,.075,.28,12), new THREE.MeshStandardMaterial({color:x===0?'#162d18':'#301414',roughness:.2,metalness:.1})); bottle.position.set(x,.90,-4.02); scene.add(bottle); }
+for(const x of [-2.7,2.7]){ const frame=new THREE.Mesh(new THREE.BoxGeometry(.78,.56,.04), matWood); frame.position.set(x,2.25,-4.77); scene.add(frame); const art=new THREE.Mesh(new THREE.PlaneGeometry(.62,.40), new THREE.MeshStandardMaterial({map:woodTex,color:x<0?'#8d6a3a':'#3f5a68',roughness:.8})); art.position.set(x,2.25,-4.745); scene.add(art); }
+
+/* ---------- table construction ---------- */
+const tableGroup = new THREE.Group(); scene.add(tableGroup);
+function box(name,w,h,d,x,y,z,mat,cast=true,recv=true){ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); m.castShadow=cast; m.receiveShadow=recv; m.name=name; tableGroup.add(m); return m; }
+/* legs: turned-ish stacked cylinders/spheres */
+const legMat = matWood;
+for(const sx of [-1,1]) for(const sz of [-1,1]){
+  const g=new THREE.Group(); g.position.set(sx*(TABLE.playL/2-.08),0,sz*(TABLE.playW/2-.08));
+  const parts=[[.16,.10,.10,0],[.105,.54,.37,0],[.17,.12,.68,0],[.12,.10,.76,0]];
+  for(const [r,h,y] of parts){ const c=new THREE.Mesh(new THREE.CylinderGeometry(r,r*.82,h,24),legMat); c.position.y=y; c.castShadow=c.receiveShadow=true; g.add(c); }
+  const ball=new THREE.Mesh(new THREE.SphereGeometry(.135,24,16),legMat); ball.position.y=.52; ball.castShadow=true; g.add(ball);
+  tableGroup.add(g);
+}
+box('apronN',TABLE.playL+.42,.26,.12,0,.665,-(TABLE.playW/2+.13),matWoodDark);
+box('apronS',TABLE.playL+.42,.26,.12,0,.665, (TABLE.playW/2+.13),matWoodDark);
+box('apronW',.12,.26,TABLE.playW+.18,-(TABLE.playL/2+.13),.665,0,matWoodDark);
+box('apronE',.12,.26,TABLE.playW+.18, (TABLE.playL/2+.13),.665,0,matWoodDark);
+const slab=box('feltSlab',TABLE.playL+.20,.065,TABLE.playW+.20,0,TABLE.feltY-.0325,0,matFelt,false,true); slab.receiveShadow=true;
+/* outer rails */
+const railLenX=TABLE.playL+.42, railLenZ=TABLE.playW+.42, railDepth=.16, railY=TABLE.feltY+.060;
+box('railN',railLenX,TABLE.railH,railDepth,0,railY,-(TABLE.playW/2+.105),matWood);
+box('railS',railLenX,TABLE.railH,railDepth,0,railY, (TABLE.playW/2+.105),matWood);
+box('railW',railDepth,TABLE.railH,railLenZ,-(TABLE.playL/2+.105),railY,0,matWood);
+box('railE',railDepth,TABLE.railH,railLenZ, (TABLE.playL/2+.105),railY,0,matWood);
+/* cushions: rubber bodies + sloped noses, segmented around pockets */
+function cushion(len,x,z,rotY,innerSign){
+  const g=new THREE.Group(); g.position.set(x,TABLE.feltY+.028,z); g.rotation.y=rotY;
+  const body=new THREE.Mesh(new THREE.BoxGeometry(len,TABLE.cushionH,.064),matRubber); body.castShadow=body.receiveShadow=true; g.add(body);
+  const nose=new THREE.Mesh(new THREE.BoxGeometry(len,.030,.036),matFelt); nose.position.set(0,.018,innerSign*-.041); nose.rotation.x=innerSign*.62; nose.castShadow=true; g.add(nose);
+  const cap=new THREE.Mesh(new THREE.BoxGeometry(len,.014,.028),matRubber); cap.position.set(0,.043,innerSign*-.026); cap.rotation.x=innerSign*.62; g.add(cap);
+  tableGroup.add(g);
+}
+const sideGap=.125, cornerGap=.125;
+const longSeg=(TABLE.playL - sideGap)/2 - .065;
+for(const sz of [-1,1]) for(const sx of [-1,1]){
+  const cx=sx*(sideGap/2 + longSeg/2 + .035); cushion(longSeg,cx,sz*(TABLE.playW/2+.030),0,sz);
+}
+const shortSeg=(TABLE.playW - cornerGap)/2 - .04;
+for(const sx of [-1,1]) for(const sz of [-1,1]){
+  const cz=sz*(cornerGap/2 + shortSeg/2 + .025); cushion(shortSeg,sx*(TABLE.playL/2+.030),cz,Math.PI/2,sx);
+}
+/* diamond inlays on rails */
+function diamond(x,y,z,rotY=0){ const d=new THREE.Mesh(new THREE.OctahedronGeometry(.018),matIvory); d.scale.set(1,.32,1); d.position.set(x,y,z); d.rotation.y=rotY; d.castShadow=true; tableGroup.add(d); }
+for(const sz of [-1,1]) for(const x of [-TABLE.playL/4,-TABLE.playL/6,TABLE.playL/6,TABLE.playL/4]) diamond(x,railY+.052,sz*(TABLE.playW/2+.105));
+for(const sx of [-1,1]) for(const z of [-TABLE.playW/4,TABLE.playW/4]) diamond(sx*(TABLE.playL/2+.105),railY+.052,z,Math.PI/4);
+/* pockets: black mouths, brass/leather rings, hanging nets below */
+const pocketGroup=new THREE.Group(); scene.add(pocketGroup);
+for(const p of pockets){
+  const rim=new THREE.Mesh(new THREE.TorusGeometry(p.r*.92,.012,12,32),p.side?matLeather:matBrass);
+  rim.rotation.x=Math.PI/2; rim.position.set(p.x,TABLE.feltY+.012,p.z); rim.castShadow=true; pocketGroup.add(rim);
+  const hole=new THREE.Mesh(new THREE.CylinderGeometry(p.r*.86,p.r*.86,.025,32),matBlack); hole.position.set(p.x,TABLE.feltY+.006,p.z); pocketGroup.add(hole);
+  const throat=new THREE.Mesh(new THREE.CylinderGeometry(p.r*.72,p.r*.48,.22,24,1,true),new THREE.MeshStandardMaterial({color:'#080402',roughness:.95,side:THREE.DoubleSide})); throat.position.set(p.x,TABLE.feltY-.12,p.z); pocketGroup.add(throat);
+  const net=new THREE.Mesh(new THREE.ConeGeometry(p.r*.62,.48,18,3,true),matNet); net.position.set(p.x,TABLE.feltY-.43,p.z); pocketGroup.add(net);
+}
+/* head string */
+const headLine=new THREE.Mesh(new THREE.BoxGeometry(.006,.001,TABLE.playW*.92),new THREE.MeshBasicMaterial({color:0xd8c79a,transparent:true,opacity:.18})); headLine.position.set(TABLE.headX,TABLE.feltY+.001,0); scene.add(headLine);
+/* pendant lamp */
+const lamp=new THREE.Group(); scene.add(lamp);
+const cord=new THREE.Mesh(new THREE.CylinderGeometry(.012,.012,1.55,10),matBlack); cord.position.y=3.35; lamp.add(cord);
+const shade=new THREE.Mesh(new THREE.ConeGeometry(.46,.36,48,1,true),new THREE.MeshStandardMaterial({color:'#8f6227',metalness:.82,roughness:.25,emissive:'#2c1706',emissiveIntensity:.5,side:THREE.DoubleSide})); shade.position.y=2.56; shade.castShadow=true; lamp.add(shade);
+const shadeRim=new THREE.Mesh(new THREE.TorusGeometry(.46,.022,10,48),matBrass); shadeRim.rotation.x=Math.PI/2; shadeRim.position.y=2.38; lamp.add(shadeRim);
+const bulb=new THREE.Mesh(new THREE.SphereGeometry(.085,24,16),matGlow); bulb.position.y=2.43; lamp.add(bulb);
+const beam=new THREE.Mesh(new THREE.ConeGeometry(1.72,2.35,48,1,true),new THREE.MeshBasicMaterial({color:0xffc879,transparent:true,opacity:.075,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide})); beam.position.y=1.36; scene.add(beam);
+const poolGlow=new THREE.Mesh(new THREE.CircleGeometry(1.55,48),new THREE.MeshBasicMaterial({color:0xffc477,transparent:true,opacity:.16,blending:THREE.AdditiveBlending,depthWrite:false})); poolGlow.rotation.x=-Math.PI/2; poolGlow.position.y=TABLE.feltY+.002; scene.add(poolGlow);
+
+/* ---------- balls ---------- */
+const ballGroup = new THREE.Group(); scene.add(ballGroup);
+const shadowGroup = new THREE.Group(); scene.add(shadowGroup);
+function ballTexture(number){
+  return tex(canvas2D(512,256,(ctx,w,h)=>{
+    if(number===0){ ctx.fillStyle='#f5eddc'; ctx.fillRect(0,0,w,h); for(let i=0;i<1600;i++){ctx.fillStyle=`rgba(90,70,40,${rnd()*.09})`;ctx.fillRect(rnd()*w,rnd()*h,1,1);} ctx.fillStyle='#7a3b1c'; ctx.beginPath(); ctx.arc(w*.25,h*.52,7,0,Math.PI*2); ctx.fill(); return; }
+    const isStripe=number>=9, base=BALL_COLORS[number];
+    if(isStripe){ ctx.fillStyle='#f4eedd'; ctx.fillRect(0,0,w,h); ctx.fillStyle=base; ctx.fillRect(0,88,w,80); }
+    else { ctx.fillStyle=base; ctx.fillRect(0,0,w,h); }
+    const drawFace=cx=>{ ctx.fillStyle='#f7f2e6'; ctx.beginPath(); ctx.ellipse(cx,h/2,54,62,0,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=4; ctx.stroke(); ctx.fillStyle='#111'; ctx.font='bold 74px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(number),cx,h/2+3); };
+    drawFace(w*.25); drawFace(w*.75);
+  }));
+}
+const ballGeo = new THREE.SphereGeometry(TABLE.ballR, 56, 36);
+const balls=[], blobShadows=[];
+for(let n=0;n<=15;n++){
+  const material=new THREE.MeshPhysicalMaterial({map:ballTexture(n),color:0xffffff,roughness:.22,metalness:.02,clearcoat:.75,clearcoatRoughness:.18,reflectivity:.35});
+  const mesh=new THREE.Mesh(ballGeo,material); mesh.castShadow=true; mesh.receiveShadow=true; ballGroup.add(mesh);
+  const b={ id:n, number:n, mesh, pos:new THREE.Vector3(), vel:new THREE.Vector3(), ang:new THREE.Vector3(), active:true, dropping:false, dropT:0, dropFrom:new THREE.Vector3(), dropTo:new THREE.Vector3(), radius:TABLE.ballR };
+  balls.push(b);
+  const sh=new THREE.Mesh(new THREE.PlaneGeometry(TABLE.ballR*3.05,TABLE.ballR*3.05),new THREE.MeshBasicMaterial({map:shadowTex,transparent:true,depthWrite:false,opacity:.62})); sh.rotation.x=-Math.PI/2; sh.position.y=TABLE.feltY+.0015; shadowGroup.add(sh); blobShadows.push(sh);
+}
+let shots=0, pocketed=[], cueScratch=false, appMode='interactive';
+const bench={ balls:balls, pocketed:[], moving:false, shots:0 }; window.__bench=bench;
+const pickSpot={};
+function resetToRack(){
+  shots=0; pocketed=[]; cueScratch=false; seed=987654321;
+  /* cue ball */
+  const cue=balls[0]; cue.pos.set(TABLE.headX,CENTER_Y,0); cue.vel.set(0,0,0); cue.ang.set(0,0,0); cue.active=true; cue.dropping=false; cue.dropT=0; cue.mesh.visible=true; cue.mesh.scale.setScalar(1); cue.mesh.quaternion.identity();
+  /* rack */
+  const d=TABLE.ballR*2*1.012, dx=d*0.8660254, apex=FOOT_X-.12; let idx=0;
+  const order=[].concat(...RACK_ROWS);
+  for(let row=0;row<RACK_ROWS.length;row++){
+    for(let k=0;k<RACK_ROWS[row].length;k++){
+      const num=RACK_ROWS[row][k], b=balls[num];
+      b.pos.set(apex+row*dx, CENTER_Y, (k-row/2)*d); b.vel.set(0,0,0); b.ang.set(0,0,0); b.active=true; b.dropping=false; b.dropT=0; b.mesh.visible=true; b.mesh.scale.setScalar(1); b.mesh.quaternion.identity();
+    }
+  }
+  for(const b of balls){ b.mesh.position.copy(b.pos); }
+  updateBlobShadows(); updateHUD();
+}
+function updateBlobShadows(){
+  for(let i=0;i<balls.length;i++){
+    const b=balls[i], sh=blobShadows[i];
+    sh.visible=b.active&&!b.dropping&&b.mesh.visible;
+    sh.position.set.x=b.pos.x; sh.position.set.y=TABLE.feltY+.0015; sh.position.set.z=b.pos.z;
+    const h=Math.max(0,b.pos.y-CENTER_Y), fade=THREE.MathUtils.clamp(1-h*2.3,.28,1);
+    sh.material=sh.material; sh.scale.setScalar(1+h*1.7); sh.material.opacity=.62*fade;
+  }
+}
+const rackOrder = balls; // alias kept for clarity
+
+/* ---------- cue stick + guide ---------- */
+const cueGroup=new THREE.Group(); scene.add(cueGroup);
+const cueShaft=new THREE.Mesh(new THREE.CylinderGeometry(.0105,.0165,1.48,20),new THREE.MeshStandardMaterial({map:woodTex,color:'#caa06a',roughness:.35,metalness:.02})); cueShaft.geometry.translate(0,.74,0); cueShaft.castShadow=true; cueGroup.add(cueShaft);
+const cueTip=new THREE.Mesh(new THREE.CylinderGeometry(.0115,.0105,.018,16),new THREE.MeshStandardMaterial({color:'#7aa6c8',roughness:.85})); cueTip.position.y=1.489; cueGroup.add(cueTip);
+const cueButt=new THREE.Mesh(new THREE.CylinderGeometry(.018,.016,.075,16),new THREE.MeshStandardMaterial({color:'#101010',roughness:.3,metalness:.25})); cueButt.position.y=.045; cueGroup.add(cueButt);
+const guideMat=new THREE.LineDashedMaterial({color:0xffe6a6,dashSize:.055,gapSize:.042,transparent:true,opacity:.95});
+const guideLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),guideMat); guideLine.frustumCulled=false; scene.add(guideLine);
+const guideDot=new THREE.Mesh(new THREE.SphereGeometry(.012,12,8),new THREE.MeshBasicMaterial({color:0xffdf92})); scene.add(guideDot);
+let aimDir=new THREE.Vector3(1,0,0), spinOffset={x:0,y:0}, charging=false, chargeStart=0, power=0;
+const raycaster=new THREE.Raycaster(), ndc=new THREE.Vector2(), tablePlane=new THREE.Plane(new THREE.Vector3(0,1,0),-CENTER_Y);
+function setAimFromClient(cx,cy){
+  ndc.x=(cx/innerWidth)*2-1; ndc.y=-(cy/innerHeight)*2+1; raycaster.setFromCamera(ndc,camera);
+  const p=new THREE.Vector3(); if(raycaster.ray.intersectPlane(tablePlane,p)){ const cue=balls[0], d=new THREE.Vector3(p.x-cue.pos.x,0,p.z-cue.pos.z); if(d.lengthSq()>0.004){ d.normalize(); aimDir.copy(d);} }
+  updateCueAndGuide();
+}
+function firstContact(origin,dir){
+  let best=4.2, kind='rail';
+  for(const b of balls){ if(b.id===0||!b.active||b.dropping) continue; const oc=origin.clone().sub(b.pos); const bq=oc.dot(dir); const cq=oc.lengthSq()-(2*TABLE.ballR)*(2*TABLE.ballR); const disc=bq*bq-cq; if(disc>0){ const t=-bq-Math.sqrt(disc); if(t>0&&t<best){best=t;kind='ball';} } }
+  let railT=Infinity;
+  if(Math.abs(dir.x)>1e-5){ const t=dir.x>0?(TABLE.limitX-origin.x)/dir.x:(-TABLE.limitX-origin.x)/dir.x; if(t>0)railT=Math.min(railT,t); }
+  if(Math.abs(dir.z)>1e-5){ const t=dir.z>0?(TABLE.limitZ-origin.z)/dir.z:(-TABLE.limitZ-origin.z)/dir.z; if(t>0)railT=Math.min(railT,t); }
+  if(railT<best){best=railT;kind='cushion';}
+  return {t:best,kind};
+}
+function updateCueAndGuide(){
+  const cue=balls[0], ready=cue.active&&!isMoving()&&!cue.dropping;
+  cueGroup.visible=ready; guideLine.visible=ready; guideDot.visible=ready;
+  if(!ready) return;
+  const y=CENTER_Y, right=new THREE.Vector3(aimDir.z,0,-aimDir.x), up=new THREE.Vector3(0,1,0);
+  const tipPoint=cue.pos.clone().addScaledVector(up,spinOffset.y*TABLE.ballR*.82).addScaledVector(right,spinOffset.x*TABLE.ballR*.82);
+  const len=1.48, draw=charging?power*.42:.075;
+  const butt=tipPoint.clone().addScaledVector(aimDir,-len-draw);
+  cueGroup.position.copy(butt);
+  cueGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), tipPoint.clone().sub(butt).normalize());
+  const start=cue.pos.clone().addScaledVector(aimDir,TABLE.ballR*1.02); start.y=y;
+  const hit=firstContact(cue.pos.clone(),aimDir), end=cue.pos.clone().addScaledVector(aimDir,hit.t); end.y=y;
+  guideLine.geometry.dispose(); guideLine.geometry=new THREE.BufferGeometry().setFromPoints([start,end]); guideLine.computeLineDistances(); guideLine.material.needsUpdate=true;
+  guideDot.position.copy(end);
+}
+
+/* ---------- physics ---------- */
+const upVec=new THREE.Vector3(0,1,0);
+function isMoving(){
+  for(const b of balls){ if(b.dropping) return true; if(b.active && b.vel.lengthSq()>0.000035) return true; }
+  return false;
+}
+function nearestPocket(p){ let best=null,bd=Infinity; for(const pk of pockets){ const dx=p.x-pk.x,dz=p.z-pk.z,d=Math.sqrt(dx*dx+dz*dz); if(d<bd){bd=d;best=pk;} } return {pocket:best,dist:bd}; }
+function startDrop(b,pk){
+  b.dropping=true; b.dropT=0; b.dropFrom.copy(b.pos); b.dropTo.set(pk.x,TABLE.feltY-.34,pk.z); b.vel.multiplyScalar(.08); b.ang.multiplyScalar(.35);
+  if(b.id===0){ cueScratch=true; flashMessage('Scratch — cue ball returns behind the head string'); }
+  else if(!pocketed.includes(b.number)){ pocketed.push(b.number); flashMessage(b.number+' ball down'); }
+  updateHUD();
+}
+function physicsStep(h){
+  const muSlide=.235, muRoll=.011, I=.4*TABLE.ballMass*TABLE.ballR*TABLE.ballR;
+  for(const b of balls){
+    if(!b.active) continue;
+    if(b.dropping){
+      b.dropT+=h; const k=Math.min(1,b.dropT/.72), e=1-Math.pow(1-k,3);
+      b.pos.lerpVectors(b.dropFrom,b.dropTo,e); b.pos.y=b.dropFrom.y-(b.dropFrom.y-b.dropTo.y)*e - Math.sin(k*Math.PI)*.035;
+      b.mesh.scale.setScalar(Math.max(.22,1-k*.78)); b.mesh.position.copy(b.pos);
+      if(k>=1){ b.active=false; b.mesh.visible=false; }
+      continue;
+    }
+    /* cloth: sliding friction then rolling resistance */
+    const v=b.vel, w=b.ang;
+    const s=new THREE.Vector3(v.x + w.z*TABLE.ballR, 0, v.z - w.x*TABLE.ballR); /* v + omega × (0,-R,0) */
+    const slip=Math.hypot(s.x,s.z);
+    if(slip>0.012){
+      const sx=s.x/slip, sz=s.z/slip, a=muSlide*TABLE.gravity*h;
+      b.vel.x-=sx*a; b.vel.z-=sz*a;
+      const K=2.5*muSlide*TABLE.gravity*h/TABLE.ballR;
+      b.ang.x+=K*sz; b.ang.z-=K*sx; b.ang.y*=(1-.015*h);
+    } else {
+      const sp=Math.hypot(v.x,v.z);
+      if(sp>0){ const dec=muRoll*TABLE.gravity*h; const ns=Math.max(0,sp-dec); b.vel.x*=ns/sp; b.vel.z*=ns/sp; }
+      const tx=v.z/TABLE.ballR, tz=-v.x/TABLE.ballR, blend=Math.min(1,h/.075);
+      b.ang.x+=(tx-b.ang.x)*blend; b.ang.z+=(tz-b.ang.z)*blend; b.ang.y*=(1-.22*h);
+      if(sp<.006 && Math.abs(b.ang.y)<.05){ b.vel.set(0,0,0); b.ang.set(0,0,0); }
+    }
+    b.pos.x+=b.vel.x*h; b.pos.y=CENTER_Y; b.pos.z+=b.vel.z*h;
+    /* integrate orientation from angular velocity */
+    const wlen=b.ang.length();
+    if(wlen>1e-6){ const axis=b.ang.clone().normalize(); const dq=new THREE.Quaternion().setFromAxisAngle(axis,wlen*h); b.mesh.quaternion.premultiply(dq); }
+    b.mesh.position.copy(b.pos);
+    /* pockets are checked before rails so balls can cross the mouth */
+    const near=nearestPocket(b.pos);
+    if(near.dist < near.pocket.r*.92){ startDrop(b,near.pocket); continue; }
+    /* cushion rebounds with english-sensitive tangential kick */
+    cushionBounce(b,'x'); cushionBounce(b,'z');
+  }
+  /* ball-ball collisions */
+  for(let i=0;i<balls.length;i++){
+    const a=balls[i]; if(!a.active||a.dropping) continue;
+    for(let j=i+1;j<balls.length;j++){
+      const b=balls[j]; if(!b.active||b.dropping) continue;
+      const dx=b.pos.x-a.pos.x, dz=b.pos.z-a.pos.z, rr=2*TABLE.ballR, d2=dx*dx+dz*dz;
+      if(d2>=rr*rr || d2===0) continue;
+      const d=Math.sqrt(d2), nx=dx/d, nz=dz/d, overlap=rr-d;
+      a.pos.x-=nx*overlap*.5; a.pos.z-=nz*overlap*.5; b.pos.x+=nx*overlap*.5; b.pos.z+=nz*overlap*.5; a.pos.y=b.pos.y=CENTER_Y;
+      const rvx=b.vel.x-a.vel.x, rvz=b.vel.z-a.vel.z, vn=rvx*nx+rvz*nz;
+      if(vn<0){
+        const e=.925, jimp=-(1+e)*vn*.5;
+        a.vel.x-=nx*jimp; a.vel.z-=nz*jimp; b.vel.x+=nx*jimp; b.vel.z+=nz*jimp;
+        /* tiny tangential throw for cutting balls — no energy created */
+        const tx=-nz, tz=nx, relT=rvx*tx+rvz*tz, throwImp=relT*.018;
+        a.vel.x+=tx*throwImp; a.vel.z+=tz*throwImp; b.vel.x-=tx*throwImp; b.vel.z-=tz*throwImp;
+        /* clipping a ball leaks a little vertical-axis english into cue tangential motion */
+        if(a.id===0||b.id===0){ const cue=a.id===0?a:b, other=cue===a?b:a; const sign=cue===a?-1:1; cue.vel.x+=tx*(cue.ang.y*TABLE.ballR*.018*sign); cue.vel.z+=tz*(cue.ang.y*TABLE.ballR*.018*sign); cue.ang.y*=.82; other.ang.y+=cue.ang.y*.08; }
+      }
+      a.mesh.position.copy(a.pos); b.mesh.position.copy(b.pos);
+    }
+  }
+  /* respawn scratched cue ball once everything is quiet */
+  if(cueScratch && !isMoving()){
+    const cue=balls[0]; let z=0, found=false;
+    for(const cand of [0,.14,-.14,.26,-.26,.38,-.38]){ let ok=true; for(const b of balls){ if(b.id===0||!b.active||b.dropping) continue; if(Math.hypot(b.pos.x-TABLE.headX,b.pos.z-cand)<TABLE.ballR*2.25){ok=false;break;} } if(ok){z=cand;found=true;break;} }
+    cue.pos.set(TABLE.headX,CENTER_Y,found?z:0); cue.vel.set(0,0,0); cue.ang.set(0,0,0); cue.active=true; cue.dropping=false; cue.mesh.visible=true; cue.mesh.scale.setScalar(1); cue.mesh.position.copy(cue.pos); cue.mesh.quaternion.identity(); cueScratch=false; flashMessage('Cue ball behind the head string'); updateHUD();
+  }
+  for(const b of balls){ b.mesh.position.copy(b.pos); }
+  updateBlobShadows();
+}
+function cushionBounce(b,axis){
+  const r=TABLE.ballR;
+  if(axis==='x'){
+    if(b.pos.x > TABLE.limitX && b.vel.x > 0){ b.pos.x=TABLE.limitX; wallKick(b,-1,0,0,1,0,0); }
+    else if(b.pos.x < -TABLE.limitX && b.vel.x < 0){ b.pos.x=-TABLE.limitX; wallKick(b,1,0,0,-1,0,0); }
+  } else {
+    if(b.pos.z > TABLE.limitZ && b.vel.z > 0){ b.pos.z=TABLE.limitZ; wallKick(b,0,0,-1,0,0,1); }
+    else if(b.pos.z < -TABLE.limitZ && b.vel.z < 0){ b.pos.z=-TABLE.limitZ; wallKick(b,0,0,1,0,0,-1); }
+  }
+}
+function wallKick(b,nx,ny,nz,tx,ty,tz){
+  const vn=b.vel.x*nx+b.vel.z*nz; if(vn>=0) return;       /* moving into rail */
+  const e=.765; b.vel.x-=(1+e)*vn*nx; b.vel.z-=(1+e)*vn*nz;
+  /* tangential English: vertical-axis spin rubs the cushion and bends the rebound */
+  const vt=b.vel.x*tx+b.vel.z*tz;
+  const english=b.ang.y*TABLE.ballR;
+  const slip=vt+english, grip=.42;
+  b.vel.x-=tx*slip*grip*.38; b.vel.z-=tz*slip*grip*.38;
+  b.ang.y*=.46; b.ang.x*=.82; b.ang.z*=.82;
+  /* small follow/draw kick into rail bleed */
+  b.vel.x*=.985; b.vel.z*=.985;
+}
+function applyShot(pow){
+  const cue=balls[0]; if(!cue.active||cue.dropping||isMoving()) return;
+  const speed=2.15+pow*6.35, dir=aimDir.clone().setY(0).normalize();
+  cue.vel.copy(dir).multiplyScalar(speed);
+  const rollAxis=new THREE.Vector3(dir.z,0,-dir.x).normalize(); /* up × dir normalized */
+  cue.ang.copy(rollAxis).multiplyScalar(speed/TABLE.ballR*(0.18+spinOffset.y*1.22));
+  cue.ang.y=spinOffset.x*speed/TABLE.ballR*.34;
+  shots++; flashMessage(pow>.82?'Full break!':'Shot '+shots); charging=false; power=0; updateHUD(); updateCueAndGuide();
+}
+function flashMessage(msg){ const el=document.getElementById('message'); el.textContent=msg; }
+function updateHUD(){
+  document.getElementById('shots').textContent=String(shots);
+  document.getElementById('state').textContent=isMoving()?'Rolling…':(cueScratch?'Respawn':'Ready');
+  const pc=document.getElementById('pocketed'); pc.innerHTML='';
+  for(const n of pocketed.slice().sort((a,b)=>a-b)){
+    const d=document.createElement('div'); const stripe=n>=9; d.className='chip'+(stripe?' stripe':''); d.title='Ball '+n;
+    const col=BALL_COLORS[n]||'#eee';
+    if(stripe) d.style.background=`repeating-linear-gradient(180deg,#f5efdf 0 28%,${col} 28% 72%,#f5efdf 72% 100%)`; else d.style.background=col;
+    d.textContent=n; pc.appendChild(d);
+  }
+}
+
+/* ---------- input ---------- */
+function drawSpinDiagram(){
+  const c=document.getElementById('spinCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height; ctx.clearRect(0,0,w,h);
+  const g=ctx.createRadialGradient(w*.38,h*.36,8,w/2,h/2,w*.46); g.addColorStop(0,'#fffdf2'); g.addColorStop(.55,'#e8dfc8'); g.addColorStop(1,'#8f846f'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(w/2,h/2,62,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(40,25,10,.55)'; ctx.lineWidth=5; ctx.stroke();
+  const px=w/2+spinOffset.x*41, py=h/2-spinOffset.y*41; ctx.fillStyle='#d1261f'; ctx.shadowColor='#ff6a4a'; ctx.shadowBlur=15; ctx.beginPath(); ctx.arc(px,py,12,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0; ctx.strokeStyle='#6d0904'; ctx.lineWidth=3; ctx.stroke();
+  ctx.fillStyle='#f0dfb2'; ctx.font='bold 15px Georgia'; ctx.textAlign='center'; ctx.fillText('W/S',w/2,20); ctx.fillText('A / D',w/2,h-8);
+}
+function keySpin(k){
+  const step=.28;
+  if(k==='w'||k==='W') spinOffset.y=THREE.MathUtils.clamp(spinOffset.y+step,-1,1);
+  else if(k==='s'||k==='S') spinOffset.y=THREE.MathUtils.clamp(spinOffset.y-step,-1,1);
+  else if(k==='a'||k==='A') spinOffset.x=THREE.MathUtils.clamp(spinOffset.x-step,-1,1);
+  else if(k==='d'||k==='D') spinOffset.x=THREE.MathUtils.clamp(spinOffset.x+step,-1,1);
+  else return false;
+  drawSpinDiagram(); updateCueAndGuide(); return true;
+}
+window.addEventListener('keydown',e=>{
+  if(keySpin(e.key)){ e.preventDefault(); return; }
+  if(e.key==='r'||e.key==='R'){ appMode='interactive'; controls.enabled=true; resetToRack(); flashMessage('Re-racked · break away'); document.getElementById('recordBtn').disabled=false; updateCueAndGuide(); }
+});
+renderer.domElement.addEventListener('pointermove',e=>{ if(appMode==='interactive') setAimFromClient(e.clientX,e.clientY); });
+renderer.domElement.addEventListener('pointerdown',e=>{
+  if(e.button!==0||appMode!=='interactive') return;
+  const cue=balls[0]; if(isMoving()||!cue.active||cue.dropping) { flashMessage('Wait for the balls to stop'); return; }
+  charging=true; chargeStart=performance.now(); power=0; setAimFromClient(e.clientX,e.clientY);
+});
+window.addEventListener('pointerup',e=>{ if(e.button!==0||!charging) return; applyShot(THREE.MathUtils.clamp(power,0,1)); updateHUD(); updateCueAndGuide(); });
+window.addEventListener('blur',()=>{ if(charging){ charging=false; power=0; } });
+
+/* ---------- showcase: deterministic 12 s camera + scripted break ---------- */
+const showcaseCam=[
+  {t:0.00,pos:[4.7,3.55,4.9],tgt:[0,.75,0]},
+  {t:1.45,pos:[2.55,1.85,2.35],tgt:[-.62,.8,0]},
+  {t:2.45,pos:[1.18,1.22,1.33],tgt:[-.58,.8,0]},
+  {t:2.92,pos:[.96,1.03,1.04],tgt:[.15,.78,0]},
+  {t:3.25,pos:[.72,.92,.78],tgt:[.55,.78,0]},
+  {t:5.10,pos:[.02,1.32,-2.05],tgt:[.62,.78,.04]},
+  {t:6.95,pos:[-2.35,1.55,1.95],tgt:[.58,.77,.08]},
+  {t:8.55,pos:[.18,2.75,.34],tgt:[.82,.8,-.05]},
+  {t:10.15,pos:[3.25,2.18,-2.65],tgt:[0,.73,0]},
+  {t:12.00,pos:[4.8,3.65,5.25],tgt:[0,.74,0]}
+];
+function smooth(u){ u=THREE.MathUtils.clamp(u,0,1); return u*u*(3-2*u); }
+function showcaseCamera(t){
+  let a=showcaseCam[0], b=showcaseCam[showcaseCam.length-1];
+  for(let i=0;i<showcaseCam.length-1;i++){ if(t>=showcaseCam[i].t && t<=showcaseCam[i+1].t){ a=showcaseCam[i]; b=showcaseCam[i+1]; break; } }
+  const u=smooth((t-a.t)/Math.max(1e-6,b.t-a.t));
+  const pos=new THREE.Vector3().fromArray(a.pos).lerp(new THREE.Vector3().fromArray(b.pos),u);
+  const tgt=new THREE.Vector3().fromArray(a.tgt).lerp(new THREE.Vector3().fromArray(b.tgt),u);
+  camera.position.copy(pos); camera.lookAt(tgt);
+}
+function showcaseBreak(){
+  const cue=balls[0], dir=new THREE.Vector3(1,0,0);
+  cue.vel.copy(dir).multiplyScalar(7.7);
+  const rollAxis=new THREE.Vector3(0,0,-1); /* up × +x */
+  cue.ang.copy(rollAxis).multiplyScalar(7.7/TABLE.ballR*.92); cue.ang.y=.48*7.7/TABLE.ballR*.3;
+  shots=1; pocketed=[]; cueScratch=false;
+}
+function seekShowcase(t){
+  appMode='showcase'; controls.enabled=false; t=THREE.MathUtils.clamp(t,0,12);
+  resetToRack(); const fixed=1/240, shotAt=2.92; let sim=0, fired=false;
+  while(sim < t-1e-9){
+    const h=Math.min(fixed,t-sim);
+    if(!fired && sim+h>=shotAt){ showcaseBreak(); fired=true; }
+    physicsStep(h); sim+=h;
+  }
+  if(!fired && t>=shotAt){ showcaseBreak(); fired=true; }
+  showcaseCamera(t); updateBlobShadows(); updateHUD(); renderFrame(); updateBench();
+}
+window.showcase={ duration:12, seek(t){ seekShowcase(t); } };
+const recordBtn=document.getElementById('recordBtn');
+recordBtn.addEventListener('click',()=>{
+  if(!renderer.domElement.captureStream || !window.MediaRecorder){ flashMessage('MediaRecorder not supported in this browser'); return; }
+  recordBtn.disabled=true; recordBtn.textContent='Recording…'; appMode='showcase'; controls.enabled=false;
+  const stream=renderer.domElement.captureStream(60);
+  let mime='video/webm;codecs=vp9'; if(!MediaRecorder.isTypeSupported(mime)) mime=MediaRecorder.isTypeSupported('video/webm')?'video/webm':'';
+  const rec=new MediaRecorder(stream, mime?{mimeType:mime,videoBitsPerSecond:12000000}:{videoBitsPerSecond:12000000});
+  const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size)chunks.push(e.data); };
+  rec.onstop=()=>{
+    const blob=new Blob(chunks,{type:mime||'video/webm'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url; a.download='billiard-hall-showcase.webm'; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(url); a.remove();},800);
+    recordBtn.disabled=false; recordBtn.textContent='● Record video'; appMode='interactive'; controls.enabled=true; resetToRack(); flashMessage('Saved showcase.webm · R to re-rack'); updateCueAndGuide();
+  };
+  rec.start(250); const start=performance.now();
+  function frame(){ const t=(performance.now()-start)/1000; if(t>=12){ window.showcase.seek(12); rec.stop(); return; } window.showcase.seek(t); requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+});
+
+/* ---------- resize / render / main loop ---------- */
+function onResize(){
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); if(composer) composer.setSize(innerWidth,innerHeight); if(bloomPass) bloomPass.setSize(innerWidth,innerHeight);
+}
+window.addEventListener('resize',onResize);
+function renderFrame(){ if(composer) composer.render(); else renderer.render(scene,camera); }
+function updateBench(){ bench.balls=balls; bench.pocketed=pocketed.slice(); bench.moving=isMoving(); bench.shots=shots; }
+resetToRack(); drawSpinDiagram(); updateCueAndGuide();
+const clock=new THREE.Clock(); let acc=0; const fixed=1/240;
+function animate(){
+  requestAnimationFrame(animate);
+  if(appMode==='interactive'){
+    const dt=Math.min(.033,clock.getDelta()); acc+=dt;
+    while(acc>=fixed){ physicsStep(fixed); acc-=fixed; }
+    if(charging){ power=Math.min(1,(performance.now()-chargeStart)/1150); document.getElementById('power').style.width=(power*100).toFixed(1)+'%'; }
+    else document.getElementById('power').style.width='0%';
+    controls.update(); updateCueAndGuide(); updateHUD();
+  } else {
+    clock.getDelta();
+    document.getElementById('power').style.width='0%';
+  }
+  /* lamp micro-breathe and warm pool shimmer */
+  const t=performance.now()*.001; warmPoint.intensity=.72+Math.sin(t*1.7)*.035; beam.material.opacity=.068+Math.sin(t*1.7)*.008;
+  renderFrame(); updateBench();
+}
+animate();
+</script>
+</body>
+</html>

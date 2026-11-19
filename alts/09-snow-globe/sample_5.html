@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Snow Globe — A Winter Windowsill</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #14100d;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; touch-action: none; }
+
+  #hud-title {
+    position: fixed; top: 22px; left: 28px; z-index: 10;
+    color: #f5e9d5; pointer-events: none;
+    text-shadow: 0 2px 14px rgba(0,0,0,0.75);
+  }
+  #hud-title h1 {
+    margin: 0; font-size: 26px; font-weight: 400;
+    letter-spacing: 0.14em; font-variant: small-caps;
+    color: #f8ecd8;
+  }
+  #hud-title p {
+    margin: 4px 0 0 2px; font-size: 11.5px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: #cbb287;
+  }
+  #hud-hints {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 10; pointer-events: none; white-space: nowrap;
+    color: #e9dcc4; font-size: 12.5px; letter-spacing: 0.06em;
+    background: rgba(20, 14, 10, 0.55); border: 1px solid rgba(217, 183, 118, 0.35);
+    border-radius: 999px; padding: 8px 22px;
+    backdrop-filter: blur(6px); text-shadow: 0 1px 4px #000;
+  }
+  #hud-hints b { color: #ffd98a; font-weight: 600; }
+  #hud-stats {
+    position: fixed; bottom: 20px; left: 28px; z-index: 10; pointer-events: none;
+    color: #b9a982; font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.05em; line-height: 1.7;
+    text-shadow: 0 1px 4px #000;
+  }
+  #hud-stats span { color: #efe2bd; }
+  #recordBtn {
+    position: fixed; top: 22px; right: 28px; z-index: 20;
+    font-family: Georgia, serif; font-size: 13px; letter-spacing: 0.12em;
+    font-variant: small-caps; color: #ffd98a;
+    background: linear-gradient(180deg, rgba(64,40,22,0.9), rgba(38,22,12,0.9));
+    border: 1px solid rgba(255, 217, 138, 0.55); border-radius: 10px;
+    padding: 12px 20px; cursor: pointer;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.15);
+    transition: all 0.25s ease;
+  }
+  #recordBtn:hover { color: #ffe9b8; border-color: #ffd98a; box-shadow: 0 4px 26px rgba(255,200,100,0.25), inset 0 1px 0 rgba(255,255,255,0.2); }
+  #recordBtn:disabled { opacity: 0.75; cursor: default; }
+  #recordBtn.recording { color: #ff9a7a; border-color: #ff8a6a; animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 12px rgba(255,120,80,0.35);} 50% { box-shadow: 0 0 30px rgba(255,120,80,0.6);} }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud-title">
+  <h1>The Snow Globe</h1>
+  <p>A Winter on the Windowsill</p>
+</div>
+
+<button id="recordBtn" title="Plays the 12-second scripted showcase and saves it as .webm">⏺&nbsp; Record Video</button>
+
+<div id="hud-hints"><b>Drag the globe</b> to shake &nbsp;·&nbsp; <b>Space</b> wind music box &nbsp;·&nbsp; <b>N</b> day / night &nbsp;·&nbsp; <b>Orbit</b> with empty space</div>
+<div id="hud-stats">flakes <span id="stFlakes">6000</span><br>airborne <span id="stAir">0</span><br>shake energy <span id="stShake">0.00</span></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+/* ============================================================
+   THE SNOW GLOBE — an interactive miniature winter
+   ============================================================ */
+
+// ---------- constants ----------
+const SILL_TOP = 2.3;
+const RIG_BASE = new THREE.Vector3(0, SILL_TOP, -0.15);
+const SPH_Y = 2.02;                 // sphere center in rig-local coords
+const GLOBE_R = 1.66;               // inner collision radius
+const GLASS_R = 1.74;
+const GROUND_Y = 1.18;              // village platform top (rig-local)
+const FLAKES = 6000;
+const SHOWCASE_DURATION = 12.0;
+const FIXED_DT = 1 / 60;
+
+// ---------- top-level scene / camera / renderer / controls ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14100d);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 60);
+camera.position.set(6.4, 4.7, 7.7);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 3.9, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.enablePan = false;
+controls.minDistance = 3.2;
+controls.maxDistance = 13;
+controls.maxPolarAngle = 1.5;
+controls.minPolarAngle = 0.35;
+controls.update();
+
+// environment reflections (procedural, no downloads)
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.06).texture;
+
+// ---------- seeded RNG ----------
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- canvas texture helpers ----------
+function makeCanvas(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp01 = v => Math.max(0, Math.min(1, v));
+const smooth = t => t * t * (3 - 2 * t);
+
+// --- wood grain ---
+function drawWood(ctx, w, h, base, streak, dark) {
+  ctx.fillStyle = base; ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 90; i++) {
+    ctx.strokeStyle = i % 3 ? streak : dark;
+    ctx.globalAlpha = 0.12 + Math.random() * 0.22;
+    ctx.lineWidth = 1 + Math.random() * 3.5;
+    ctx.beginPath();
+    const y = Math.random() * h;
+    ctx.moveTo(0, y);
+    for (let x = 0; x <= w; x += 16) {
+      ctx.lineTo(x, y + Math.sin(x * 0.02 + i) * 6 + (Math.random() - 0.5) * 4);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+const woodTex = makeCanvas(512, 512, (c, w, h) => drawWood(c, w, h, '#5a3b24', '#3d2413', '#2a1809'));
+woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping;
+const floorTex = makeCanvas(1024, 1024, (c, w, h) => {
+  drawWood(c, w, h, '#4b3320', '#33200f', '#241407');
+  c.globalAlpha = 0.85; c.strokeStyle = '#1c0f06'; c.lineWidth = 5;
+  const rows = 6;
+  for (let r = 0; r <= rows; r++) { c.beginPath(); c.moveTo(0, r * h / rows); c.lineTo(w, r * h / rows); c.stroke(); }
+  for (let r = 0; r < rows; r++) {
+    const off = (r * 733) % w;
+    c.beginPath(); c.moveTo(off, r * h / rows); c.lineTo(off, (r + 1) * h / rows); c.stroke();
+  }
+  c.globalAlpha = 1;
+});
+floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+floorTex.repeat.set(4, 4);
+
+// --- plaster wall ---
+const wallTex = makeCanvas(512, 512, (c, w, h) => {
+  c.fillStyle = '#6e5f50'; c.fillRect(0, 0, w, h);
+  for (let i = 0; i < 9000; i++) {
+    c.globalAlpha = 0.05 + Math.random() * 0.07;
+    c.fillStyle = Math.random() < 0.5 ? '#867566' : '#584c40';
+    c.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 4, 2 + Math.random() * 4);
+  }
+  c.globalAlpha = 1;
+});
+wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+wallTex.repeat.set(6, 3);
+
+// --- snow noise (ground / drifts) ---
+const snowTex = makeCanvas(256, 256, (c, w, h) => {
+  c.fillStyle = '#eef3f8'; c.fillRect(0, 0, w, h);
+  for (let i = 0; i < 2600; i++) {
+    c.globalAlpha = 0.1 + Math.random() * 0.25;
+    c.fillStyle = Math.random() < 0.6 ? '#cdd9e6' : '#ffffff';
+    c.beginPath(); c.arc(Math.random() * w, Math.random() * h, 0.6 + Math.random() * 2.2, 0, 7); c.fill();
+  }
+  c.globalAlpha = 1;
+});
+snowTex.wrapS = snowTex.wrapT = THREE.RepeatWrapping;
+
+// --- flake sprite ---
+const flakeSprite = makeCanvas(64, 64, (c) => {
+  const g = c.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.35, 'rgba(255,255,255,0.95)');
+  g.addColorStop(0.75, 'rgba(240,248,255,0.45)');
+  g.addColorStop(1, 'rgba(240,248,255,0)');
+  c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+  c.strokeStyle = 'rgba(255,255,255,0.9)'; c.lineWidth = 1.4;
+  for (let k = 0; k < 6; k++) {
+    const a = k * Math.PI / 3;
+    c.beginPath(); c.moveTo(32, 32); c.lineTo(32 + Math.cos(a) * 15, 32 + Math.sin(a) * 15); c.stroke();
+  }
+});
+
+// --- steam sprite ---
+const steamTex = makeCanvas(64, 64, (c) => {
+  const g = c.createRadialGradient(32, 32, 4, 32, 32, 30);
+  g.addColorStop(0, 'rgba(255,255,255,0.75)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+});
+
+// --- frost for the window panes ---
+const frostTex = makeCanvas(512, 512, (c, w, h) => {
+  c.clearRect(0, 0, w, h);
+  // soft haze overall
+  const haze = c.createRadialGradient(w/2, h/2, h*0.18, w/2, h/2, h*0.75);
+  haze.addColorStop(0, 'rgba(235,245,252,0.06)');
+  haze.addColorStop(0.75, 'rgba(235,245,252,0.35)');
+  haze.addColorStop(1, 'rgba(240,248,255,0.92)');
+  c.fillStyle = haze; c.fillRect(0, 0, w, h);
+  // crystalline feathers from the edges
+  const rng = mulberry32(777);
+  c.lineCap = 'round';
+  for (let i = 0; i < 260; i++) {
+    const edge = Math.floor(rng() * 4);
+    let x = edge === 0 ? 0 : edge === 1 ? w : rng() * w;
+    let y = edge === 2 ? 0 : edge === 3 ? h : rng() * h;
+    let ang = Math.atan2(h/2 - y, w/2 - x) + (rng() - 0.5) * 0.9;
+    const len = 30 + rng() * 150;
+    c.strokeStyle = 'rgba(245,252,255,' + (0.25 + rng() * 0.5) + ')';
+    c.lineWidth = 1 + rng() * 3.2;
+    c.beginPath(); c.moveTo(x, y);
+    let px = x, py = y;
+    for (let s = 0; s < 6; s++) {
+      ang += (rng() - 0.5) * 0.7;
+      px += Math.cos(ang) * len / 6; py += Math.sin(ang) * len / 6;
+      c.lineTo(px, py);
+      // side barbs
+      c.moveTo(px, py);
+      c.lineTo(px + Math.cos(ang + 0.9) * 14 * rng(), py + Math.sin(ang + 0.9) * 14 * rng());
+      c.moveTo(px, py);
+    }
+    c.stroke();
+  }
+  // frost speckle
+  for (let i = 0; i < 1500; i++) {
+    const dx = rng() - 0.5, dy = rng() - 0.5;
+    const d = Math.sqrt(dx*dx + dy*dy) * 2;
+    if (rng() > d * 1.15) continue;
+    c.fillStyle = 'rgba(250,253,255,' + (0.3 + rng() * 0.6) + ')';
+    c.beginPath(); c.arc(rng() * w, rng() * h, 0.5 + rng() * 1.8, 0, 7); c.fill();
+  }
+});
+frostTex.wrapS = frostTex.wrapT = THREE.ClampToEdgeWrapping;
+
+// --- book cover ---
+const bookTex = makeCanvas(512, 640, (c, w, h) => {
+  c.fillStyle = '#6e1f2a'; c.fillRect(0, 0, w, h);
+  const g = c.createLinearGradient(0, 0, w, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0.14)'); g.addColorStop(0.15, 'rgba(255,255,255,0)'); g.addColorStop(0.9, 'rgba(0,0,0,0.25)'); g.addColorStop(1, 'rgba(0,0,0,0.4)');
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+  c.strokeStyle = '#d8b25c'; c.lineWidth = 6;
+  c.strokeRect(36, 36, w - 72, h - 72);
+  c.lineWidth = 2; c.strokeRect(52, 52, w - 104, h - 104);
+  c.fillStyle = '#e6c87a';
+  c.textAlign = 'center';
+  c.font = '600 64px Georgia, serif';
+  c.fillText('WINTER', w / 2, 200);
+  c.fillText('TALES', w / 2, 275);
+  // snowflake emblem
+  c.save(); c.translate(w / 2, 410); c.strokeStyle = '#e6c87a'; c.lineWidth = 5;
+  for (let k = 0; k < 6; k++) {
+    c.rotate(Math.PI / 3);
+    c.beginPath(); c.moveTo(0, -14); c.lineTo(0, -72);
+    c.moveTo(0, -48); c.lineTo(-16, -60); c.moveTo(0, -48); c.lineTo(16, -60); c.stroke();
+  }
+  c.restore();
+  c.font = 'italic 26px Georgia, serif'; c.fillText('· a frosty anthology ·', w / 2, h - 90);
+});
+
+// --- mug wrap ---
+const mugTex = makeCanvas(512, 256, (c, w, h) => {
+  c.fillStyle = '#f2e7d5'; c.fillRect(0, 0, w, h);
+  c.fillStyle = '#8e2f32'; c.fillRect(0, h * 0.36, w, h * 0.3);
+  c.fillStyle = '#d8b25c'; c.fillRect(0, h * 0.36, w, 8); c.fillRect(0, h * 0.66 - 8, w, 8);
+  c.fillStyle = '#f2e7d5'; c.font = '28px Georgia'; c.textAlign = 'center';
+  for (let x = 40; x < w; x += 80) c.fillText('❄', x, h * 0.56);
+});
+mugTex.wrapS = THREE.RepeatWrapping;
+
+// --- frozen pond with skate scratches ---
+const pondTex = makeCanvas(256, 256, (c, w, h) => {
+  const g = c.createRadialGradient(w/2, h/2, 10, w/2, h/2, w/2);
+  g.addColorStop(0, '#a8d4ee'); g.addColorStop(0.6, '#7fb4dc'); g.addColorStop(1, '#5d8fb8');
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+  c.strokeStyle = 'rgba(255,255,255,0.55)';
+  const rng = mulberry32(4242);
+  for (let i = 0; i < 40; i++) {
+    c.lineWidth = 0.6 + rng() * 1.6;
+    c.globalAlpha = 0.3 + rng() * 0.5;
+    c.beginPath();
+    const cx = rng() * w, cy = rng() * h, r = 12 + rng() * 60, a0 = rng() * 6.28;
+    c.arc(cx, cy, r, a0, a0 + 0.6 + rng() * 1.6);
+    c.stroke();
+  }
+  c.globalAlpha = 1;
+});
+
+// --- sky + street backdrops (day & night) ---
+function drawBackdrop(night) {
+  return makeCanvas(2048, 1024, (c, w, h) => {
+    const horizon = h * 0.78;
+    const sky = c.createLinearGradient(0, 0, 0, horizon);
+    if (!night) {
+      sky.addColorStop(0, '#9fbecd'); sky.addColorStop(0.55, '#c3d5da');
+      sky.addColorStop(0.9, '#e8e2d2'); sky.addColorStop(1, '#f6e6cf');
+    } else {
+      sky.addColorStop(0, '#04070f'); sky.addColorStop(0.6, '#0b1626');
+      sky.addColorStop(0.92, '#16233a'); sky.addColorStop(1, '#33261f');
+    }
+    c.fillStyle = sky; c.fillRect(0, 0, w, horizon);
+    const rng = mulberry32(night ? 9001 : 1337);
+    if (!night) {
+      // hazy sun
+      const sun = c.createRadialGradient(w * 0.7, h * 0.24, 8, w * 0.7, h * 0.24, 190);
+      sun.addColorStop(0, 'rgba(255,250,225,0.95)'); sun.addColorStop(0.25, 'rgba(255,246,214,0.55)'); sun.addColorStop(1, 'rgba(255,246,214,0)');
+      c.fillStyle = sun; c.fillRect(0, 0, w, horizon);
+    } else {
+      // stars
+      for (let i = 0; i < 340; i++) {
+        c.globalAlpha = 0.3 + rng() * 0.7;
+        c.fillStyle = '#dfe8ff';
+        c.fillRect(rng() * w, rng() * horizon * 0.55, 1.5 + rng() * 1.5, 1.5 + rng() * 1.5);
+      }
+      c.globalAlpha = 1;
+      // moon + glow
+      const mx = w * 0.72, my = h * 0.18;
+      const mg = c.createRadialGradient(mx, my, 6, mx, my, 150);
+      mg.addColorStop(0, 'rgba(226,236,255,0.9)'); mg.addColorStop(0.2, 'rgba(200,215,245,0.35)'); mg.addColorStop(1, 'rgba(200,215,245,0)');
+      c.fillStyle = mg; c.fillRect(0, 0, w, horizon);
+      c.fillStyle = '#eef2fa'; c.beginPath(); c.arc(mx, my, 26, 0, 7); c.fill();
+      c.fillStyle = '#c9d2e2'; c.beginPath(); c.arc(mx - 8, my + 4, 5, 0, 7); c.arc(mx + 9, my - 6, 3.6, 0, 7); c.fill();
+    }
+    // distant hills
+    c.fillStyle = night ? '#0d1826' : '#9db4bc';
+    c.beginPath(); c.moveTo(0, horizon);
+    for (let x = 0; x <= w; x += 24) c.lineTo(x, horizon - 26 - Math.sin(x * 0.004 + 2) * 34 - Math.sin(x * 0.011) * 12);
+    c.lineTo(w, horizon); c.fill();
+    // far town: rooftops & church spire
+    const farCol = night ? '#070d17' : '#7d929c';
+    c.fillStyle = farCol;
+    let x = 0;
+    while (x < w) {
+      const bw = 60 + rng() * 150, bh = 40 + rng() * 130;
+      c.fillRect(x, horizon - bh, bw, bh);
+      if (rng() < 0.32) { // gable
+        c.beginPath(); c.moveTo(x - 6, horizon - bh); c.lineTo(x + bw / 2, horizon - bh - 34 - rng() * 26); c.lineTo(x + bw + 6, horizon - bh); c.fill();
+      }
+      if (rng() < 0.14) { // church spire
+        const sx = x + bw * 0.5;
+        c.fillRect(sx - 12, horizon - bh - 60, 24, 62);
+        c.beginPath(); c.moveTo(sx - 17, horizon - bh - 60); c.lineTo(sx, horizon - bh - 128 - rng() * 40); c.lineTo(sx + 17, horizon - bh - 60); c.fill();
+      }
+      x += bw + 14 + rng() * 60;
+    }
+    // lit windows far away (night)
+    if (night) {
+      for (let i = 0; i < 240; i++) {
+        c.globalAlpha = 0.35 + rng() * 0.65;
+        c.fillStyle = rng() < 0.8 ? '#ffc978' : '#ffe9b0';
+        c.fillRect(rng() * w, horizon - 10 - rng() * 130, 4 + rng() * 5, 5 + rng() * 6);
+      }
+      c.globalAlpha = 1;
+    }
+    // street band
+    const street = c.createLinearGradient(0, horizon, 0, h);
+    if (!night) { street.addColorStop(0, '#b9c4c9'); street.addColorStop(0.15, '#dfe6e9'); street.addColorStop(1, '#eef1f2'); }
+    else { street.addColorStop(0, '#11161f'); street.addColorStop(0.2, '#39424f'); street.addColorStop(1, '#141a24'); }
+    c.fillStyle = street; c.fillRect(0, horizon, w, h - horizon);
+    // snow-covered road sheen
+    if (night) {
+      const sheen = c.createLinearGradient(0, horizon, 0, h);
+      sheen.addColorStop(0.12, 'rgba(160,180,215,0.28)'); sheen.addColorStop(0.4, 'rgba(160,180,215,0.04)'); sheen.addColorStop(1, 'rgba(160,180,215,0)');
+      c.fillStyle = sheen; c.fillRect(0, horizon, w, h - horizon);
+    }
+    // falling snow dots
+    for (let i = 0; i < (night ? 420 : 300); i++) {
+      c.globalAlpha = 0.25 + rng() * 0.55;
+      c.fillStyle = '#ffffff';
+      c.beginPath(); c.arc(rng() * w, rng() * h, 0.8 + rng() * 2.4, 0, 7); c.fill();
+    }
+    c.globalAlpha = 1;
+  });
+}
+const skyDayTex = drawBackdrop(false);
+const skyNightTex = drawBackdrop(true);
+
+// --- building facade with emissive windows ---
+const facadeTex = makeCanvas(256, 256, (c, w, h) => {
+  c.fillStyle = '#2b3138'; c.fillRect(0, 0, w, h);
+  const rng = mulberry32(555);
+  for (let y = 18; y < h - 14; y += 42) {
+    for (let x = 14; x < w - 10; x += 36) {
+      const lit = rng() < 0.42;
+      c.fillStyle = lit ? '#ffc87a' : '#12161c';
+      c.fillRect(x, y, 18, 24);
+      if (lit && rng() < 0.5) { c.fillStyle = 'rgba(255,200,122,0.5)'; c.fillRect(x - 3, y - 3, 24, 30); }
+    }
+  }
+});
+
+/* ============================================================
+   ROOM — wall with window opening, floor, windowsill
+   ============================================================ */
+const roomGroup = new THREE.Group();
+scene.add(roomGroup);
+
+const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, color: 0xa79a89, roughness: 0.96 });
+function wallPanel(w, h, d, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+  m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; roomGroup.add(m); return m;
+}
+// window opening: x -4.3..4.3, y 2.3..7.9, wall plane z = -1.75
+wallPanel(30, 2.3, 0.35, 0, 1.15, -1.75);          // below sill
+wallPanel(30, 2.3, 0.35, 0, 9.05, -1.75);          // above window
+wallPanel(10.7, 5.6, 0.35, -9.65, 5.1, -1.75);     // left
+wallPanel(10.7, 5.6, 0.35, 9.65, 5.1, -1.75);      // right
+
+// floor
+const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, color: 0x9a8468, roughness: 0.55, metalness: 0.08 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 24), floorMat);
+floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, 4);
+floor.receiveShadow = true; roomGroup.add(floor);
+
+// baseboard
+const baseboard = new THREE.Mesh(new THREE.BoxGeometry(30, 0.42, 0.12), new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.6 }));
+baseboard.position.set(0, 0.21, -1.55); roomGroup.add(baseboard);
+
+// windowsill — deep wooden ledge
+const sillMat = new THREE.MeshStandardMaterial({ map: woodTex, color: 0x7d5a38, roughness: 0.42, metalness: 0.05 });
+const sill = new THREE.Mesh(new THREE.BoxGeometry(17, 0.34, 3.75), sillMat);
+sill.position.set(0, SILL_TOP - 0.17, 0.12);
+sill.castShadow = true; sill.receiveShadow = true; roomGroup.add(sill);
+// sill front apron with carved rail
+const apron = new THREE.Mesh(new THREE.BoxGeometry(17, 0.5, 0.18), new THREE.MeshStandardMaterial({ map: woodTex, color: 0x5f422a, roughness: 0.5 }));
+apron.position.set(0, SILL_TOP - 0.55, 1.9); apron.castShadow = true; roomGroup.add(apron);
+// frost dusting on the sill
+const sillDust = new THREE.Mesh(new THREE.PlaneGeometry(16.6, 3.4), new THREE.MeshStandardMaterial({ color: 0xdfe8ef, roughness: 1, transparent: true, opacity: 0.32, depthWrite: false }));
+sillDust.rotation.x = -Math.PI / 2; sillDust.position.set(0, SILL_TOP + 0.002, 0.12); roomGroup.add(sillDust);
+
+// window frame (dark walnut) + frosted panes
+const frameMat = new THREE.MeshStandardMaterial({ map: woodTex, color: 0x4a3320, roughness: 0.45 });
+const FR = { x0: -4.3, x1: 4.3, y0: SILL_TOP, y1: 7.9, z: -1.68, t: 0.22, depth: 0.3 };
+function frameBar(w, h, x, y) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, FR.depth), frameMat);
+  m.position.set(x, y, FR.z); m.castShadow = true; m.receiveShadow = true; roomGroup.add(m);
+}
+frameBar(FR.x1 - FR.x0 + FR.t * 2, FR.t, 0, FR.y1 + FR.t / 2);
+frameBar(FR.x1 - FR.x0 + FR.t * 2, FR.t, 0, FR.y0 + FR.t / 2);
+frameBar(FR.t, FR.y1 - FR.y0, FR.x0 - FR.t / 2, (FR.y0 + FR.y1) / 2);
+frameBar(FR.t, FR.y1 - FR.y0, FR.x1 + FR.t / 2, (FR.y0 + FR.y1) / 2);
+// mullions (these cast lovely stripe shadows)
+frameBar(0.14, FR.y1 - FR.y0, -1.44, (FR.y0 + FR.y1) / 2);
+frameBar(0.14, FR.y1 - FR.y0, 1.44, (FR.y0 + FR.y1) / 2);
+frameBar(FR.x1 - FR.x0, 0.14, 0, 5.1);
+
+const frostMat = new THREE.MeshPhysicalMaterial({
+  map: frostTex, transparent: true, roughness: 0.4, metalness: 0,
+  color: 0xffffff, opacity: 0.96, depthWrite: false,
+  emissive: 0xbfd2dd, emissiveIntensity: 0.12
+});
+const pane = new THREE.Mesh(new THREE.PlaneGeometry(FR.x1 - FR.x0, FR.y1 - FR.y0), frostMat);
+pane.position.set(0, (FR.y0 + FR.y1) / 2, FR.z - 0.09); roomGroup.add(pane);
+
+/* ============================================================
+   OUTSIDE — street, buildings, lamp, falling snow
+   ============================================================ */
+const outsideGroup = new THREE.Group(); scene.add(outsideGroup);
+
+// snowy ground outside
+const outsideGround = new THREE.Mesh(
+  new THREE.PlaneGeometry(36, 6.2),
+  new THREE.MeshStandardMaterial({ map: snowTex, color: 0xe8edf2, roughness: 0.95 })
+);
+outsideGround.rotation.x = -Math.PI / 2; outsideGround.position.set(0, 1.02, -4.6); outsideGroup.add(outsideGround);
+
+// day / night painted backdrops (cross-faded)
+const skyDayMat = new THREE.MeshBasicMaterial({ map: skyDayTex, transparent: true, opacity: 1, fog: false });
+const skyNightMat = new THREE.MeshBasicMaterial({ map: skyNightTex, transparent: true, opacity: 0, fog: false });
+const skyDay = new THREE.Mesh(new THREE.PlaneGeometry(30, 13), skyDayMat);
+skyDay.position.set(0, 5.4, -7.6); outsideGroup.add(skyDay);
+const skyNight = new THREE.Mesh(new THREE.PlaneGeometry(30, 13), skyNightMat);
+skyNight.position.set(0, 5.4, -7.62); outsideGroup.add(skyNight);
+
+// 3D buildings with snow caps and glowing windows
+const buildingMat = new THREE.MeshStandardMaterial({
+  color: 0x596068, roughness: 0.9,
+  emissive: 0xffffff, emissiveMap: facadeTex, emissiveIntensity: 0
+});
+const snowCapMat = new THREE.MeshStandardMaterial({ color: 0xe9edf2, roughness: 0.95 });
+const buildingSpecs = [
+  { x: -3.6, z: -3.6, w: 2.3, h: 2.6, d: 1.6 },
+  { x: -1.4, z: -4.8, w: 2.8, h: 3.4, d: 1.8 },
+  { x: 0.9, z: -3.4, w: 1.9, h: 1.9, d: 1.4 },
+  { x: 3.4, z: -5.0, w: 3.0, h: 3.0, d: 2.0 },
+  { x: 5.6, z: -3.3, w: 1.7, h: 2.2, d: 1.3 }
+];
+for (const b of buildingSpecs) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), buildingMat);
+  m.position.set(b.x, 1.02 + b.h / 2, b.z); outsideGroup.add(m);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(b.w + 0.12, 0.16, b.d + 0.12), snowCapMat);
+  cap.position.set(b.x, 1.02 + b.h + 0.06, b.z); outsideGroup.add(cap);
+}
+
+// street lamp (3D, glows at night)
+const lampGroup = new THREE.Group();
+lampGroup.position.set(2.35, 1.02, -2.85);
+const lampPostMat = new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.6, metalness: 0.6 });
+const post = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 2.1, 10), lampPostMat);
+post.position.y = 1.05; lampGroup.add(post);
+const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.55, 8), lampPostMat);
+arm.rotation.z = Math.PI / 2.4; arm.position.set(-0.2, 2.08, 0); lampGroup.add(arm);
+const lampHeadMat = new THREE.MeshStandardMaterial({ color: 0x2a2e35, emissive: 0xffc978, emissiveIntensity: 0.15, roughness: 0.4 });
+const lampHead = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), lampHeadMat);
+lampHead.position.set(-0.42, 2.18, 0); lampGroup.add(lampHead);
+outsideGroup.add(lampGroup);
+const outsideLampLight = new THREE.PointLight(0xffc37a, 0, 8, 2);
+outsideLampLight.position.set(2.35 - 0.42, 1.02 + 2.18, -2.85); scene.add(outsideLampLight);
+// volumetric-ish light cone
+const coneMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const lightCone = new THREE.Mesh(new THREE.ConeGeometry(0.85, 2.1, 24, 1, true), coneMat);
+lightCone.position.set(2.35 - 0.42, 1.02 + 2.18 - 1.05, -2.85); scene.add(lightCone);
+
+// falling snow outside (GPU-animated, deterministic)
+const outsideSnowGeo = new THREE.BufferGeometry();
+{
+  const N = 700, pos = new Float32Array(N * 3), spd = new Float32Array(N), ph = new Float32Array(N);
+  const rng = mulberry32(31337);
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] = (rng() - 0.5) * 20;
+    pos[i * 3 + 1] = rng() * 7.5 + 0.6;
+    pos[i * 3 + 2] = -2.6 - rng() * 4.2;
+    spd[i] = 0.42 + rng() * 0.5;
+    ph[i] = rng() * 6.28;
+  }
+  outsideSnowGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  outsideSnowGeo.setAttribute('aSpeed', new THREE.BufferAttribute(spd, 1));
+  outsideSnowGeo.setAttribute('aPhase', new THREE.BufferAttribute(ph, 1));
+}
+const outsideSnowMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uMap: { value: flakeSprite } },
+  transparent: true, depthWrite: false,
+  vertexShader: `
+    attribute float aSpeed; attribute float aPhase;
+    uniform float uTime;
+    void main() {
+      vec3 p = position;
+      p.y = mod(p.y - uTime * aSpeed, 7.4) + 0.6;
+      p.x += sin(uTime * 0.8 + aPhase * 3.0) * 0.35;
+      p.z += cos(uTime * 0.6 + aPhase * 2.0) * 0.18;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      gl_PointSize = (2.4 + aPhase * 0.5) * (150.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform sampler2D uMap;
+    void main() {
+      float a = texture2D(uMap, gl_PointCoord).a;
+      gl_FragColor = vec4(vec3(0.98, 0.99, 1.0), a * 0.9);
+    }`
+});
+const outsideSnow = new THREE.Points(outsideSnowGeo, outsideSnowMat);
+scene.add(outsideSnow);
+
+/* ============================================================
+   THE GLOBE — carved wooden base, glass sphere, village
+   ============================================================ */
+const rig = new THREE.Group();
+rig.position.copy(RIG_BASE);
+scene.add(rig);
+
+// ---- carved wooden base (lathe + brass trim) ----
+const baseGroup = new THREE.Group(); rig.add(baseGroup);
+const baseProfile = [
+  [0.001, 0.0], [1.30, 0.0], [1.44, 0.05], [1.52, 0.15], [1.34, 0.26],
+  [1.17, 0.35], [1.23, 0.44], [1.38, 0.56], [1.48, 0.72], [1.52, 0.88],
+  [1.47, 1.00], [1.31, 1.055], [1.17, 1.10], [1.16, 1.16]
+].map(p => new THREE.Vector2(p[0], p[1]));
+const baseMat = new THREE.MeshStandardMaterial({ map: woodTex, color: 0x8a5a34, roughness: 0.38, metalness: 0.12 });
+const baseMesh = new THREE.Mesh(new THREE.LatheGeometry(baseProfile, 80), baseMat);
+baseMesh.castShadow = true; baseMesh.receiveShadow = true; baseGroup.add(baseMesh);
+// carved beads around the foot
+const beadGeo = new THREE.SphereGeometry(0.085, 12, 10);
+const beadMat = new THREE.MeshStandardMaterial({ map: woodTex, color: 0x9c6b3d, roughness: 0.35 });
+for (let i = 0; i < 28; i++) {
+  const a = (i / 28) * Math.PI * 2;
+  const bead = new THREE.Mesh(beadGeo, beadMat);
+  bead.position.set(Math.cos(a) * 1.47, 0.155, Math.sin(a) * 1.47);
+  bead.scale.y = 0.75; baseGroup.add(bead);
+}
+// brass trim rings
+const brassMat = new THREE.MeshStandardMaterial({ color: 0xd8b25c, roughness: 0.22, metalness: 0.95 });
+for (const [ty, tr, tt] of [[0.905, 1.475, 0.045], [0.30, 1.30, 0.032], [1.085, 1.22, 0.04]]) {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(tr, tt, 12, 72), brassMat);
+  ring.rotation.x = Math.PI / 2; ring.position.y = ty; baseGroup.add(ring);
+}
+// engraved plaque
+const plaqueCanvasTex = makeCanvas(256, 128, (c, w, h) => {
+  c.fillStyle = '#c9a24e'; c.fillRect(0, 0, w, h);
+  c.fillStyle = '#8a6a22'; c.fillRect(8, 8, w - 16, h - 16);
+  c.fillStyle = '#e8cd82'; c.textAlign = 'center'; c.font = 'italic 34px Georgia';
+  c.fillText('Winter,', w / 2, 55); c.fillText('forever', w / 2, 95);
+});
+const plaque = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.36), new THREE.MeshStandardMaterial({ map: plaqueCanvasTex, roughness: 0.3, metalness: 0.8 }));
+plaque.position.set(0, 0.56, 1.415); plaque.rotation.x = -0.12; baseGroup.add(plaque);
+
+// ---- inner village (rotates via music box) ----
+const villageGroup = new THREE.Group();
+villageGroup.position.set(0, 0, 0);
+rig.add(villageGroup);
+
+const snowMat = new THREE.MeshStandardMaterial({ map: snowTex, color: 0xf2f6fb, roughness: 0.94 });
+const snowMatRoof = new THREE.MeshStandardMaterial({ color: 0xf4f8fc, roughness: 0.9 });
+const roofMat = new THREE.MeshStandardMaterial({ color: 0x55382a, roughness: 0.75 });
+const wallCreamMat = new THREE.MeshStandardMaterial({ color: 0xe6d9c4, roughness: 0.85 });
+const wallRoseMat = new THREE.MeshStandardMaterial({ color: 0xc9a9a0, roughness: 0.85 });
+const wallSageMat = new THREE.MeshStandardMaterial({ color: 0xa8b2a0, roughness: 0.85 });
+const timberMat = new THREE.MeshStandardMaterial({ color: 0x4d3626, roughness: 0.8 });
+
+// ground platform
+const platform = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.28, 0.14, 56), snowMat);
+platform.position.y = GROUND_Y - 0.07; platform.receiveShadow = true; villageGroup.add(platform);
+// snow drifts
+const driftMat = new THREE.MeshStandardMaterial({ color: 0xe9eff6, roughness: 1 });
+for (const [dx, dz, s] of [[-0.95, 0.72, 0.42], [1.02, -0.28, 0.36], [-1.0, -0.62, 0.34], [0.15, 1.08, 0.4]]) {
+  const drift = new THREE.Mesh(new THREE.SphereGeometry(s, 18, 12), driftMat);
+  drift.scale.y = 0.38; drift.position.set(dx, GROUND_Y, dz); drift.receiveShadow = true; villageGroup.add(drift);
+}
+
+// pond
+const pond = new THREE.Mesh(new THREE.CircleGeometry(0.58, 40),
+  new THREE.MeshPhysicalMaterial({ map: pondTex, color: 0xbfe0f2, roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.08, transparent: true, opacity: 0.96 }));
+pond.rotation.x = -Math.PI / 2; pond.position.set(0.30, GROUND_Y + 0.005, 0.02); villageGroup.add(pond);
+
+// village window glow materials (night)
+const windowGlowMats = [];
+function glowWindowMat() {
+  const m = new THREE.MeshStandardMaterial({ color: 0x3a2c1c, emissive: 0xffc46b, emissiveIntensity: 0.06, roughness: 0.4 });
+  windowGlowMats.push(m); return m;
+}
+function addWindow(parent, x, y, z, ry, w = 0.075, h = 0.095) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), glowWindowMat());
+  m.position.set(x, y, z); m.rotation.y = ry; parent.add(m);
+}
+// gabled roof helper (triangular prism)
+function gableRoof(w, h, len, snowy) {
+  const g = new THREE.Group();
+  const prism = new THREE.CylinderGeometry(w * 0.62, w * 0.62, len, 3, 1);
+  prism.rotateZ(Math.PI / 2); prism.rotateX(Math.PI / 2);
+  const roof = new THREE.Mesh(prism, roofMat);
+  roof.scale.y = h / (w * 0.62); roof.castShadow = true; g.add(roof);
+  if (snowy) {
+    const cap = new THREE.Mesh(prism.clone(), snowMatRoof);
+    cap.scale.set(1.06, h / (w * 0.62) * 0.62, 1.04);
+    cap.position.y = h * 0.32; g.add(cap);
+  }
+  return g;
+}
+function box(w, h, d, mat, x, y, z, cast = true) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = true; return m;
+}
+
+// ---- the church ----
+const church = new THREE.Group();
+church.position.set(-0.62, GROUND_Y, -0.34);
+church.rotation.y = 0.35;
+church.add(box(0.44, 0.36, 0.66, wallCreamMat, 0, 0.18, 0));
+const churchRoof = gableRoof(0.46, 0.17, 0.68, true);
+churchRoof.position.set(0, 0.44, 0); churchRoof.rotation.y = Math.PI / 2; church.add(churchRoof);
+church.add(box(0.2, 0.52, 0.2, wallCreamMat, 0, 0.6, -0.28)); // tower
+const spire = new THREE.Mesh(new THREE.ConeGeometry(0.155, 0.34, 4), roofMat);
+spire.position.set(0, 1.02, -0.28); spire.rotation.y = Math.PI / 4; spire.castShadow = true; church.add(spire);
+const spireSnow = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.2, 4), snowMatRoof);
+spireSnow.position.set(0, 1.11, -0.28); spireSnow.rotation.y = Math.PI / 4; church.add(spireSnow);
+const crossMat = new THREE.MeshStandardMaterial({ color: 0xe8e4d2, emissive: 0xfff2c0, emissiveIntensity: 0.25, roughness: 0.3, metalness: 0.7 });
+const crossV = box(0.025, 0.14, 0.025, crossMat, 0, 1.28, -0.28, false); church.add(crossV);
+const crossH = box(0.09, 0.025, 0.025, crossMat, 0, 1.29, -0.28, false); church.add(crossH);
+addWindow(church, 0.13, 0.16, 0.335, 0); addWindow(church, -0.13, 0.16, 0.335, 0);
+addWindow(church, 0, 0.62, -0.175, 0, 0.07, 0.11); // tower window
+addWindow(church, 0.225, 0.17, 0, Math.PI / 2); addWindow(church, -0.225, 0.17, 0, -Math.PI / 2);
+// arched door
+const door = new THREE.Mesh(new THREE.CircleGeometry(0.07, 16), timberMat);
+door.position.set(0, 0.075, 0.332); church.add(door);
+villageGroup.add(church);
+
+// ---- houses ----
+const houseA = new THREE.Group(); houseA.position.set(0.44, GROUND_Y, -0.53); houseA.rotation.y = -0.28;
+houseA.add(box(0.4, 0.3, 0.35, wallRoseMat, 0, 0.15, 0));
+const hA_roof = gableRoof(0.42, 0.15, 0.38, true); hA_roof.position.set(0, 0.375, 0); hA_roof.rotation.y = Math.PI / 2; houseA.add(hA_roof);
+houseA.add(box(0.08, 0.16, 0.08, wallRoseMat, 0.12, 0.42, 0.06)); // chimney
+houseA.add(box(0.1, 0.05, 0.1, snowMatRoof, 0.12, 0.51, 0.06, false));
+addWindow(houseA, 0.11, 0.15, 0.178, 0); addWindow(houseA, -0.11, 0.15, 0.178, 0);
+villageGroup.add(houseA);
+
+const houseB = new THREE.Group(); houseB.position.set(0.76, GROUND_Y, 0.38); houseB.rotation.y = 0.5;
+houseB.add(box(0.33, 0.26, 0.29, wallSageMat, 0, 0.13, 0));
+const hB_roof = gableRoof(0.35, 0.13, 0.32, true); hB_roof.position.set(0, 0.315, 0); hB_roof.rotation.y = Math.PI / 2; houseB.add(hB_roof);
+houseB.add(box(0.07, 0.13, 0.07, wallSageMat, -0.09, 0.35, -0.05));
+addWindow(houseB, 0.09, 0.13, 0.148, 0); addWindow(houseB, -0.09, 0.13, 0.148, 0);
+addWindow(houseB, 0.168, 0.13, 0, Math.PI / 2);
+villageGroup.add(houseB);
+
+const houseC = new THREE.Group(); houseC.position.set(-0.2, GROUND_Y, 0.62); houseC.rotation.y = 2.5;
+houseC.add(box(0.35, 0.24, 0.31, wallCreamMat, 0, 0.12, 0));
+const hC_roof = gableRoof(0.37, 0.13, 0.34, true); hC_roof.position.set(0, 0.29, 0); hC_roof.rotation.y = Math.PI / 2; houseC.add(hC_roof);
+addWindow(houseC, 0.09, 0.12, 0.158, 0); addWindow(houseC, -0.09, 0.12, 0.158, 0);
+villageGroup.add(houseC);
+
+// ---- pine trees ----
+const pineGreen = new THREE.MeshStandardMaterial({ color: 0x1e4030, roughness: 0.9 });
+const pineDark = new THREE.MeshStandardMaterial({ color: 0x17301f, roughness: 0.9 });
+function makePine(h, snowy) {
+  const g = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.028 * h, 0.036 * h, 0.22 * h, 7), timberMat);
+  trunk.position.y = 0.11 * h; g.add(trunk);
+  const tiers = [[0.30, 0.30, 0.24], [0.225, 0.30, 0.47], [0.15, 0.28, 0.68]];
+  for (let i = 0; i < tiers.length; i++) {
+    const [r, hh, y] = tiers[i];
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(r * h * 1.35, hh * h * 1.35, 9), i % 2 ? pineDark : pineGreen);
+    cone.position.y = y * h * 1.15; cone.castShadow = true; g.add(cone);
+    if (snowy) {
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(r * h * 0.78, hh * h * 0.62, 9), snowMatRoof);
+      cap.position.y = (y * 1.15 + hh * 0.36) * h; g.add(cap);
+    }
+  }
+  return g;
+}
+const pineSpots = [
+  [-1.05, -0.05, 0.52], [-0.82, 0.48, 0.4], [-0.32, -0.78, 0.46], [0.18, -0.95, 0.38],
+  [1.08, -0.72, 0.5], [1.14, 0.05, 0.42], [0.62, 0.88, 0.48], [-0.62, 0.95, 0.44],
+  [-1.12, 0.28, 0.36], [0.95, -0.12, 0.32]
+];
+for (const [px, pz, ph] of pineSpots) {
+  const p = makePine(ph, true); p.position.set(px, GROUND_Y, pz); p.rotation.y = px * 13 + pz * 7; villageGroup.add(p);
+}
+
+// ---- tiny village lamps (glow at night) ----
+const villageLampGlowMats = [];
+function makeVillageLamp(x, z) {
+  const g = new THREE.Group(); g.position.set(x, GROUND_Y, z);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.022, 0.3, 6), timberMat);
+  pole.position.y = 0.15; g.add(pole);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.05, 6), brassMat);
+  cap.position.y = 0.35; g.add(cap);
+  const bulbMat = new THREE.MeshStandardMaterial({ color: 0x554433, emissive: 0xffd9a0, emissiveIntensity: 0.15 });
+  villageLampGlowMats.push(bulbMat);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), bulbMat);
+  bulb.position.y = 0.31; g.add(bulb);
+  villageGroup.add(g);
+}
+makeVillageLamp(0.78, -0.22);
+makeVillageLamp(-0.38, 0.22);
+
+// ---- the skater on the frozen pond ----
+const skater = new THREE.Group();
+const skaterCoat = new THREE.MeshStandardMaterial({ color: 0x8e2f32, roughness: 0.7 });
+const skaterSkin = new THREE.MeshStandardMaterial({ color: 0xe8c39a, roughness: 0.7 });
+const skaterLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.22, 8), new THREE.MeshStandardMaterial({ color: 0x2b3242, roughness: 0.7 }));
+skaterLeg.position.set(0.05, 0.11, 0); skaterLeg.rotation.z = -0.55; skater.add(skaterLeg);
+const skaterLeg2 = skaterLeg.clone(); skaterLeg2.position.set(-0.06, 0.12, 0.02); skaterLeg2.rotation.z = 0.62; skater.add(skaterLeg2);
+const skaterBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.16, 6, 12), skaterCoat);
+skaterBody.position.y = 0.33; skaterBody.castShadow = true; skater.add(skaterBody);
+const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.028, 8, 14), new THREE.MeshStandardMaterial({ color: 0x2b6e5a, roughness: 0.8 }));
+scarf.position.y = 0.42; scarf.rotation.x = Math.PI / 2.3; skater.add(scarf);
+const scarfTail = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.16), new THREE.MeshStandardMaterial({ color: 0x2b6e5a, side: THREE.DoubleSide, roughness: 0.8 }));
+scarfTail.position.set(-0.09, 0.34, 0); scarfTail.rotation.z = 0.5; skater.add(scarfTail);
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.062, 14, 12), skaterSkin);
+head.position.y = 0.52; head.castShadow = true; skater.add(head);
+const hat = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.085, 12), new THREE.MeshStandardMaterial({ color: 0x2b6e5a, roughness: 0.85 }));
+hat.position.y = 0.585; skater.add(hat);
+const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.17, 7), skaterCoat);
+armL.position.set(0.11, 0.36, 0); armL.rotation.z = -1.1; skater.add(armL);
+const armR = armL.clone(); armR.position.set(-0.11, 0.36, 0); armR.rotation.z = 1.25; skater.add(armR);
+skater.position.set(0.30, GROUND_Y + 0.012, 0.02);
+villageGroup.add(skater);
+
+// ---- physics colliders for resting on rooftops (village-local frame) ----
+const colliders = [
+  { x: -0.62, z: -0.34, hx: 0.26, hz: 0.38, top: GROUND_Y + 0.56 },   // church nave ridge
+  { x: 0.44,  z: -0.53, hx: 0.23, hz: 0.20, top: GROUND_Y + 0.455 },  // house A
+  { x: 0.76,  z: 0.38,  hx: 0.19, hz: 0.17, top: GROUND_Y + 0.38 },   // house B
+  { x: -0.20, z: 0.62,  hx: 0.20, hz: 0.18, top: GROUND_Y + 0.35 }    // house C
+];
+
+// ---- glass sphere ----
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff, metalness: 0, roughness: 0.035,
+  transmission: 1.0, thickness: 0.45, ior: 1.52,
+  attenuationColor: new THREE.Color(0xdfeef4), attenuationDistance: 6.5,
+  clearcoat: 1.0, clearcoatRoughness: 0.06,
+  specularIntensity: 1.25, envMapIntensity: 1.5,
+  reflectivity: 0.9
+});
+const glassMesh = new THREE.Mesh(new THREE.SphereGeometry(GLASS_R, 96, 72), glassMat);
+glassMesh.position.y = SPH_Y; baseGroup.parent === rig; // (glass lives in rig)
+rig.add(glassMesh);
+// subtle inner-base snow skirt so you never see inside the base
+const skirt = new THREE.Mesh(new THREE.CylinderGeometry(1.14, 1.14, 0.1, 48), snowMat);
+skirt.position.y = GROUND_Y - 0.16; rig.add(skirt);
+
+/* ============================================================
+   FLAKE SIMULATION — 6000 flakes, curl-noise liquid + swirl
+   ============================================================ */
+const fPos = new Float32Array(FLAKES * 3);
+const fVel = new Float32Array(FLAKES * 3);
+const fSize = new Float32Array(FLAKES);   // render size
+const fSizeW = new Float32Array(FLAKES);  // sim size class
+const fDrag = new Float32Array(FLAKES);
+const fFall = new Float32Array(FLAKES);
+const fRand = new Float32Array(FLAKES);
+const fRest = new Uint8Array(FLAKES);
+
+let airVel = new THREE.Vector3(0, 0, 0);
+let swirl = new THREE.Vector3(0, 0, 0);
+let springWind = 0;
+let villageAngle = 0;
+let nightMix = 0, nightTarget = 0;
+let simTime = 0;
+let shakeEnergy = 0;
+let airborneCount = FLAKES;
+let showcaseRunning = false;
+
+const POND = { x: 0.30, z: 0.02, r: 0.56 };
+function surfaceHeight(x, z) {
+  const dx = x - POND.x, dz = z - POND.z;
+  const pondD = Math.sqrt(dx * dx + dz * dz);
+  let sy = GROUND_Y + 0.016 * Math.sin(x * 6.7 + 1.3) * Math.sin(z * 7.9 + 2.1);
+  if (pondD < POND.r) sy = GROUND_Y + 0.002;
+  return sy + 0.012;
+}
+function curlVec(x, y, z, t, out) {
+  out.x = Math.sin(y * 2.1 + t * 0.77 + Math.sin(z * 1.6 + t * 0.5) * 1.2) * 0.6
+        + Math.sin(z * 3.4 - t * 0.61) * 0.35;
+  out.y = Math.sin(z * 2.4 + t * 0.66 + Math.sin(x * 1.8 - t * 0.43)) * 0.38
+        + Math.sin(x * 4.1 + t * 0.5) * 0.18;
+  out.z = Math.cos(x * 2.2 + t * 0.71 + Math.sin(y * 1.9 + t * 0.55) * 1.1) * 0.6
+        + Math.sin(y * 3.7 - t * 0.58) * 0.35;
+}
+const _curl = new THREE.Vector3();
+
+function initFlakes(seed) {
+  const rng = mulberry32(seed);
+  for (let i = 0; i < FLAKES; i++) {
+    const i3 = i * 3;
+    let x = 0, y = 0, z = 0, d2 = 2;
+    while (d2 >= 0.9) {
+      x = rng() * 2 - 1; y = rng() * 2 - 1; z = rng() * 2 - 1;
+      d2 = x * x + y * y + z * z;
+    }
+    x *= GLOBE_R * 0.9; y = SPH_Y + y * GLOBE_R * 0.9; z *= GLOBE_R * 0.9;
+    if (y < GROUND_Y + 0.05) y = GROUND_Y + 0.05 + rng() * 0.12;
+    // a few flakes start pre-settled, as if the globe has been sitting
+    const preSettled = rng() < 0.14;
+    if (preSettled) { y = surfaceHeight(x, z); }
+    fPos[i3] = x; fPos[i3 + 1] = y; fPos[i3 + 2] = z;
+    fVel[i3] = (rng() - 0.5) * 0.25; fVel[i3 + 1] = (rng() - 0.5) * 0.25; fVel[i3 + 2] = (rng() - 0.5) * 0.25;
+    const sClass = Math.pow(rng(), 1.6);
+    fSizeW[i] = 0.013 + sClass * 0.03;
+    fSize[i] = 3.2 + sClass * 5.2;
+    fDrag[i] = 1.7 + rng() * 1.7;
+    fFall[i] = fDrag[i] * (0.050 + sClass * 0.042); // sized fall speed → ~20 s to settle
+    fRand[i] = rng();
+    fRest[i] = preSettled ? 1 : 0;
+    if (preSettled) { fVel[i3] = fVel[i3 + 1] = fVel[i3 + 2] = 0; }
+  }
+}
+
+// flake rendering
+const flakeGeo = new THREE.BufferGeometry();
+const flakePosAttr = new THREE.BufferAttribute(fPos, 3);
+flakePosAttr.setUsage(THREE.DynamicDrawUsage);
+flakeGeo.setAttribute('position', flakePosAttr);
+flakeGeo.setAttribute('aSize', new THREE.BufferAttribute(fSize, 1));
+const flakeMat = new THREE.ShaderMaterial({
+  uniforms: { uMap: { value: flakeSprite }, uTime: { value: 0 } },
+  transparent: true, depthWrite: false,
+  vertexShader: `
+    attribute float aSize;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = aSize * (190.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform sampler2D uMap;
+    void main() {
+      float a = texture2D(uMap, gl_PointCoord).a;
+      if (a < 0.04) discard;
+      gl_FragColor = vec4(vec3(0.97, 0.985, 1.0), a);
+    }`
+});
+const flakePoints = new THREE.Points(flakeGeo, flakeMat);
+flakePoints.frustumCulled = false;
+rig.add(flakePoints);
+
+// ---- one fixed simulation step (deterministic) ----
+let prevSimTime = 0;
+function stepFixed(dt) {
+  prevSimTime = simTime;
+  simTime += dt;
+
+  // decay of the shaken liquid
+  airVel.multiplyScalar(Math.exp(-dt * 0.62));
+  swirl.multiplyScalar(Math.exp(-dt * 0.40));
+
+  // scripted showcase events (deterministic)
+  if (showcaseRunning) {
+    if (prevSimTime < 2.4 && simTime >= 2.4) { airVel.set(1.85, 2.35, 1.3); swirl.set(0.9, 3.3, -0.7); }
+    if (prevSimTime < 6.0 && simTime >= 6.0) { nightTarget = 1; }
+    if (prevSimTime < 9.2 && simTime >= 9.2) { springWind = Math.min(2.2, springWind + 1.4); }
+  }
+
+  // music-box spring
+  if (springWind > 0.015) {
+    const omega = 0.5 * springWind;
+    villageAngle += omega * dt;
+    springWind = Math.max(0, springWind - 0.048 * dt);
+  }
+  const dAngle = villageAngle - (stepFixed._lastAngle || 0);
+  stepFixed._lastAngle = villageAngle;
+
+  // day/night easing
+  if (Math.abs(nightTarget - nightMix) > 0.0008) {
+    nightMix += (nightTarget - nightMix) * Math.min(1, dt * 1.7);
+    applyNightMix(nightMix);
+  }
+
+  shakeEnergy = clamp01(airVel.length() / 2.4 + swirl.length() / 3.2);
+  const curlAmp = 0.085 + shakeEnergy * 0.6;
+  const cosD = Math.cos(-villageAngle), sinD = Math.sin(-villageAngle);
+  const unrestBase = Math.max(0, shakeEnergy - 0.26);
+  let restCount = 0;
+
+  for (let i = 0; i < FLAKES; i++) {
+    const i3 = i * 3;
+    let px = fPos[i3], py = fPos[i3 + 1], pz = fPos[i3 + 2];
+
+    // resting flakes slowly tour with the rotating village, and may re-lift
+    if (fRest[i]) {
+      if (dAngle !== 0) {
+        const c = Math.cos(dAngle), s = Math.sin(dAngle);
+        const nx = px * c - pz * s, nz = px * s + pz * c;
+        px = nx; pz = nz; fPos[i3] = px; fPos[i3 + 2] = pz;
+      }
+      if (unrestBase > 0) {
+        const chance = unrestBase * dt * 7.0 * (0.45 + fRand[i] * 0.9);
+        if (Math.random() < chance) {
+          fRest[i] = 0;
+          fVel[i3] = (Math.random() - 0.5) * 0.4;
+          fVel[i3 + 1] = 0.45 + Math.random() * 0.5;
+          fVel[i3 + 2] = (Math.random() - 0.5) * 0.4;
+        } else { restCount++; continue; }
+      } else { restCount++; continue; }
+    }
+
+    // liquid velocity at the particle: bulk air + rotational swirl + curl noise
+    const rx = px, ry = py - SPH_Y, rz = pz;
+    curlVec(px * 1.6, py * 1.6, pz * 1.6, simTime, _curl);
+    const lx = airVel.x + (swirl.y * rz - swirl.z * ry) + _curl.x * curlAmp;
+    const ly = airVel.y + (swirl.z * rx - swirl.x * rz) + _curl.y * curlAmp;
+    const lz = airVel.z + (swirl.x * ry - swirl.y * rx) + _curl.z * curlAmp;
+
+    const drag = fDrag[i];
+    let vx = fVel[i3], vy = fVel[i3 + 1], vz = fVel[i3 + 2];
+    vx += ((lx - vx) * drag) * dt;
+    vy += ((ly - vy) * drag - fFall[i]) * dt;
+    vz += ((lz - vz) * drag) * dt;
+    px += vx * dt; py += vy * dt; pz += vz * dt;
+
+    // collide with the inside of the glass (sphere)
+    const dx = px, dy = py - SPH_Y, dz = pz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > GLOBE_R * GLOBE_R) {
+      const d = Math.sqrt(d2);
+      const s = (GLOBE_R - 0.012) / d;
+      px = dx * s; py = SPH_Y + dy * s; pz = dz * s;
+      const nx = dx / d, ny = dy / d, nz = dz / d;
+      const vr = vx * nx + vy * ny + vz * nz;
+      if (vr > 0) { vx -= nx * vr * 1.4; vy -= ny * vr * 1.4; vz -= nz * vr * 1.4; }
+    }
+
+    // rest on village rooftops (colliders live in village-local frame)
+    const vlx = px * cosD - pz * sinD, vlz = px * sinD + pz * cosD;
+    let landed = false;
+    for (let ci = 0; ci < colliders.length; ci++) {
+      const c = colliders[ci];
+      if (Math.abs(vlx - c.x) < c.hx && Math.abs(vlz - c.z) < c.hz) {
+        if (py < c.top + 0.02 && vy <= 0.06 && py > c.top - 0.4) {
+          py = c.top + 0.02; landed = true; break;
+        }
+      }
+    }
+    // rest on the snow / ice
+    if (!landed) {
+      const sy = surfaceHeight(px, pz);
+      if (py <= sy) { py = sy; landed = true; }
+    }
+    if (landed) {
+      fRest[i] = 1; vx = 0; vy = 0; vz = 0; restCount++;
+    }
+
+    fVel[i3] = vx; fVel[i3 + 1] = vy; fVel[i3 + 2] = vz;
+    fPos[i3] = px; fPos[i3 + 1] = py; fPos[i3 + 2] = pz;
+  }
+
+  airborneCount = FLAKES - restCount;
+  flakePosAttr.needsUpdate = true;
+  villageGroup.rotation.y = villageAngle;
+  skater.rotation.z = Math.sin(simTime * 2.1) * 0.05;
+  skater.rotation.y = Math.sin(simTime * 0.9) * 0.22;
+  outsideSnowMat.uniforms.uTime.value = simTime;
+}
+
+/* ============================================================
+   LIGHTS & DAY/NIGHT
+   ============================================================ */
+const hemi = new THREE.HemisphereLight(0xcdd8e2, 0x8a6f56, 0.55);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff1dc, 1.55);
+sun.position.set(-4.6, 9.2, -7.2);
+sun.target.position.set(1.6, 1.6, 2.6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.left = -9; sun.shadow.camera.right = 9;
+sun.shadow.camera.top = 9; sun.shadow.camera.bottom = -6;
+sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 30;
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.025;
+scene.add(sun); scene.add(sun.target);
+
+const warmLamp = new THREE.PointLight(0xffc98a, 0.75, 15, 1.8);
+warmLamp.position.set(4.6, 5.6, 3.6);
+scene.add(warmLamp);
+
+const fillLamp = new THREE.PointLight(0xffe2b8, 0.3, 8, 2);
+fillLamp.position.set(-3.4, 3.4, 2.6);
+scene.add(fillLamp);
+
+// warm light inside the village at night
+const villageLight = new THREE.PointLight(0xffb066, 0, 4.5, 2);
+villageLight.position.set(0, SILL_TOP + GROUND_Y + 0.5, -0.15);
+scene.add(villageLight);
+
+const daySunColor = new THREE.Color(0xfff1dc), nightSunColor = new THREE.Color(0x9db8e8);
+function applyNightMix(m) {
+  sun.intensity = lerp(1.55, 0.3, m);
+  sun.color.lerpColors(daySunColor, nightSunColor, m);
+  hemi.intensity = lerp(0.55, 0.16, m);
+  warmLamp.intensity = lerp(0.75, 1.5, m);
+  fillLamp.intensity = lerp(0.3, 0.1, m);
+  villageLight.intensity = m * 1.7;
+  for (const mat of windowGlowMats) mat.emissiveIntensity = lerp(0.06, 2.6, m);
+  for (const mat of villageLampGlowMats) mat.emissiveIntensity = lerp(0.15, 2.4, m);
+  lampHeadMat.emissiveIntensity = lerp(0.15, 2.6, m);
+  outsideLampLight.intensity = m * 2.1;
+  coneMat.opacity = m * 0.32;
+  buildingMat.emissiveIntensity = m * 1.9;
+  skyDayMat.opacity = 1 - m;
+  skyNightMat.opacity = m;
+  frostMat.emissiveIntensity = lerp(0.12, 0.05, m);
+  renderer.toneMappingExposure = lerp(1.12, 1.0, m);
+  if (bloomPass) bloomPass.strength = lerp(0.32, 0.6, m);
+}
+
+/* ============================================================
+   PROPS — mug with steam, book
+   ============================================================ */
+const mug = new THREE.Group();
+const mugMat = new THREE.MeshStandardMaterial({ map: mugTex, color: 0xffffff, roughness: 0.28 });
+const mugBody = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.26, 0.62, 36, 1, true), mugMat);
+mugBody.position.y = 0.31; mugBody.castShadow = true; mug.add(mugBody);
+const mugBottom = new THREE.Mesh(new THREE.CircleGeometry(0.26, 36), new THREE.MeshStandardMaterial({ color: 0xe8dcc8, roughness: 0.3 }));
+mugBottom.rotation.x = -Math.PI / 2; mugBottom.position.y = 0.005; mug.add(mugBottom);
+const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.27, 36), new THREE.MeshStandardMaterial({ color: 0x2a170c, roughness: 0.12 }));
+coffee.rotation.x = -Math.PI / 2; coffee.position.y = 0.52; mug.add(coffee);
+// foam swirl
+const foamTex = makeCanvas(128, 128, (c, w, h) => {
+  c.fillStyle = '#3a2414'; c.fillRect(0, 0, w, h);
+  c.strokeStyle = '#a8845e'; c.lineWidth = 7; c.beginPath(); c.arc(64, 64, 34, 0.4, 3.6); c.stroke();
+  c.fillStyle = '#c9a878'; c.beginPath(); c.arc(64, 64, 12, 0, 7); c.fill();
+});
+coffee.material.map = foamTex;
+const handle = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.045, 12, 28, Math.PI * 1.35), mugMat);
+handle.position.set(0.29, 0.32, 0); handle.rotation.z = -0.35; handle.castShadow = true; mug.add(handle);
+mug.position.set(2.78, SILL_TOP, 0.72);
+scene.add(mug);
+
+// steam sprites (driven by simTime → deterministic)
+const steamSprites = [];
+for (let i = 0; i < 3; i++) {
+  const sm = new THREE.SpriteMaterial({ map: steamTex, transparent: true, opacity: 0.35, depthWrite: false });
+  const sp = new THREE.Sprite(sm);
+  sp.scale.set(0.16, 0.26, 1);
+  sp.position.set(2.78, SILL_TOP + 0.68, 0.72);
+  scene.add(sp); steamSprites.push(sp);
+}
+function updateSteam() {
+  for (let i = 0; i < steamSprites.length; i++) {
+    const t = (simTime * 0.24 + i * 0.37) % 1;
+    const sp = steamSprites[i];
+    sp.position.set(2.78 + Math.sin(simTime * 1.7 + i * 2.1) * 0.045, SILL_TOP + 0.62 + t * 0.62, 0.72 + Math.cos(simTime * 1.3 + i) * 0.03);
+    sp.material.opacity = 0.42 * Math.sin(t * Math.PI);
+    const s = 0.10 + t * 0.22;
+    sp.scale.set(s, s * 1.7, 1);
+  }
+}
+
+const bookGroup = new THREE.Group();
+const pages = new THREE.Mesh(new THREE.BoxGeometry(1.28, 0.16, 0.9), new THREE.MeshStandardMaterial({ color: 0xede3c8, roughness: 0.85 }));
+pages.position.y = 0.085; bookGroup.add(pages);
+const coverMat = new THREE.MeshStandardMaterial({ map: bookTex, roughness: 0.4 });
+const coverTop = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.045, 0.96), coverMat);
+coverTop.position.y = 0.19; bookGroup.add(coverTop);
+const coverBot = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.045, 0.96), new THREE.MeshStandardMaterial({ color: 0x541720, roughness: 0.45 }));
+coverBot.position.y = 0.022; bookGroup.add(coverBot);
+const spine = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.21, 0.96), new THREE.MeshStandardMaterial({ color: 0x541720, roughness: 0.45 }));
+spine.position.set(-0.66, 0.105, 0); bookGroup.add(spine);
+bookGroup.position.set(-2.65, SILL_TOP, 0.8);
+bookGroup.rotation.y = 0.38;
+bookGroup.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+scene.add(bookGroup);
+// ribbon bookmark
+const ribbon = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.5), new THREE.MeshStandardMaterial({ color: 0xB03A2E || 0xb03a2e, side: THREE.DoubleSide, roughness: 0.8 }));
+ribbon.position.set(-2.02, SILL_TOP + 0.1, 1.18); ribbon.rotation.x = -1.1; ribbon.rotation.z = 0.15; scene.add(ribbon);
+
+/* ============================================================
+   POST-PROCESSING — bloom + shallow DOF
+   ============================================================ */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.32, 0.55, 0.82);
+composer.addPass(bloomPass);
+const bokehPass = new BokehPass(scene, camera, { focus: 8.0, aperture: 0.011, maxblur: 0.0072 });
+composer.addPass(bokehPass);
+composer.addPass(new OutputPass());
+applyNightMix(0);
+
+/* ============================================================
+   INTERACTION — drag the globe to shake it
+   ============================================================ */
+const shakables = [glassMesh, baseMesh, skirt];
+const raycaster = new THREE.Raycaster();
+const dragPlane = new THREE.Plane();
+const desiredOffset = new THREE.Vector3();
+const grabOffset = new THREE.Vector3();
+const rigVel = new THREE.Vector3();
+const prevRigPos = rig.position.clone();
+let dragging = false;
+const ndc = new THREE.Vector2();
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+
+function setRayFromEvent(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  ndc.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+}
+function clampLen(v, max) {
+  const l = v.length();
+  if (l > max) v.multiplyScalar(max / l);
+  return v;
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (showcaseRunning) return;
+  setRayFromEvent(e);
+  const hits = raycaster.intersectObjects(shakables, false);
+  if (hits.length) {
+    dragging = true;
+    controls.enabled = false;
+    camera.getWorldDirection(_v1);
+    dragPlane.setFromNormalAndCoplanarPoint(_v1, rig.position);
+    grabOffset.copy(rig.position).sub(hits[0].point);
+    renderer.domElement.setPointerCapture(e.pointerId);
+  }
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  setRayFromEvent(e);
+  const hit = raycaster.ray.intersectPlane(dragPlane, _v2);
+  if (hit) {
+    desiredOffset.copy(_v2).add(grabOffset).sub(RIG_BASE);
+    clampLen(desiredOffset, 0.85);
+  }
+});
+function endDrag(e) {
+  if (!dragging) return;
+  dragging = false;
+  controls.enabled = true;
+  try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (_) {}
+}
+renderer.domElement.addEventListener('pointerup', endDrag);
+renderer.domElement.addEventListener('pointercancel', endDrag);
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!showcaseRunning) springWind = Math.min(2.2, springWind + 0.95);
+  } else if (e.code === 'KeyN') {
+    if (!showcaseRunning) nightTarget = nightTarget > 0.5 ? 0 : 1;
+  }
+});
+
+/* ============================================================
+   SHOWCASE — 12 s deterministic cinematic + recording
+   ============================================================ */
+const camKeys = [
+  { t: 0.0,  pos: [8.7, 5.5, 10.1], tgt: [0, 3.9, 0] },
+  { t: 2.3,  pos: [3.0, 4.4, 4.4],  tgt: [0, 3.85, 0] },
+  { t: 4.7,  pos: [4.9, 3.35, 6.3], tgt: [0, 3.55, 0.1] },
+  { t: 6.3,  pos: [5.7, 3.15, 4.7], tgt: [-1.0, 3.6, -3.4] },
+  { t: 8.6,  pos: [3.45, 4.65, 5.55], tgt: [0, 3.6, 0] },
+  { t: 10.1, pos: [2.35, 4.15, 3.15], tgt: [0, 3.95, -0.15] },
+  { t: 12.0, pos: [6.9, 5.15, 8.8], tgt: [0, 3.8, 0] }
+];
+function applyCameraTimeline(t) {
+  t = Math.max(0, Math.min(SHOWCASE_DURATION, t));
+  let a = camKeys[0], b = camKeys[camKeys.length - 1];
+  for (let i = 0; i < camKeys.length - 1; i++) {
+    if (t >= camKeys[i].t && t <= camKeys[i + 1].t) { a = camKeys[i]; b = camKeys[i + 1]; break; }
+  }
+  const span = Math.max(0.0001, b.t - a.t);
+  const u = smooth(clamp01((t - a.t) / span));
+  camera.position.set(lerp(a.pos[0], b.pos[0], u), lerp(a.pos[1], b.pos[1], u), lerp(a.pos[2], b.pos[2], u));
+  _v3.set(lerp(a.tgt[0], b.tgt[0], u), lerp(a.tgt[1], b.tgt[1], u), lerp(a.tgt[2], b.tgt[2], u));
+  camera.lookAt(_v3);
+  if (bokehPass) bokehPass.uniforms['focus'].value = camera.position.distanceTo(_v3);
+}
+function showcaseJolt(t) {
+  if (t < 2.4 || t > 4.3) return 0;
+  const u = t - 2.4;
+  return Math.sin(u * 14.5) * Math.exp(-u * 2.4);
+}
+function resetShowcase() {
+  showcaseRunning = true;
+  simTime = 0; prevSimTime = 0;
+  airVel.set(0, 0, 0); swirl.set(0, 0, 0);
+  springWind = 0; villageAngle = 0; stepFixed._lastAngle = 0;
+  nightTarget = 0; nightMix = 0;
+  applyNightMix(0);
+  initFlakes(987654321);
+  villageGroup.rotation.y = 0;
+  desiredOffset.set(0, 0, 0);
+  rig.position.copy(RIG_BASE);
+}
+function finishShowcaseCommon(t) {
+  const j = showcaseJolt(t);
+  rig.position.set(RIG_BASE.x + j * 0.16, RIG_BASE.y + Math.abs(j) * 0.1, RIG_BASE.z - j * 0.1);
+  updateSteam();
+  updateHUD();
+}
+function seek(t) {
+  resetShowcase();
+  const steps = Math.floor(t / FIXED_DT);
+  for (let i = 0; i < steps; i++) stepFixed(FIXED_DT);
+  applyCameraTimeline(t);
+  finishShowcaseCommon(t);
+  composer.render();
+  // sync orbit controls so the interactive view resumes sanely
+  controls.target.set(0, 3.9, 0);
+  controls.update();
+  showcaseRunning = false;
+  return true;
+}
+
+// record playback state
+let recorder = null, recordedChunks = [], recording = false;
+let playShowcase = false, showcaseTime = 0, showcaseAcc = 0, realPrev = 0;
+const recordBtn = document.getElementById('recordBtn');
+
+function pickMime() {
+  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  for (const c of candidates) if (window.MediaRecorder && MediaRecorder.isTypeSupported(c)) return c;
+  return 'video/webm';
+}
+recordBtn.addEventListener('click', () => {
+  if (recording || playShowcase) return;
+  try {
+    const stream = renderer.domElement.captureStream(60);
+    recorder = new MediaRecorder(stream, { mimeType: pickMime(), videoBitsPerSecond: 12_000_000 });
+    recordedChunks = [];
+    recorder.ondataavailable = e => { if (e.data && e.data.size) recordedChunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'snow-globe-showcase.webm';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      recording = false;
+      recordBtn.disabled = false;
+      recordBtn.classList.remove('recording');
+      recordBtn.innerHTML = '⏺&nbsp; Record Video';
+    };
+    recorder.start(250);
+    recording = true;
+    recordBtn.disabled = true;
+    recordBtn.classList.add('recording');
+    recordBtn.innerHTML = '●&nbsp; Recording…';
+    // start deterministic playback from t = 0
+    resetShowcase();
+    playShowcase = true;
+    showcaseTime = 0; showcaseAcc = 0; realPrev = performance.now();
+    controls.enabled = false;
+  } catch (err) {
+    console.error('Recording failed:', err);
+    alert('Recording is not supported in this browser.');
+  }
+});
+window.showcase = { duration: SHOWCASE_DURATION, seek };
+
+/* ============================================================
+   BENCH — window.__bench
+   ============================================================ */
+const bench = { flakes: FLAKES, airborne: FLAKES, shakeEnergy: 0 };
+window.__bench = bench;
+const stFlakes = document.getElementById('stFlakes');
+const stAir = document.getElementById('stAir');
+const stShake = document.getElementById('stShake');
+let hudTimer = 0;
+function updateHUD() {
+  bench.flakes = FLAKES;
+  bench.airborne = airborneCount;
+  bench.shakeEnergy = shakeEnergy;
+  stFlakes.textContent = FLAKES;
+  stAir.textContent = airborneCount;
+  stShake.textContent = shakeEnergy.toFixed(2);
+}
+
+/* ============================================================
+   MAIN LOOP
+   ============================================================ */
+initFlakes(20240607);
+updateHUD();
+
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dtReal = Math.min(clock.getDelta(), 1 / 20);
+
+  if (playShowcase) {
+    // fixed-timestep deterministic playback, paced to real time
+    const frameDt = Math.min((now - realPrev) / 1000, 0.1);
+    realPrev = now;
+    showcaseAcc += frameDt;
+    while (showcaseAcc >= FIXED_DT && showcaseTime < SHOWCASE_DURATION) {
+      stepFixed(FIXED_DT);
+      showcaseTime += FIXED_DT;
+      showcaseAcc -= FIXED_DT;
+    }
+    applyCameraTimeline(showcaseTime);
+    finishShowcaseCommon(showcaseTime);
+    if (showcaseTime >= SHOWCASE_DURATION) {
+      playShowcase = false;
+      showcaseRunning = false;
+      controls.enabled = true;
+      controls.target.set(0, 3.9, 0);
+      controls.update();
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+    }
+  } else {
+    // interactive mode
+    stepFixed(dtReal);
+    simTime = simTime; // clarity: simTime advanced inside stepFixed
+    if (!dragging) desiredOffset.multiplyScalar(Math.exp(-dtReal * 2.1));
+    // globe follows the cursor with spring damping; its motion shakes the liquid
+    prevRigPos.copy(rig.position);
+    _v1.copy(RIG_BASE).add(desiredOffset);
+    rig.position.lerp(_v1, 1 - Math.exp(-dtReal * 9.5));
+    rigVel.copy(rig.position).sub(prevRigPos).divideScalar(Math.max(dtReal, 1e-4));
+    if (rigVel.lengthSq() > 0.0004 && !showcaseRunning) {
+      airVel.addScaledVector(rigVel, -dtReal * 1.55);
+      clampLen(airVel, 3.1);
+      swirl.x += -rigVel.z * dtReal * 1.15;
+      swirl.z += rigVel.x * dtReal * 1.15;
+      swirl.y += (rigVel.x - rigVel.z) * dtReal * 0.35;
+      clampLen(swirl, 4.6);
+    }
+    updateSteam();
+    controls.update();
+    // shallow DOF: track focus on the globe
+    bokehPass.uniforms['focus'].value = camera.position.distanceTo(rig.position.clone().add(_v2.set(0, SPH_Y, 0)));
+  }
+
+  // warm flicker of the village light at night
+  villageLight.intensity = nightMix * (1.55 + Math.sin(simTime * 11.0) * 0.14 + Math.sin(simTime * 23.7) * 0.08);
+
+  // HUD ~4 Hz
+  hudTimer += dtReal;
+  if (hudTimer > 0.25) { hudTimer = 0; updateHUD(); }
+
+  composer.render();
+}
+animate();
+
+// ---------- resize ----------
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  bloomPass.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

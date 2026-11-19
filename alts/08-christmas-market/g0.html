@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Weihnachtsmarkt — Winter Christmas Market</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#070b18;height:100%;font-family:Georgia,'Times New Roman',serif;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;}
+  .panel{position:fixed;pointer-events:none;z-index:10;color:#f6e7c8;text-shadow:0 2px 8px #000;}
+  #title{top:18px;left:24px;}
+  #title h1{margin:0;font-size:26px;letter-spacing:2px;font-weight:600;color:#ffd98a;}
+  #title p{margin:4px 0 0;font-size:12px;letter-spacing:3px;text-transform:uppercase;color:#a9b8e0;}
+  #hint{bottom:16px;left:24px;font-size:12px;line-height:1.7;background:rgba(10,14,32,.55);border:1px solid rgba(255,217,138,.35);border-radius:10px;padding:10px 14px;backdrop-filter:blur(4px);}
+  #hint b{color:#ffd98a;font-family:monospace;background:rgba(255,217,138,.12);padding:0 6px;border-radius:4px;border:1px solid rgba(255,217,138,.4);}
+  #recWrap{position:fixed;top:18px;right:22px;z-index:20;text-align:right;}
+  #recordBtn{pointer-events:auto;cursor:pointer;font-family:Georgia,serif;font-size:14px;letter-spacing:1.5px;color:#3a2404;
+    background:linear-gradient(180deg,#ffe9a8 0%,#f2c14e 45%,#c98a1e 100%);
+    border:2px solid #7a5410;border-radius:12px;padding:12px 22px;box-shadow:0 0 18px rgba(255,205,100,.45),inset 0 1px 0 #fffbe0;
+    transition:transform .15s, box-shadow .15s;}
+  #recordBtn:hover{transform:translateY(-2px);box-shadow:0 0 28px rgba(255,215,120,.65),inset 0 1px 0 #fffbe0;}
+  #recordBtn:disabled{opacity:.6;cursor:wait;}
+  #status{margin-top:8px;font-size:11px;color:#ffd98a;letter-spacing:1px;min-height:16px;text-shadow:0 1px 4px #000;}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div class="panel" id="title"><h1>❄ Weihnachtsmarkt ❄</h1><p>Christmas Market · Town Square · Night</p></div>
+<div class="panel" id="hint"><b>Space</b> carousel start / stop &nbsp;·&nbsp; <b>L</b> light pattern &nbsp;·&nbsp; <b>↑</b>/<b>↓</b> snowfall<br/>Drag to orbit · scroll to zoom</div>
+<div id="recWrap"><button id="recordBtn">⏺ &nbsp;Record video</button><div id="status"></div></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* ============================================================
+   WEIHNACHTSMARKT — procedural winter Christmas market
+   ============================================================ */
+
+// ---------- deterministic RNG ----------
+function mulberry32(seed){let a=seed>>>0;return function(){a|=0;a=(a+0x6D2B79F5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const smooth=t=>t*t*(3-2*t);
+
+// ---------- renderer / scene / camera ----------
+const app=document.getElementById('app');
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.12;
+app.appendChild(renderer.domElement);
+const canvas=renderer.domElement;
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0a1024);
+scene.fog=new THREE.Fog(0x0a1024,34,105);
+
+const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,300);
+camera.position.set(16.5,9.5,18.5);
+
+const controls=new OrbitControls(camera,canvas);
+controls.target.set(0,2.4,0);
+controls.enableDamping=true;
+controls.dampingFactor=0.06;
+controls.maxPolarAngle=Math.PI*0.495;
+controls.minDistance=5;
+controls.maxDistance=55;
+
+// ---------- post: bloom ----------
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),0.62,0.75,0.72);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ---------- lights ----------
+scene.add(new THREE.HemisphereLight(0x33436e,0x191411,0.85));
+scene.add(new THREE.AmbientLight(0x25304d,0.7));
+const moon=new THREE.DirectionalLight(0xbdd0ff,1.9);
+moon.position.set(-22,30,14);
+moon.castShadow=true;
+moon.shadow.mapSize.set(4096,4096);
+moon.shadow.camera.left=-34;moon.shadow.camera.right=34;
+moon.shadow.camera.top=34;moon.shadow.camera.bottom=-34;
+moon.shadow.camera.far=80;
+moon.shadow.bias=-0.0004;
+scene.add(moon);
+// moon disc
+const moonMesh=new THREE.Mesh(new THREE.CircleGeometry(3.2,48),new THREE.MeshBasicMaterial({color:0xe9eeff,fog:false}));
+moonMesh.position.set(-52,38,-58);moonMesh.lookAt(camera.position);scene.add(moonMesh);
+
+/* ============================================================
+   PROCEDURAL TEXTURES (canvas)
+   ============================================================ */
+function makeCanvas(w,h,draw){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;return t;}
+
+const woodTex=makeCanvas(512,512,(g,w,h)=>{
+  g.fillStyle='#6d4a2a';g.fillRect(0,0,w,h);
+  const rows=8;
+  for(let r=0;r<rows;r++){
+    const y=r*h/rows;
+    g.fillStyle=`rgba(${40+Math.random()*30|0},${24+Math.random()*18|0},10,0.85)`;
+    g.fillRect(0,y,w,4);
+    for(let i=0;i<60;i++){g.strokeStyle=`rgba(30,18,6,${0.15+Math.random()*0.25})`;g.lineWidth=1+Math.random()*1.6;g.beginPath();const yy=y+6+Math.random()*(h/rows-10);g.moveTo(0,yy);g.bezierCurveTo(w*0.3,yy+Math.random()*6-3,w*0.7,yy+Math.random()*6-3,w,yy);g.stroke();}
+  }
+});
+woodTex.wrapS=woodTex.wrapT=THREE.RepeatWrapping;
+
+const groundTex=makeCanvas(1024,1024,(g,w,h)=>{
+  g.fillStyle='#dfe7f2';g.fillRect(0,0,w,h);
+  for(let i=0;i<9000;i++){g.fillStyle=`rgba(${150+Math.random()*60|0},${165+Math.random()*60|0},${200+Math.random()*55|0},0.18)`;const r=Math.random()*5+1;g.beginPath();g.arc(Math.random()*w,Math.random()*h,r,0,7);g.fill();}
+  // trampled cobble plaza near middle
+  const cx=w/2,cy=h/2;
+  for(let ring=0;ring<9;ring++){const rad=40+ring*26;const n=Math.floor(rad/4.4);
+    for(let i=0;i<n;i++){const a=i/n*Math.PI*2+ring*0.35;const x=cx+Math.cos(a)*rad,y=cy+Math.sin(a)*rad;
+      g.fillStyle=`rgba(${90+Math.random()*30|0},${100+Math.random()*30|0},${125+Math.random()*30|0},0.34)`;
+      g.beginPath();g.ellipse(x,y,9,6.5,a,0,7);g.fill();}}
+});
+groundTex.wrapS=groundTex.wrapT=THREE.RepeatWrapping;
+
+const stripeTex=makeCanvas(512,256,(g,w,h)=>{
+  for(let i=0;i<16;i++){g.fillStyle=i%2?'#8e2f2f':'#f3e6cf';g.fillRect(i*w/16,0,w/16,h);}
+  g.fillStyle='rgba(0,0,0,0.12)';g.fillRect(0,h-36,w,36);
+});
+stripeTex.wrapS=THREE.RepeatWrapping;
+
+function signTexture(text){return makeCanvas(512,128,(g,w,h)=>{
+  g.fillStyle='#1d3a2a';g.fillRect(0,0,w,h);
+  g.strokeStyle='#d4af5a';g.lineWidth=10;g.strokeRect(10,10,w-20,h-20);
+  g.fillStyle='#f7e3ac';g.font='bold 52px Georgia';g.textAlign='center';g.textBaseline='middle';
+  g.fillText(text,w/2,h/2+2);
+});}
+function snowSlabTex(){return makeCanvas(128,128,(g,w,h)=>{g.fillStyle='#f4f8ff';g.fillRect(0,0,w,h);for(let i=0;i<500;i++){g.fillStyle=`rgba(170,190,225,${Math.random()*0.5})`;g.fillRect(Math.random()*w,Math.random()*h,2,2);}});}
+const snowTexTop=snowSlabTex();
+
+/* ============================================================
+   MATERIALS
+   ============================================================ */
+const M={
+  wood:new THREE.MeshStandardMaterial({map:woodTex,roughness:0.82,color:0xffffff}),
+  woodDark:new THREE.MeshStandardMaterial({map:woodTex,roughness:0.9,color:0x8a6a45}),
+  snow:new THREE.MeshStandardMaterial({map:snowTexTop,color:0xf5f9ff,roughness:0.95}),
+  roofRed:new THREE.MeshStandardMaterial({color:0x5d2723,roughness:0.75}),
+  roofGreen:new THREE.MeshStandardMaterial({color:0x24402e,roughness:0.75}),
+  gold:new THREE.MeshStandardMaterial({color:0xd9a844,roughness:0.35,metalness:0.7,emissive:0x513806,emissiveIntensity:0.6}),
+  cream:new THREE.MeshStandardMaterial({color:0xefe3c8,roughness:0.7}),
+  glowWarm:new THREE.MeshBasicMaterial({color:0xffc06a}),
+  glowHot:new THREE.MeshBasicMaterial({color:0xffe6a8}),
+  leaf:new THREE.MeshStandardMaterial({color:0x1d4a2a,roughness:0.9}),
+  trunk:new THREE.MeshStandardMaterial({color:0x4a2e18,roughness:0.95}),
+};
+
+/* ============================================================
+   GROUND / SQUARE / BACKDROP BUILDINGS
+   ============================================================ */
+const ground=new THREE.Mesh(new THREE.CircleGeometry(70,64),new THREE.MeshStandardMaterial({map:groundTex,roughness:0.96,color:0xffffff}));
+ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+
+// soft snow drifts (domes)
+const driftGeo=new THREE.SphereGeometry(1,14,10,0,Math.PI*2,0,Math.PI/2);
+const driftRng=mulberry32(777);
+for(let i=0;i<26;i++){
+  const d=new THREE.Mesh(driftGeo,M.snow);
+  const a=driftRng()*Math.PI*2,r=12+driftRng()*26;
+  d.position.set(Math.cos(a)*r,-0.15,Math.sin(a)*r);
+  d.scale.set(0.8+driftRng()*1.8,0.35+driftRng()*0.4,0.8+driftRng()*1.8);
+  d.receiveShadow=true;scene.add(d);
+}
+
+// ring of dark gabled houses with lit windows
+const buildingRng=mulberry32(4242);
+const winMat=new THREE.MeshBasicMaterial({color:0xffc978});
+const winMatDark=new THREE.MeshBasicMaterial({color:0x1a2438});
+for(let i=0;i<14;i++){
+  const a=i/14*Math.PI*2+0.22;
+  const r=30+buildingRng()*6;
+  const w=5.5+buildingRng()*4.5,h=6+buildingRng()*5.5,d=5+buildingRng()*3;
+  const gHouse=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(0.62+buildingRng()*0.06,0.18,0.10+buildingRng()*0.06),roughness:0.95}));
+  body.position.y=h/2;body.castShadow=body.receiveShadow=true;gHouse.add(body);
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(Math.hypot(w,d)*0.62,h*0.42,4),M.snow);
+  roof.position.y=h+h*0.21;roof.rotation.y=Math.PI/4;gHouse.add(roof);
+  const rows=Math.floor(h/2.4),cols=Math.floor(w/1.9);
+  for(let ry=0;ry<rows;ry++)for(let cx=0;cx<cols;cx++){
+    const win=new THREE.Mesh(new THREE.PlaneGeometry(0.75,0.95),buildingRng()<0.62?winMat:winMatDark);
+    win.position.set(-w/2+(cx+0.5)*(w/cols),1.6+ry*2.3,d/2+0.02);gHouse.add(win);
+  }
+  gHouse.position.set(Math.cos(a)*r,0,Math.sin(a)*r);
+  gHouse.lookAt(0,0,0);scene.add(gHouse);
+}
+
+/* ============================================================
+   CHRISTMAS TREE (center-back) with 380 twinkling lights
+   ============================================================ */
+const TREE_POS=new THREE.Vector3(0,0,-5.5);
+const tree=new THREE.Group();tree.position.copy(TREE_POS);
+const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.55,1.3,10),M.trunk);trunk.position.y=0.65;trunk.castShadow=true;tree.add(trunk);
+const tierR=[3.35,2.55,1.75,0.95],tierH=2.15;
+let ty=1.1;
+for(let i=0;i<4;i++){
+  const cone=new THREE.Mesh(new THREE.ConeGeometry(tierR[i],tierH,18),M.leaf);
+  cone.position.y=ty+tierH/2;cone.castShadow=true;tree.add(cone);
+  const snowRing=new THREE.Mesh(new THREE.ConeGeometry(tierR[i]*1.015,0.5,18),M.snow);
+  snowRing.position.y=ty+0.32;tree.add(snowRing);
+  ty+=tierH*0.62;
+}
+const star=new THREE.Mesh(new THREE.OctahedronGeometry(0.46),new THREE.MeshStandardMaterial({color:0xffd95e,emissive:0xffc02e,emissiveIntensity:2.6,roughness:0.3}));
+star.position.y=ty+tierH*0.55+0.35;tree.add(star);
+const treeLight=new THREE.PointLight(0xffd27a,60,16,2);treeLight.position.set(TREE_POS.x,4.4,TREE_POS.z);scene.add(treeLight);
+
+// tree light points (spiral)
+const TREE_LIGHTS=380;
+const treeLightGeo=new THREE.BufferGeometry();
+{
+  const pos=new Float32Array(TREE_LIGHTS*3),phase=new Float32Array(TREE_LIGHTS),ci=new Float32Array(TREE_LIGHTS);
+  for(let i=0;i<TREE_LIGHTS;i++){
+    const t=i/TREE_LIGHTS,y=1.35+t*5.6;
+    const r=Math.max(0.18,3.3*(1-(y-1.1)/6.4))+0.07;
+    const a=i*2.39996;
+    pos[i*3]=Math.cos(a)*r;pos[i*3+1]=y;pos[i*3+2]=Math.sin(a)*r;
+    phase[i]=Math.random()*Math.PI*2;ci[i]=Math.random();
+  }
+  treeLightGeo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  treeLightGeo.setAttribute('aPhase',new THREE.BufferAttribute(phase,1));
+  treeLightGeo.setAttribute('aSeed',new THREE.BufferAttribute(ci,1));
+}
+const treeLightMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:{value:0},uPR:{value:renderer.getPixelRatio()}},
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  vertexShader:`attribute float aPhase;attribute float aSeed;varying float vP;varying float vS;uniform float uPR;
+    void main(){vP=aPhase;vS=aSeed;vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;gl_PointSize=clamp(150.0/-mv.z,2.0,18.0)*uPR;}`,
+  fragmentShader:`varying float vP;varying float vS;uniform float uTime;
+    void main(){vec2 d=gl_PointCoord-0.5;float m=length(d);if(m>0.5)discard;
+      vec3 col=0.5+0.5*cos(6.2831*(vS*3.0+vec3(0.0,0.33,0.67)));
+      float tw=0.35+0.85*pow(0.5+0.5*sin(uTime*2.6+vP*4.0+vS*17.0),2.0);
+      float a=smoothstep(0.5,0.05,m);gl_FragColor=vec4(col*tw*1.9,a);}`
+});
+const treeLightPts=new THREE.Points(treeLightGeo,treeLightMat);tree.add(treeLightPts);
+
+/* ============================================================
+   16 WOODEN STALLS — snow roofs, goods, warm glow, signs
+   ============================================================ */
+const SIGN_TEXTS=['TOYS','MULLED WINE','CANDLES','GINGERBREAD','GIFTS','KNITWEAR','ORNAMENTS','HONEY','CHEESE','MUGS','SPICES','WREATHS','CANDY CANES','BAKED PIES','CRAFTS','COCOA'];
+const STALL_R=15.2;
+const stallFarcades=[];
+const stalls=[];
+const stallRng=mulberry32(9001);
+const goodsMats=[0xb5402f,0x2f6db5,0x3f9e57,0xd9a844,0x8a4bb5,0xe07b2a,0x3ab5a0,0xd6538a].map(c=>new THREE.MeshStandardMaterial({color:c,roughness:0.5}));
+const loafMat=new THREE.MeshStandardMaterial({color:0xa8743a,roughness:0.8});
+
+function buildStall(i){
+  const g=new THREE.Group();
+  const roofMat=i%2?M.roofGreen:M.roofRed;
+  // timber base / back panel
+  const back=new THREE.Mesh(new THREE.BoxGeometry(3.5,2.35,0.18),M.wood);
+  back.position.set(0,1.32,-1.05);back.castShadow=back.receiveShadow=true;g.add(back);
+  // side posts
+  const postGeo=new THREE.CylinderGeometry(0.09,0.09,2.35,8);
+  [[-1.62,-1.0],[1.62,-1.0],[-1.62,1.0],[1.62,1.0]].forEach(([x,z])=>{
+    const p=new THREE.Mesh(postGeo,M.woodDark);p.position.set(x,1.32,z);p.castShadow=true;g.add(p);
+    const cap=new THREE.Mesh(new THREE.SphereGeometry(0.13,8,6),M.snow);cap.position.set(x,2.53,z);g.add(cap);
+  });
+  // counter
+  const counter=new THREE.Mesh(new THREE.BoxGeometry(3.5,0.92,0.55),M.wood);
+  counter.position.set(0,0.62,0.78);counter.castShadow=counter.receiveShadow=true;g.add(counter);
+  const counterTop=new THREE.Mesh(new THREE.BoxGeometry(3.7,0.09,0.72),M.woodDark);
+  counterTop.position.set(0,1.12,0.78);g.add(counterTop);
+  const counterSnow=new THREE.Mesh(new THREE.BoxGeometry(3.72,0.07,0.74),M.snow);
+  counterSnow.position.set(0,1.2,0.78);g.add(counterSnow);
+  // interior warm glow backing
+  const glow=new THREE.Mesh(new THREE.PlaneGeometry(3.1,1.5),new THREE.MeshBasicMaterial({color:0xffb267}));
+  glow.position.set(0,1.55,-0.94);g.add(glow);
+  // hanging goods silhouettes against glow
+  for(let k=0;k<5;k++){
+    const s=0.22+stallRng()*0.18;
+    const item=stallRng()<0.5
+      ? new THREE.Mesh(new THREE.ConeGeometry(s*0.55,s*1.5,8),new THREE.MeshStandardMaterial({color:0x274a2c,roughness:0.9}))
+      : new THREE.Mesh(new THREE.SphereGeometry(s*0.6,8,6),goodsMats[(i+k)%goodsMats.length]);
+    item.position.set(-1.2+k*0.6,1.75+((k%2)*0.12),-0.85);g.add(item);
+  }
+  // peaked roof: two slabs + snow caps
+  const slabGeo=new THREE.BoxGeometry(4.15,0.14,1.62);
+  const snowSlabGeo=new THREE.BoxGeometry(4.22,0.09,1.66);
+  [[-1,0.62],[1,-0.62]].forEach(([s])=>{});
+  const r1=new THREE.Mesh(slabGeo,roofMat);r1.position.set(0,2.78,0.66);r1.rotation.x=0.62;r1.castShadow=true;g.add(r1);
+  const r2=new THREE.Mesh(slabGeo,roofMat);r2.position.set(0,2.78,-0.66);r2.rotation.x=-0.62;r2.castShadow=true;g.add(r2);
+  const s1=new THREE.Mesh(snowSlabGeo,M.snow);s1.position.set(0,2.86,0.68);s1.rotation.x=0.62;g.add(s1);
+  const s2=new THREE.Mesh(snowSlabGeo,M.snow);s2.position.set(0,2.86,-0.68);s2.rotation.x=-0.62;g.add(s2);
+  const ridge=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.16,4.25,8),M.snow);
+  ridge.rotation.z=Math.PI/2;ridge.position.set(0,3.28,0);g.add(ridge);
+  // signboard
+  const sign=new THREE.Mesh(new THREE.PlaneGeometry(2.5,0.62),new THREE.MeshBasicMaterial({map:signTexture(SIGN_TEXTS[i])}));
+  sign.position.set(0,2.28,1.02);g.add(sign);
+  const signSnow=new THREE.Mesh(new THREE.BoxGeometry(2.55,0.08,0.1),M.snow);signSnow.position.set(0,2.62,1.02);g.add(signSnow);
+  // goods on the counter
+  for(let k=0;k<9;k++){
+    const gx=-1.45+k*0.36+(stallRng()-0.5)*0.12,gz=0.62+stallRng()*0.3;
+    const kind=stallRng();
+    let item;
+    if(kind<0.35){item=new THREE.Mesh(new THREE.BoxGeometry(0.2+stallRng()*0.12,0.16+stallRng()*0.14,0.2+stallRng()*0.1),goodsMats[(i*3+k)%goodsMats.length]);item.position.set(gx,1.28,gz);}
+    else if(kind<0.62){item=new THREE.Mesh(new THREE.SphereGeometry(0.09+stallRng()*0.05,10,8),new THREE.MeshStandardMaterial({color:[0xc0392b,0xd4af37,0x2e86c1,0x8e44ad,0x1e8449][(i+k)%5],roughness:0.25,metalness:0.5}));item.position.set(gx,1.3,gz);}
+    else if(kind<0.8){item=new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.06,0.16,10),goodsMats[(i+k+2)%goodsMats.length]);item.position.set(gx,1.32,gz);}
+    else {item=new THREE.Mesh(new THREE.BoxGeometry(0.24,0.13,0.14),loafMat);item.position.set(gx,1.3,gz);}
+    item.rotation.y=stallRng()*Math.PI;item.castShadow=true;g.add(item);
+  }
+  // crates beside stall
+  if(stallRng()<0.7){
+    const crate=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.4,0.6),M.woodDark);
+    crate.position.set(stallRng()<0.5?-2.15:2.15,0.2,0.9);crate.castShadow=true;g.add(crate);
+    const crateSnow=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.08,0.62),M.snow);crateSnow.position.set(crate.position.x,0.44,0.9);g.add(crateSnow);
+  }
+  // warm point light (every stall gets a soft one; low shadow cost — shadows off)
+  const pl=new THREE.PointLight(0xffb168,15,6.5,2);pl.position.set(0,1.9,0.3);g.add(pl);
+  return g;
+}
+for(let i=0;i<16;i++){
+  const a=i/16*Math.PI*2+Math.PI/16;
+  const x=Math.cos(a)*STALL_R,z=Math.sin(a)*STALL_R;
+  const s=buildStall(i);
+  s.position.set(x,0,z);
+  s.rotation.y=Math.atan2(-x,-z);
+  scene.add(s);
+  stalls.push(s);
+  stallFarcades.push(new THREE.Vector3(x,3.35,z));
+}
+
+/* ============================================================
+   CAROUSEL (14 horses, spin-up / coast-down)
+   ============================================================ */
+const CAR_POS=new THREE.Vector3(8.4,0,5.4);
+const carousel=new THREE.Group();carousel.position.copy(CAR_POS);scene.add(carousel);
+const carouselSpin=new THREE.Group();carousel.add(carouselSpin);
+// static base
+const base=new THREE.Mesh(new THREE.CylinderGeometry(3.35,3.5,0.4,28),M.woodDark);base.position.y=0.2;base.castShadow=base.receiveShadow=true;carousel.add(base);
+const baseSnow=new THREE.Mesh(new THREE.CylinderGeometry(3.4,3.4,0.07,28),M.snow);baseSnow.position.y=0.42;carousel.add(baseSnow);
+// rotating deck
+const deck=new THREE.Mesh(new THREE.CylinderGeometry(3.1,3.1,0.14,28),M.cream);deck.position.y=0.5;deck.receiveShadow=true;carouselSpin.add(deck);
+// center column
+const column=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.4,3.0,14),M.roofRed);column.position.y=2.1;column.castShadow=true;carouselSpin.add(column);
+const colRing1=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.07,8,20),M.gold);colRing1.rotation.x=Math.PI/2;colRing1.position.y=1.35;carouselSpin.add(colRing1);
+const colRing2=colRing1.clone();colRing2.position.y=2.6;carouselSpin.add(colRing2);
+// canopy — striped cone + gold trim + bulb ring
+const canopy=new THREE.Mesh(new THREE.ConeGeometry(3.85,1.5,24,1,true),new THREE.MeshStandardMaterial({map:stripeTex,roughness:0.75,side:THREE.DoubleSide}));
+canopy.position.y=4.25;canopy.castShadow=true;carouselSpin.add(canopy);
+const canopySnow=new THREE.Mesh(new THREE.ConeGeometry(2.35,0.75,24),M.snow);canopySnow.position.y=5.08;carouselSpin.add(canopySnow);
+const finial=new THREE.Mesh(new THREE.SphereGeometry(0.34,12,10),M.gold);finial.position.y=5.6;carouselSpin.add(finial);
+const trim=new THREE.Mesh(new THREE.TorusGeometry(3.85,0.1,8,36),M.gold);trim.rotation.x=Math.PI/2;trim.position.y=3.52;carouselSpin.add(trim);
+const canopyLight=new THREE.PointLight(0xffbe6e,55,11,2);canopyLight.position.y=3.1;carousel.add(canopyLight);
+// canopy rim bulbs
+for(let i=0;i<24;i++){const a=i/24*Math.PI*2;const b=new THREE.Mesh(new THREE.SphereGeometry(0.09,8,6),M.glowHot);b.position.set(Math.cos(a)*3.85,3.5,Math.sin(a)*3.85);carouselSpin.add(b);}
+// grandfather clock-ish sign on column? instead a glowing star plaque
+// horses
+function buildHorse(color){
+  const h=new THREE.Group();
+  const bodyMat=new THREE.MeshStandardMaterial({color,roughness:0.55});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(0.32,12,10),bodyMat);body.scale.set(1.55,0.95,0.72);body.position.y=0;h.add(body);
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.13,0.17,0.5,8),bodyMat);neck.position.set(0.42,0.32,0);neck.rotation.z=-0.6;h.add(neck);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.36,0.2,0.18),bodyMat);head.position.set(0.62,0.55,0);head.rotation.z=-0.25;h.add(head);
+  const mane=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.3,0.07),new THREE.MeshStandardMaterial({color:0x2a1a10,roughness:0.9}));mane.position.set(0.38,0.42,0);mane.rotation.z=-0.6;h.add(mane);
+  const snout=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.14,0.14),new THREE.MeshStandardMaterial({color:0x1c1c1c}));snout.position.set(0.78,0.5,0);h.add(snout);
+  const eyeMat=new THREE.MeshBasicMaterial({color:0x111111});
+  [[0.13],[-0.13]].forEach(([z])=>{const e=new THREE.Mesh(new THREE.SphereGeometry(0.028,6,6),eyeMat);e.position.set(0.68,0.58,z);h.add(e);});
+  const legGeo=new THREE.CylinderGeometry(0.055,0.045,0.52,8);
+  [[0.3,0.16,0.35],[0.3,-0.16,-0.3],[-0.28,0.16,-0.35],[-0.28,-0.16,0.32]].forEach(([x,z,rz])=>{
+    const leg=new THREE.Mesh(legGeo,bodyMat);leg.position.set(x,-0.36,z);leg.rotation.x=rz;h.add(leg);
+  });
+  const saddle=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.09,0.4),M.gold);saddle.position.set(-0.03,0.28,0);h.add(saddle);
+  h.traverse(o=>{if(o.isMesh)o.castShadow=true;});
+  return h;
+}
+const HORSES=14,horses=[];
+const horseCols=[0xf0e6d2,0x7a4a2a,0x3a3a44,0xa03030,0xd9c9a0,0x5a3a5a,0x2f4a6a,0xdadada,0x6e3a1e,0x402818,0xb8b8c8,0x883030,0xe8d8b8,0x303038];
+for(let i=0;i<HORSES;i++){
+  const a=i/HORSES*Math.PI*2;
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,2.9,8),M.gold);
+  pole.position.set(Math.cos(a)*2.15,2.0,Math.sin(a)*2.15);carouselSpin.add(pole);
+  const horse=buildHorse(horseCols[i]);
+  horse.position.set(Math.cos(a)*2.15,1.25,Math.sin(a)*2.15);
+  horse.rotation.y=-a+Math.PI; // face tangent direction
+  carouselSpin.add(horse);
+  horses.push({group:horse,phase:i*(Math.PI*2/HORSES)*2+i*0.7,baseY:1.25});
+}
+
+/* ============================================================
+   CATENARY LIGHT STRINGS — >= 1000 bulbs
+   ============================================================ */
+function catenary(a,b,sag,nSeg){
+  const pts=[];const mid=a.clone().lerp(b,0.5);const c=new THREE.Vector3(mid.x,mid.y-2*sag,mid.z);
+  for(let i=0;i<=nSeg;i++){const t=i/nSeg,it=1-t;
+    pts.push(new THREE.Vector3(
+      it*it*a.x+2*it*t*c.x+t*t*b.x,
+      it*it*a.y+2*it*t*c.y+t*t*b.y,
+      it*it*a.z+2*it*t*c.z+t*t*b.z));}
+  return pts;
+}
+const stringEndpoints=[];
+// ring strings between neighbouring stall peaks
+for(let i=0;i<16;i++) stringEndpoints.push([stallFarcades[i],stallFarcades[(i+1)%16],0.85]);
+// long radial strings from treetop to far stalls
+const treeTop=new THREE.Vector3(TREE_POS.x,8.6,TREE_POS.z);
+for(const i of [0,2,5,8,10,13]) stringEndpoints.push([treeTop.clone(),stallFarcades[i].clone(),1.6]);
+// cross-square diagonals
+for(let i=0;i<8;i++) stringEndpoints.push([stallFarcades[i],stallFarcades[(i+6)%16],2.3]);
+
+const bulbPos=[],bulbPhase=[],bulbU=[],bulbSeed=[];
+const wireMat=new THREE.LineBasicMaterial({color:0x0c0c10,transparent:true,opacity:0.85});
+for(const [a,b,sag] of stringEndpoints){
+  const len=a.distanceTo(b);
+  const pts=catenary(a,b,sag,Math.max(12,Math.floor(len*2)));
+  const geo=new THREE.BufferGeometry().setFromPoints(pts);
+  scene.add(new THREE.Line(geo,wireMat));
+  const count=Math.floor(len/0.17);
+  for(let k=0;k<count;k++){
+    const u=(k+0.5)/count;
+    // quadratic bezier eval
+    const mid=a.clone().lerp(b,0.5);const c=new THREE.Vector3(mid.x,mid.y-2*sag,mid.z);
+    const it=1-u;
+    bulbPos.push(it*it*a.x+2*it*u*c.x+u*u*b.x,(it*it*a.y+2*it*u*c.y+u*u*b.y)-0.09,it*it*a.z+2*it*u*c.z+u*u*b.z);
+    bulbPhase.push(Math.random()*Math.PI*2);bulbU.push(u);bulbSeed.push(Math.random());
+  }
+}
+const STRING_BULBS=bulbPos.length/3;
+const bulbGeo=new THREE.BufferGeometry();
+bulbGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(bulbPos),3));
+bulbGeo.setAttribute('aPhase',new THREE.BufferAttribute(new Float32Array(bulbPhase),1));
+bulbGeo.setAttribute('aU',new THREE.BufferAttribute(new Float32Array(bulbU),1));
+bulbGeo.setAttribute('aSeed',new THREE.BufferAttribute(new Float32Array(bulbSeed),1));
+const bulbMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:{value:0},uPattern:{value:0},uPR:{value:renderer.getPixelRatio()}},
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  vertexShader:`attribute float aPhase;attribute float aU;attribute float aSeed;
+    varying float vP;varying float vU;varying float vS;uniform float uPR;
+    void main(){vP=aPhase;vU=aU;vS=aSeed;vec4 mv=modelViewMatrix*vec4(position,1.0);
+      gl_Position=projectionMatrix*mv;gl_PointSize=clamp(105.0/-mv.z,2.4,16.0)*uPR;}`,
+  fragmentShader:`varying float vP;varying float vU;varying float vS;uniform float uTime;uniform float uPattern;
+    void main(){
+      vec2 d=gl_PointCoord-0.5;float m=length(d);if(m>0.5)discard;
+      float p=floor(uPattern+0.5);vec3 col;float tw;
+      if(p<0.5){           // 0: warm candle twinkle
+        col=mix(vec3(1.0,0.72,0.32),vec3(1.0,0.88,0.55),vS);
+        tw=0.62+0.5*pow(0.5+0.5*sin(uTime*2.3+vP*5.0+vS*23.0),1.6);
+      } else if(p<1.5){    // 1: rainbow drift
+        col=0.5+0.5*cos(6.2831*(vS+uTime*0.09+vec3(0.0,0.33,0.67)));
+        tw=0.55+0.75*pow(0.5+0.5*sin(uTime*3.1+vP*3.0),2.0);
+      } else if(p<2.5){    // 2: golden chase along the wire
+        float b=pow(0.5+0.5*sin(vU*46.0-uTime*7.0),4.0);
+        col=vec3(1.0,0.8,0.35);tw=0.18+1.7*b;
+      } else {             // 3: red/green/white alternating twinkle
+        float sel=mod(floor(vS*3.0)+floor(uTime*1.4),3.0);
+        col=sel<1.0?vec3(1.0,0.25,0.2):(sel<2.0?vec3(0.3,1.0,0.4):vec3(0.95,0.97,1.0));
+        tw=0.35+1.1*pow(0.5+0.5*sin(uTime*4.2+vP*9.0),2.0);
+      }
+      float a=smoothstep(0.5,0.05,m);
+      gl_FragColor=vec4(col*tw*2.1,a);
+    }`
+});
+const bulbs=new THREE.Points(bulbGeo,bulbMat);scene.add(bulbs);
+
+/* ============================================================
+   LAMPS around the inner plaza
+   ============================================================ */
+for(let i=0;i<6;i++){
+  const a=i/6*Math.PI*2+Math.PI/6,r=9.6;
+  const x=Math.cos(a)*r,z=Math.sin(a)*r;
+  const g=new THREE.Group();g.position.set(x,0,z);
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.15,3.7,10),new THREE.MeshStandardMaterial({color:0x151a20,roughness:0.6,metalness:0.6}));pole.position.y=1.85;pole.castShadow=true;g.add(pole);
+  const collar=new THREE.Mesh(new THREE.TorusGeometry(0.14,0.04,6,12),M.gold);collar.rotation.x=Math.PI/2;collar.position.y=2.6;g.add(collar);
+  const lantern=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.5,0.42),M.glowWarm);lantern.position.y=3.9;g.add(lantern);
+  const lanternCap=new THREE.Mesh(new THREE.ConeGeometry(0.38,0.3,4),new THREE.MeshStandardMaterial({color:0x151a20,roughness:0.6}));lanternCap.position.y=4.3;lanternCap.rotation.y=Math.PI/4;g.add(lanternCap);
+  const capSnow=new THREE.Mesh(new THREE.ConeGeometry(0.3,0.14,4),M.snow);capSnow.position.y=4.44;capSnow.rotation.y=Math.PI/4;g.add(capSnow);
+  const pl=new THREE.PointLight(0xffc178,26,10,2);pl.position.y=3.9;g.add(pl);
+  scene.add(g);
+}
+
+/* ============================================================
+   SNOW — 30,000 flakes, shader-driven, deterministic
+   ============================================================ */
+const FLAKES=30000;
+const snowGeo=new THREE.BufferGeometry();
+{
+  const pos=new Float32Array(FLAKES*3),seed=new Float32Array(FLAKES*3);
+  const r=mulberry32(31337);
+  for(let i=0;i<FLAKES;i++){
+    pos[i*3]=0;pos[i*3+1]=0;pos[i*3+2]=0;
+    seed[i*3]=r();seed[i*3+1]=r();seed[i*3+2]=r();
+  }
+  snowGeo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  snowGeo.setAttribute('aSeed',new THREE.BufferAttribute(seed,3));
+}
+const SNOW_COUNTS=[0,12000,22000,30000];
+const SNOW_SPEEDS=[0,5.2,7.6,10.5];
+let snowLevel=2;
+const snowMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:{value:0},uFall:{value:SNOW_SPEEDS[2]},uPR:{value:renderer.getPixelRatio()}},
+  transparent:true,depthWrite:false,
+  vertexShader:`attribute vec3 aSeed;uniform float uTime;uniform float uFall;uniform float uPR;varying float vA;
+    void main(){
+      float H=36.0;
+      float y=mod(aSeed.y*H-uTime*uFall*(0.55+0.75*aSeed.z),H);
+      float x=(aSeed.x-0.5)*76.0 + sin(uTime*0.6+aSeed.z*39.0)*1.5 + sin(y*0.32+uTime*1.25+aSeed.x*25.0)*0.5;
+      float z=(aSeed.z-0.5)*76.0 + cos(uTime*0.5+aSeed.x*33.0)*1.5;
+      vec4 mv=modelViewMatrix*vec4(x,y,z,1.0);
+      gl_Position=projectionMatrix*mv;
+      gl_PointSize=clamp((2.1+aSeed.x*2.6)*(26.0/-mv.z),1.0,7.0)*uPR;
+      vA=0.55+aSeed.y*0.45;
+    }`,
+  fragmentShader:`varying float vA;
+    void main(){vec2 d=gl_PointCoord-0.5;float m=length(d);if(m>0.5)discard;
+      float a=smoothstep(0.5,0.08,m)*vA;gl_FragColor=vec4(0.93,0.96,1.0,a);}`
+});
+const snowfall=new THREE.Points(snowGeo,snowMat);
+snowGeo.setDrawRange(0,SNOW_COUNTS[snowLevel]);
+scene.add(snowfall);
+
+/* ============================================================
+   VISITORS — 52 walkers/browsers/carousel-gawkers + cups + steam
+   ============================================================ */
+const visitors=[];
+const COAT=[0x7a2d2d,0x2d4a6e,0x33502f,0x50324e,0x704a1e,0x24384d,0x5e2f1a,0x3a3f4a,0x6e2d47,0x234d43,0x845c1e,0x442a55];
+const HAT=[0xd8d2c0,0x8c1f1f,0x1f3a8c,0x2f6b3a,0xb03a6e,0xefe6c8];
+const SKIN=[0xf2c89b,0xd9a06b,0x8a5a33,0xf6d7b0,0x6e4630];
+const FOOT_MAX=460;
+const footPool=[];
+const footGeo=new THREE.CircleGeometry(0.115,10);footGeo.scale(1,1.7,1);
+for(let i=0;i<FOOT_MAX;i++){
+  const m=new THREE.Mesh(footGeo,new THREE.MeshBasicMaterial({color:0x232a40,transparent:true,opacity:0.55,depthWrite:false}));
+  m.rotation.x=-Math.PI/2;m.visible=false;m.renderOrder=1;scene.add(m);footPool.push(m);
+}
+let fpIndex=0;
+function spawnFootprint(x,z,rot){
+  const m=footPool[fpIndex%FOOT_MAX];const slot=fpIndex;fpIndex++;
+  m.position.set(x,0.018+(slot%13)*0.0013,z);
+  m.rotation.z=rot;m.visible=true;
+}
+function buildVisitorMesh(rng,i){
+  const g=new THREE.Group();
+  const coat=COAT[Math.floor(rng()*COAT.length)];
+  const coatMat=new THREE.MeshStandardMaterial({color:coat,roughness:0.9});
+  const darkMat=new THREE.MeshStandardMaterial({color:0x1d1d24,roughness:0.9});
+  // legs & boots
+  const legGeo=new THREE.CylinderGeometry(0.115,0.125,0.62,8);
+  [[-0.16],[0.16]].forEach(([x])=>{const l=new THREE.Mesh(legGeo,darkMat);l.position.set(x,0.31,0);g.add(l);
+    const b=new THREE.Mesh(new THREE.BoxGeometry(0.17,0.12,0.26),darkMat);b.position.set(x,0.06,0.05);g.add(b);});
+  // coat (flared cylinder)
+  const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.44,1.05,12),coatMat);torso.position.y=1.08;torso.castShadow=true;g.add(torso);
+  // arms
+  const armGeo=new THREE.CylinderGeometry(0.085,0.095,0.68,8);
+  const mittenMat=new THREE.MeshStandardMaterial({color:HAT[Math.floor(rng()*HAT.length)],roughness:0.8});
+  [[-1,0.35],[1,-0.35]].forEach(([s,rz])=>{
+    const arm=new THREE.Mesh(armGeo,coatMat);arm.position.set(s*0.4,1.13,0.02);arm.rotation.z=rz;arm.castShadow=true;g.add(arm);
+    const mit=new THREE.Mesh(new THREE.SphereGeometry(0.095,8,6),mittenMat);mit.position.set(s*0.52,0.8,0.04);g.add(mit);
+  });
+  // scarf band
+  const scarf=new THREE.Mesh(new THREE.CylinderGeometry(0.205,0.215,0.14,10),mittenMat);scarf.position.y=1.62;g.add(scarf);
+  // head + hat
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.21,12,10),new THREE.MeshStandardMaterial({color:SKIN[Math.floor(rng()*SKIN.length)],roughness:0.65}));
+  head.position.y=1.82;head.castShadow=true;g.add(head);
+  const nose=new THREE.Mesh(new THREE.SphereGeometry(0.035,6,6),head.material);nose.position.set(0,1.8,0.2);g.add(nose);
+  const hatCol=HAT[Math.floor(rng()*HAT.length)];
+  const hat=new THREE.Mesh(new THREE.ConeGeometry(0.21,0.42,10),new THREE.MeshStandardMaterial({color:hatCol,roughness:0.85}));
+  hat.position.y=2.08;g.add(hat);
+  const pompom=new THREE.Mesh(new THREE.SphereGeometry(0.07,8,6),M.snow);pompom.position.y=2.32;g.add(pompom);
+  // steaming cup for every 3rd visitor
+  const hasCup=i%3===0;
+  let cup=null;
+  if(hasCup){
+    cup=new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.06,0.11,10),new THREE.MeshStandardMaterial({color:0xd8c49a,roughness:0.5}));
+    cup.position.set(0.34,1.06,0.3);g.add(cup);
+  }
+  g.scale.setScalar(0.9+rng()*0.22);
+  return {group:g,hasCup,cup};
+}
+const V_COUNT=52;
+const visitorRng=mulberry32(20241225);
+for(let i=0;i<V_COUNT;i++){
+  const seed=1000+i;
+  const rng=mulberry32(seed);
+  const {group,hasCup}=buildVisitorMesh(rng,i);
+  scene.add(group);
+  const v={i,seed,group,hasCup,rng:null,heading:0,mode:'walk',target:new THREE.Vector3(),dwell:0,stepPhase:0,footAcc:0,footSide:1,orbitA:0,orbitR:4.6,orbitT:0,speed:1.1+rng()*0.5};
+  visitors.push(v);
+}
+function resetVisitor(v){
+  v.rng=mulberry32(v.seed);
+  const a=v.rng()*Math.PI*2,r=6.5+v.rng()*7.5;
+  v.group.position.set(Math.cos(a)*r,0,Math.sin(a)*r);
+  v.heading=v.rng()*Math.PI*2;
+  v.mode='walk';v.dwell=0;v.stepPhase=0;v.footAcc=0;v.orbitT=0;
+  v.orbitA=v.rng()*Math.PI*2;v.orbitR=4.1+v.rng()*1.2;
+  pickVisitorTarget(v);
+  v.group.rotation.y=v.heading;
+}
+function pickVisitorTarget(v){
+  const r=v.rng;
+  if(r()<0.3){v.mode='orbit';v.orbitT=6+r()*9;return;}
+  v.mode='walk';
+  let x,z,tries=0;
+  do{
+    const a=r()*Math.PI*2,rad=6.2+r()*7.8;
+    x=Math.cos(a)*rad;z=Math.sin(a)*rad;tries++;
+  }while(Math.hypot(x-CAR_POS.x,z-CAR_POS.z)<4.6&&tries<8);
+  v.target.set(x,0,z);
+}
+function updateVisitor(v,dt){
+  const p=v.group.position;
+  if(v.mode==='orbit'){
+    v.orbitA+=dt*0.22;v.orbitT-=dt;
+    const nx=CAR_POS.x+Math.cos(v.orbitA)*v.orbitR,nz=CAR_POS.z+Math.sin(v.orbitA)*v.orbitR;
+    const dx=nx-p.x,dz=nz-p.z;const dl=Math.hypot(dx,dz)||1;
+    v.heading=Math.atan2(dx,dz);
+    p.x=nx;p.z=nz;
+    v.group.rotation.y=v.heading;
+    v.group.position.y=Math.abs(Math.sin(v.orbitA*6))*0.04;
+    if(v.orbitT<=0)pickVisitorTarget(v);
+    return;
+  }
+  if(v.mode==='dwell'){
+    v.dwell-=dt;
+    v.group.position.y=Math.sin((v.dwell*3)+v.i)*0.015; // idle sway
+    if(v.dwell<=0)pickVisitorTarget(v);
+    return;
+  }
+  // walk toward target
+  const dx=v.target.x-p.x,dz=v.target.z-p.z,dist=Math.hypot(dx,dz);
+  if(dist<0.45){v.mode='dwell';v.dwell=1.6+v.rng()*4.5;return;}
+  const desired=Math.atan2(dx,dz);
+  let diff=desired-v.heading;
+  while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
+  v.heading+=clamp(diff,-2.6*dt,2.6*dt);
+  const sp=v.speed;
+  p.x+=Math.sin(v.heading)*sp*dt;p.z+=Math.cos(v.heading)*sp*dt;
+  v.stepPhase+=sp*dt*3.6;
+  p.y=Math.abs(Math.sin(v.stepPhase))*0.055;
+  v.group.rotation.y=v.heading;
+  // footprints
+  v.footAcc+=sp*dt;
+  if(v.footAcc>0.62){
+    v.footAcc=0;v.footSide*=-1;
+    const rx=Math.cos(v.heading)*0.15*v.footSide,rz=-Math.sin(v.heading)*0.15*v.footSide;
+    spawnFootprint(p.x+rx,p.z+rz,v.heading);
+  }
+}
+
+/* ============================================================
+   STEAM from cups (shader-lifted points anchored to holders)
+   ============================================================ */
+const STEAM_PER=4;
+const cupHolders=visitors.filter(v=>v.hasCup);
+const STEAM_N=cupHolders.length*STEAM_PER;
+const steamGeo=new THREE.BufferGeometry();
+const steamPos=new Float32Array(STEAM_N*3);
+const steamPhase=new Float32Array(STEAM_N);
+const steamHolder=new Float32Array(STEAM_N);
+for(let i=0;i<STEAM_N;i++){steamHolder[i]=i%cupHolders.length;steamPhase[i]=Math.random();}
+steamGeo.setAttribute('position',new THREE.BufferAttribute(steamPos,3));
+steamGeo.setAttribute('aPhase',new THREE.BufferAttribute(steamPhase,1));
+const steamMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:{value:0},uPR:{value:renderer.getPixelRatio()}},
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  vertexShader:`attribute float aPhase;uniform float uTime;uniform float uPR;varying float vLife;
+    void main(){
+      float life=fract(uTime*0.42+aPhase);vLife=life;
+      vec3 p=position;
+      p.y+=life*0.85;
+      p.x+=sin(life*9.0+aPhase*40.0+uTime*1.5)*0.05;
+      p.z+=cos(life*7.0+aPhase*31.0)*0.05;
+      vec4 mv=modelViewMatrix*vec4(p,1.0);
+      gl_Position=projectionMatrix*mv;
+      gl_PointSize=clamp((3.0+life*7.0)*(24.0/-mv.z),1.5,12.0)*uPR;
+    }`,
+  fragmentShader:`varying float vLife;
+    void main(){vec2 d=gl_PointCoord-0.5;float m=length(d);if(m>0.5)discard;
+      float a=(1.0-vLife)*0.42*smoothstep(0.5,0.1,m);gl_FragColor=vec4(0.9,0.93,1.0,a);}`
+});
+const steam=new THREE.Points(steamGeo,steamMat);scene.add(steam);
+function updateSteamEmitters(){
+  for(let i=0;i<STEAM_N;i++){
+    const v=cupHolders[Math.floor(steamHolder[i])];
+    const p=v.group.position;
+    steamPos[i*3]=p.x+Math.sin(v.heading)*0.3+Math.cos(v.heading)*0.34;
+    steamPos[i*3+1]=p.y+1.14;
+    steamPos[i*3+2]=p.z+Math.cos(v.heading)*0.3-Math.sin(v.heading)*0.34;
+  }
+  steamGeo.attributes.position.needsUpdate=true;
+}
+
+/* ============================================================
+   STARS
+   ============================================================ */
+{
+  const N=420,pos=new Float32Array(N*3);const r=mulberry32(555);
+  for(let i=0;i<N;i++){
+    const a=r()*Math.PI*2,el=0.18+r()*0.75,rad=140;
+    pos[i*3]=Math.cos(a)*Math.cos(el)*rad;pos[i*3+1]=Math.sin(el)*rad;pos[i*3+2]=Math.sin(a)*Math.cos(el)*rad;
+  }
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xcdd8ff,size:0.55,sizeAttenuation:true,fog:false})));
+}
+
+/* ============================================================
+   SIMULATION STATE + controls (Space / L / Up / Down)
+   ============================================================ */
+const CAROUSEL_MAX=1.05;         // rad/s
+const STEP=1/60;
+let simTime=0,carouselAngle=0,carouselSpeed=0,carouselOn=false;
+let patternMode=0;
+const PATTERN_NAMES=['Warm Twinkle','Rainbow Drift','Golden Chase','Festive Alternate'];
+let showcaseActive=false;
+
+function resetSimulation(){
+  simTime=0;carouselAngle=0;carouselSpeed=0;
+  fpIndex=0;for(const m of footPool)m.visible=false;
+  for(const v of visitors)resetVisitor(v);
+  updateSteamEmitters();
+}
+function advance(dt){
+  simTime+=dt;
+  // showcase timeline overrides interactive toggles
+  let targetOn=carouselOn,snow=snowLevel,pattern=patternMode;
+  if(showcaseActive){
+    targetOn=simTime>=1.15;
+    pattern=simTime<5.0?0:(simTime<9.5?1:2);
+    snow=simTime<8.3?2:3;
+  }
+  patternMode=showcaseActive?pattern:patternMode;
+  snowLevel=showcaseActive?snow:snowLevel;
+  bulbMat.uniforms.uPattern.value=patternMode;
+  snowGeo.setDrawRange(0,SNOW_COUNTS[snowLevel]);
+  snowMat.uniforms.uFall.value=SNOW_SPEEDS[snowLevel];
+  // carousel spin-up / coast-down (exponential approach, different rates)
+  const target=targetOn?CAROUSEL_MAX:0;
+  const rate=targetOn?0.55:0.22;
+  carouselSpeed+=(target-carouselSpeed)*(1-Math.exp(-rate*dt));
+  carouselAngle+=carouselSpeed*dt;
+  // visitors
+  for(const v of visitors)updateVisitor(v,dt);
+}
+function applyCarouselAndSnow(t){
+  carouselSpin.rotation.y=carouselAngle;
+  const activity=clamp(carouselSpeed/CAROUSEL_MAX,0,1);
+  for(const h of horses)h.group.position.y=h.baseY+Math.sin(carouselAngle*2.1+h.phase)*0.36*activity;
+  snowMat.uniforms.uTime.value=simTime;
+  bulbMat.uniforms.uTime.value=simTime;
+  treeLightMat.uniforms.uTime.value=simTime;
+  steamMat.uniforms.uTime.value=simTime;
+  star.rotation.y=simTime*0.8;
+  updateSteamEmitters();
+}
+function resetAll(){resetSimulation();carouselSpin.rotation.y=0;}
+
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();if(!showcaseActive)carouselOn=!carouselOn;}
+  else if(e.code==='KeyL'){if(!showcaseActive){patternMode=(patternMode+1)%4;bulbMat.uniforms.uPattern.value=patternMode;}}
+  else if(e.code==='ArrowUp'){e.preventDefault();if(!showcaseActive)snowLevel=clamp(snowLevel+1,1,3);}
+  else if(e.code==='ArrowDown'){e.preventDefault();if(!showcaseActive)snowLevel=clamp(snowLevel-1,1,3);}
+});
+
+/* ============================================================
+   SHOWCASE — 12s scripted camera + behaviours
+   ============================================================ */
+const SHOWCASE_DURATION=12;
+const stallFocus=stalls[2].position.clone().add(new THREE.Vector3(0,1.4,0));
+const SHOTS=[
+  {t:0.0, pos:[17.5,11.5,19.5], look:[0,2.6,0]},
+  {t:2.1, pos:[11.5,2.6,12.0],  look:[1.5,2.4,-1.5]},
+  {t:4.1, pos:[stallFocus.x+3.4,2.1,stallFocus.z+4.2], look:[stallFocus.x,1.5,stallFocus.z]},
+  {t:6.3, pos:[CAR_POS.x+6.4,2.7,CAR_POS.z+4.6], look:[CAR_POS.x,2.4,CAR_POS.z]},
+  {t:8.8, pos:[1.0,14.5,15.5],  look:[0,1.2,-1]},
+  {t:12.0,pos:[15.5,8.5,17.5],  look:[0,3.0,0]},
+];
+const _posA=new THREE.Vector3(),_posB=new THREE.Vector3(),_lookA=new THREE.Vector3(),_lookB=new THREE.Vector3();
+function updateCameraShot(t){
+  let i=0;while(i<SHOTS.length-2&&t>SHOTS[i+1].t)i++;
+  const a=SHOTS[i],b=SHOTS[i+1];
+  const u=smooth(clamp((t-a.t)/(b.t-a.t),0,1));
+  _posA.fromArray(a.pos);_posB.fromArray(b.pos);
+  _lookA.fromArray(a.look);_lookB.fromArray(b.look);
+  camera.position.lerpVectors(_posA,_posB,u);
+  // subtle breathing hand-held sway (deterministic in t)
+  camera.position.x+=Math.sin(t*1.7)*0.12;
+  camera.position.y+=Math.sin(t*2.3+1.2)*0.08;
+  const look=_lookA.lerp(_lookB,u);
+  camera.lookAt(look);
+  controls.target.copy(look);
+}
+function seek(t){
+  t=clamp(t,0,SHOWCASE_DURATION);
+  const wasShowcase=showcaseActive;showcaseActive=true;
+  resetSimulation();
+  let rem=t;
+  while(rem>1e-6){const dt=Math.min(STEP,rem);advance(dt);rem-=dt;}
+  applyCarouselAndSnow(t);
+  updateCameraShot(t);
+  composer.render();
+  showcaseActive=wasShowcase;
+}
+window.showcase={duration:SHOWCASE_DURATION,seek};
+
+/* ============================================================
+   BENCH
+   ============================================================ */
+const TOTAL_LIGHTS=STRING_BULBS+TREE_LIGHTS;
+window.__bench={visitors:visitors.length,snowflakes:FLAKES,carouselSpeed:0,lights:TOTAL_LIGHTS};
+function updateBench(){
+  window.__bench.visitors=visitors.length;
+  window.__bench.snowflakes=FLAKES;
+  window.__bench.carouselSpeed=+carouselSpeed.toFixed(4);
+  window.__bench.lights=TOTAL_LIGHTS;
+}
+
+/* ============================================================
+   RECORD VIDEO button — captureStream + MediaRecorder
+   ============================================================ */
+const statusEl=document.getElementById('status');
+const recordBtn=document.getElementById('recordBtn');
+let recording=false;
+recordBtn.addEventListener('click',()=>{
+  if(recording)return;
+  recording=true;recordBtn.disabled=true;statusEl.textContent='● Recording showcase…';
+  controls.enabled=false;
+  const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':(MediaRecorder.isTypeSupported('video/webm')?'video/webm':'');
+  const stream=canvas.captureStream(60);
+  const chunks=[];
+  let rec;
+  try{rec=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:12_000_000}:{videoBitsPerSecond:12_000_000});}
+  catch(err){rec=new MediaRecorder(stream);}
+  rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
+  rec.onstop=()=>{
+    const blob=new Blob(chunks,{type:rec.mimeType||'video/webm'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download='christmas-market-showcase.webm';document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+    recording=false;recordBtn.disabled=false;statusEl.textContent='✓ Saved christmas-market-showcase.webm';
+    controls.enabled=true;showcaseActive=false;
+  };
+  rec.start(250);
+  const start=performance.now();
+  showcaseActive=true;
+  function tick(){
+    const el=(performance.now()-start)/1000;
+    const t=Math.min(el,SHOWCASE_DURATION);
+    seek(t);
+    updateBench();
+    if(el<SHOWCASE_DURATION){requestAnimationFrame(tick);}
+    else{showcaseActive=false;setTimeout(()=>{try{rec.stop();}catch(e){recording=false;recordBtn.disabled=false;controls.enabled=true;}},120);}
+  }
+  requestAnimationFrame(tick);
+});
+
+/* ============================================================
+   MAIN LOOP
+   ============================================================ */
+resetSimulation();
+const clockStart=performance.now();
+let lastT=clockStart/1000,acc=0;
+function frame(){
+  requestAnimationFrame(frame);
+  const now=performance.now()/1000;
+  let dt=Math.min(0.05,now-lastT);lastT=now;
+  if(!recording&&!showcaseActive){
+    acc+=dt;
+    while(acc>=STEP){advance(STEP);acc-=STEP;}
+    controls.update();
+  }
+  applyCarouselAndSnow(simTime);
+  composer.render();
+  updateBench();
+}
+frame();
+
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  composer.setSize(innerWidth,innerHeight);
+  bloom.setSize(innerWidth,innerHeight);
+  const pr=renderer.getPixelRatio();
+  bulbMat.uniforms.uPR.value=pr;snowMat.uniforms.uPR.value=pr;treeLightMat.uniforms.uPR.value=pr;steamMat.uniforms.uPR.value=pr;
+});
+</script>
+</body>
+</html>
+

@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orrery — An Interactive Solar System · Keplerian Elements (J2000)</title>
+<style>
+  :root{
+    --amber:#ffcf87; --amber2:#ffb85c; --ink:#e9edf5; --dim:#8b93a7;
+    --panel:rgba(12,16,26,.62); --panel2:rgba(16,21,34,.78); --line:rgba(255,255,255,.09);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#02040a;}
+  body{font-family:"Avenir Next","Segoe UI",system-ui,-apple-system,sans-serif;color:var(--ink);}
+  #scene{position:fixed;inset:0;display:block;}
+
+  /* ---------- title ---------- */
+  #title{
+    position:fixed;top:18px;left:22px;z-index:10;pointer-events:none;user-select:none;
+  }
+  #title h1{
+    font-size:15px;font-weight:700;letter-spacing:.42em;color:var(--ink);
+    text-transform:uppercase; opacity:.96;
+  }
+  #title h1 em{font-style:normal;color:var(--amber);}
+  #title p{margin-top:4px;font-size:10.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;}
+
+  /* ---------- hints ---------- */
+  #hint{
+    position:fixed;top:18px;right:22px;z-index:10;pointer-events:none;user-select:none;
+    font-size:10.5px;letter-spacing:.06em;color:var(--dim);text-align:right;line-height:1.9;
+  }
+  .kbd{
+    display:inline-block;min-width:20px;text-align:center;padding:0 5px;margin:0 2px;
+    border:1px solid rgba(255,255,255,.22);border-bottom-width:2px;border-radius:5px;
+    font-size:9.5px;color:var(--ink);background:rgba(255,255,255,.06);font-family:inherit;
+  }
+
+  /* ---------- control bar ---------- */
+  #bar{
+    position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:10;
+    display:flex;align-items:center;gap:10px;padding:10px 14px;
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    box-shadow:0 18px 50px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+    max-width:min(1180px,96vw);
+  }
+  .btn{
+    appearance:none;border:1px solid var(--line);background:rgba(255,255,255,.05);
+    color:var(--ink);border-radius:10px;height:38px;min-width:38px;padding:0 10px;
+    font-size:13px;cursor:pointer;transition:all .18s ease;font-family:inherit;
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;
+  }
+  .btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.22);transform:translateY(-1px);}
+  .btn:active{transform:translateY(0px) scale(.97);}
+  #playBtn{width:44px;height:44px;border-radius:12px;font-size:15px;color:#0b0e14;
+    background:linear-gradient(180deg,#ffd98a,#f0a94e);border:1px solid rgba(255,255,255,.35);
+    box-shadow:0 4px 18px rgba(255,190,90,.35);}
+  #playBtn:hover{background:linear-gradient(180deg,#ffe4a3,#ffb95e);}
+  .speedBox{display:flex;align-items:center;gap:6px;}
+  #speedLabel{min-width:86px;text-align:center;font-size:10.5px;letter-spacing:.08em;color:var(--amber);
+    text-transform:uppercase;font-weight:600;}
+  .divider{width:1px;height:30px;background:var(--line);}
+
+  #dateSlider{
+    -webkit-appearance:none;appearance:none;width:min(330px,32vw);height:4px;border-radius:2px;
+    background:linear-gradient(90deg,#3a4a6b,#ffcf87);outline:none;cursor:pointer;
+  }
+  #dateSlider::-webkit-slider-thumb{
+    -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:#fff;border:2px solid var(--amber);box-shadow:0 0 10px rgba(255,205,130,.6);
+  }
+  #dateSlider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid var(--amber);}
+
+  #dateReadout{
+    min-width:148px;text-align:center;padding:4px 12px;border-radius:10px;
+    background:rgba(0,0,0,.35);border:1px solid var(--line);
+  }
+  #dateReadout .iso{font-size:15px;font-weight:700;letter-spacing:.1em;color:#fff;
+    font-variant-numeric:tabular-nums;font-family:"SF Mono",ui-monospace,Menlo,monospace;}
+  #dateReadout .dow{font-size:8.5px;letter-spacing:.24em;color:var(--dim);text-transform:uppercase;margin-top:1px;}
+
+  #scaleBtn{color:var(--amber);}
+  #recBtn{border-color:rgba(255,110,110,.4);color:#ffb0a0;}
+  #recBtn:hover{background:rgba(255,80,80,.14);border-color:rgba(255,120,120,.65);}
+  #recBtn .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#ff5a4e;
+    box-shadow:0 0 8px rgba(255,90,78,.8);margin-right:2px;}
+  #recBtn.recording{color:#fff;background:rgba(255,60,50,.28);animation:blink 1s steps(2) infinite;}
+  @keyframes blink{50%{box-shadow:0 0 18px rgba(255,70,60,.6);}}
+
+  /* ---------- info card ---------- */
+  #card{
+    position:fixed;right:22px;top:96px;z-index:10;width:288px;padding:16px 18px 14px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:16px;
+    backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    box-shadow:0 20px 60px rgba(0,0,0,.6);transform:translateX(30px);opacity:0;
+    pointer-events:none;transition:all .4s cubic-bezier(.2,.9,.25,1.2);
+  }
+  #card.show{transform:translateX(0);opacity:1;pointer-events:auto;}
+  #card h2{display:flex;align-items:center;gap:10px;font-size:19px;letter-spacing:.12em;
+    text-transform:uppercase;font-weight:700;}
+  #cardDot{width:14px;height:14px;border-radius:50%;box-shadow:0 0 12px currentColor;}
+  #cardSub{font-size:9px;letter-spacing:.28em;color:var(--dim);text-transform:uppercase;margin:2px 0 12px 24px;}
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+    padding:7px 0;border-top:1px solid rgba(255,255,255,.06);}
+  .row .k{font-size:9px;letter-spacing:.18em;color:var(--dim);text-transform:uppercase;}
+  .row .v{font-size:13px;color:#fff;font-variant-numeric:tabular-nums;text-align:right;}
+  .row .v small{color:var(--dim);font-size:10px;}
+  #cardClose{position:absolute;top:8px;right:12px;background:none;border:none;color:var(--dim);
+    font-size:17px;cursor:pointer;padding:4px;}
+  #cardClose:hover{color:#fff;}
+  #cardNote{margin-top:10px;font-size:9px;color:#5b6376;letter-spacing:.06em;line-height:1.5;}
+
+  #foot{
+    position:fixed;left:22px;bottom:22px;z-index:9;pointer-events:none;
+    font-size:9px;letter-spacing:.14em;color:#4a5268;text-transform:uppercase;line-height:1.8;
+  }
+
+  #toast{
+    position:fixed;top:22px;left:50%;transform:translate(-50%,-14px);z-index:20;
+    padding:8px 18px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);
+    font-size:11px;letter-spacing:.12em;color:var(--amber);text-transform:uppercase;
+    opacity:0;pointer-events:none;transition:all .3s;
+  }
+  #toast.show{opacity:1;transform:translate(-50%,0);}
+  @media (max-width:900px){ #hint,#foot{display:none;} #dateSlider{width:24vw;} }
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div id="title">
+  <h1><em>Orrery</em> · Solar System</h1>
+  <p>Keplerian Elements (J2000) · Live Solve</p>
+</div>
+
+<div id="hint">
+  <span class="kbd">S</span> scale mode &nbsp;<span class="kbd">L</span> labels &nbsp;<span class="kbd">Space</span> play/pause<br>
+  drag to orbit · scroll to zoom · <b style="color:#dfe5f0">click a planet</b>
+</div>
+
+<div id="card">
+  <button id="cardClose" aria-label="close">✕</button>
+  <h2><span id="cardDot"></span><span id="cardName">Earth</span></h2>
+  <div id="cardSub">Planetary Profile</div>
+  <div class="row"><span class="k">Distance from Sun</span><span class="v" id="cardDist">—</span></div>
+  <div class="row"><span class="k">Orbital Period</span><span class="v" id="cardPeriod">—</span></div>
+  <div class="row"><span class="k">Mean Radius</span><span class="v" id="cardRadius">—</span></div>
+  <div class="row"><span class="k">Orbital Eccentricity</span><span class="v" id="cardEcc">—</span></div>
+  <div id="cardNote">Heliocentric position computed per frame by solving Kepler's equation M = E − e·sinE from J2000 mean elements.</div>
+</div>
+
+<div id="bar">
+  <button class="btn" id="playBtn" title="Play / pause time">❚❚</button>
+  <div class="speedBox">
+    <button class="btn" id="speedDown" title="Slower">−</button>
+    <div id="speedLabel">1 month / s</div>
+    <button class="btn" id="speedUp" title="Faster">+</button>
+  </div>
+  <div class="divider"></div>
+  <input type="range" id="dateSlider" min="0" max="73049" step="1" value="0" aria-label="Date">
+  <div id="dateReadout"><div class="iso" id="dateISOEl">——</div><div class="dow" id="dateDOW">———</div></div>
+  <div class="divider"></div>
+  <button class="btn" id="scaleBtn" title="Toggle scale mode (S)">Orbits · True Dist.</button>
+  <button class="btn" id="labelsBtn" title="Toggle labels (L)">Labels · On</button>
+  <div class="divider"></div>
+  <button class="btn" id="recBtn" title="Play the 12-second cinematic showcase and save it as .webm"><span class="dot"></span>Record video</button>
+</div>
+
+<div id="foot">J2000 Mean Elements<br>1900 — 2100 Range</div>
+<div id="toast"></div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+'use strict';
+/* ============================================================================
+   ORRERY — An interactive, accurate solar system
+   Positions: J2000 mean orbital elements + Kepler's equation solved per frame.
+   window.__bench = { dateISO, planets: { name: {x,y,z} } }  (heliocentric AU,
+   ecliptic frame: x → vernal equinox, y → 90° east in ecliptic, z → north)
+   ========================================================================== */
+
+const DAY = 86400000;
+const J2000 = Date.UTC(2000, 0, 1, 12, 0, 0);   // J2000.0 epoch (TT ≈ UTC here)
+const MIN_MS = Date.UTC(1900, 0, 1);
+const MAX_MS = Date.UTC(2100, 11, 31);
+const AU_KM = 149597870.7;
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp  = (a, b, t) => a + (b - a) * t;
+const sstep = t => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+const easeInOut = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const D2R = Math.PI / 180;
+
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function cnv(w, h){ const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function hexRgb(hex){
+  const n = parseInt(hex.slice(1), 16);
+  return [ (n >> 16) & 255, (n >> 8) & 255, n & 255 ];
+}
+function stopColor(stops, t){
+  t = clamp(t, 0, 1);
+  for (let i = 0; i < stops.length - 1; i++){
+    const a = stops[i], b = stops[i + 1];
+    if (t <= b[0]){
+      const k = (t - a[0]) / Math.max(1e-6, b[0] - a[0]);
+      const ca = hexRgb(a[1]), cb = hexRgb(b[1]);
+      return 'rgb(' + Math.round(lerp(ca[0],cb[0],k)) + ',' + Math.round(lerp(ca[1],cb[1],k)) + ',' + Math.round(lerp(ca[2],cb[2],k)) + ')';
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+/* ============================================================================
+   ORBITAL ELEMENTS — J2000 (a [AU], e, i/node/peri/M0 in degrees)
+   Argument of perihelion ω and mean anomaly M0 derived from
+   longitude of perihelion ϖ and mean longitude L (JPL approximate elements).
+   ========================================================================== */
+const PLANET_DEFS = [
+  { name:'Mercury', a:0.38709927, e:0.20563593, inc: 7.00497902, node: 48.33076593, w: 29.12703035, M0: 174.79252722, er:0.3829, km:2439.7, tilt:0.034,  rot: 58.646,  color:'#c9b6a4' },
+  { name:'Venus',   a:0.72333566, e:0.00677672, inc: 3.39467605, node: 76.67984255, w: 54.92262463, M0:  50.37663232, er:0.949,  km:6051.8, tilt:3.094,  rot:-243.025, color:'#e6c98f' },
+  { name:'Earth',   a:1.00000261, e:0.01671123, inc:-0.00001531, node:  0.0,         w:102.93768193, M0:  -2.47311027, er:1.0,    km:6371.0, tilt:0.4091, rot:  0.99727, color:'#8fc1ff' },
+  { name:'Mars',    a:1.52371034, e:0.09339410, inc: 1.84969142, node: 49.55953891, w:286.48130193, M0:-340.59427289, er:0.5324, km:3389.5, tilt:0.4396, rot:  1.02596, color:'#ff9a63' },
+  { name:'Jupiter', a:5.20288700, e:0.04849766, inc: 1.30327074, node:100.47390909, w:274.25457074, M0:  19.62300515, er:11.209, km:69911,  tilt:0.0549, rot:  0.41354, color:'#d8a878' },
+  { name:'Saturn',  a:9.53667594, e:0.05550862, inc: 2.48524072, node:113.66530368, w:338.93357463, M0: -42.52140699, er:9.449,  km:58232,  tilt:0.4665, rot:  0.44401, color:'#ecdaa0' },
+  { name:'Uranus',  a:19.18916464,e:0.04638122, inc: 0.77255694, node: 74.22997183, w: 96.72430447, M0: 143.10072841, er:4.007,  km:25362,  tilt:1.7064, rot: -0.71833, color:'#a9ecff' },
+  { name:'Neptune', a:30.06992276,e:0.00859048, inc: 1.76995259, node:131.56294759, w:273.40181462, M0: 259.38390327, er:3.883,  km:24622,  tilt:0.4937, rot:  0.67125, color:'#7fa8ff' }
+];
+
+function solveKepler(M, e){
+  let E = e < 0.8 ? M : Math.PI;
+  for (let k = 0; k < 14; k++){
+    E = E - (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+  }
+  return E;
+}
+// Heliocentric ecliptic coordinates (AU) for a body at days-since-J2000 d.
+function eclipticPosition(def, d, out){
+  const n = 360 / (Math.pow(def.a, 1.5) * 365.25);       // mean motion, deg/day (Kepler III)
+  let M = (def.M0 + n * d) * D2R;
+  M = ((M % (2*Math.PI)) + 3*Math.PI) % (2*Math.PI) - Math.PI;
+  const E = solveKepler(M, def.e);
+  const r = def.a * (1 - def.e * Math.cos(E));            // AU
+  const nu = 2 * Math.atan2(Math.sqrt(1+def.e) * Math.sin(E/2), Math.sqrt(1-def.e) * Math.cos(E/2));
+  const u  = def.w * D2R + nu;
+  const Om = def.node * D2R, ci = Math.cos(def.inc * D2R), si = Math.sin(def.inc * D2R);
+  const cosu = Math.cos(u), sinu = Math.sin(u), cosOm = Math.cos(Om), sinOm = Math.sin(Om);
+  out.x = r * (cosOm * cosu - sinOm * sinu * ci);
+  out.y = r * (sinOm * cosu + cosOm * sinu * ci);
+  out.z = r * sinu * si;
+  out.r = r;
+  return out;
+}
+
+/* ============================================================================
+   PROCEDURAL TEXTURES
+   ========================================================================== */
+function canvasTex(c, srgb){
+  const t = new THREE.CanvasTexture(c);
+  if (srgb !== false) t.encoding = THREE.sRGBEncoding;
+  t.anisotropy = 8; t.wrapS = THREE.RepeatWrapping;
+  return t;
+}
+function speckle(ctx, w, h, n, rnd, alpha, light){
+  for (let i = 0; i < n; i++){
+    const x = rnd() * w, y = rnd() * h, r = rnd() * 2.4 + 0.4;
+    ctx.fillStyle = light ? 'rgba(255,255,255,' + (alpha*rnd()).toFixed(3) + ')'
+                          : 'rgba(0,0,0,'       + (alpha*rnd()).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+}
+function gasGiant(seed, stops, bandFreq, turb, spots){
+  const w = 1024, h = 512, c = cnv(w, h), ctx = c.getContext('2d');
+  const rnd = mulberry32(seed);
+  const noiseN = 64, noise = [];
+  for (let i = 0; i < noiseN; i++) noise.push(rnd() * 2 - 1);
+  const n1 = v => { const p = ((v % 1) + 1) % 1 * (noiseN - 1); const i = Math.floor(p); const f = p - i;
+                    return lerp(noise[i], noise[Math.min(noiseN-1, i+1)], f * f * (3 - 2 * f)); };
+  const img = ctx.createImageData(w, h), px = img.data;
+  for (let y = 0; y < h; y++){
+    const v = y / h;
+    let n = Math.sin(v * bandFreq * Math.PI * 2 + seed * 0.7) * 0.55
+          + Math.sin(v * bandFreq * 2.63 * Math.PI + seed * 1.9 + n1(v * 3.1) * 2.0) * 0.30
+          + n1(v * 7.7 + seed) * 0.35 * turb;
+    const t = (v + n * turb * 0.09 + 1) % 1;
+    const col = stopColor(stops, t).match(/\d+/g).map(Number);
+    for (let x = 0; x < w; x++){
+      const wob = Math.sin(x * 0.012 + v * 40 + seed) * 0.012 * turb + n1(x * 0.004 + v * 9 + seed * 3) * 0.02 * turb;
+      const col2 = stopColor(stops, (t + wob + 1) % 1).match(/\d+/g).map(Number);
+      const k = (y * w + x) * 4;
+      px[k] = col2[0]; px[k+1] = col2[1]; px[k+2] = col2[2]; px[k+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  // horizontal streaks / shear
+  for (let i = 0; i < 130; i++){
+    const y = rnd() * h, len = 60 + rnd() * 300, x = rnd() * w, hh = 1 + rnd() * 3;
+    ctx.fillStyle = rnd() > 0.5 ? 'rgba(255,255,255,' + (0.05 + rnd()*0.10).toFixed(3) + ')'
+                                : 'rgba(60,40,20,'    + (0.05 + rnd()*0.10).toFixed(3) + ')';
+    ctx.fillRect(x, y, len, hh);
+  }
+  // storm spots
+  if (spots) for (const s of spots){
+    const g = ctx.createRadialGradient(s.x*w, s.y*h, 2, s.x*w, s.y*h, s.rx*w);
+    g.addColorStop(0, s.c0); g.addColorStop(0.72, s.c1); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save(); ctx.translate(s.x*w, s.y*h); ctx.scale(1, s.ry/s.rx); ctx.translate(-s.x*w, -s.y*h);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(s.x*w, s.y*h, s.rx*w, s.rx*w, 0, 0, 7); ctx.fill(); ctx.restore();
+  }
+  speckle(ctx, w, h, 700, rnd, 0.05, true);
+  return c;
+}
+function rockyTexture(seed, baseStops, maria, craters){
+  const w = 1024, h = 512, c = cnv(w, h), ctx = c.getContext('2d');
+  const rnd = mulberry32(seed);
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, baseStops[0]); grad.addColorStop(0.5, baseStops[1]); grad.addColorStop(1, baseStops[0]);
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+  // large tonal blotches
+  for (let i = 0; i < 26; i++){
+    const x = rnd()*w, y = rnd()*h, r = 30 + rnd()*130;
+    const g = ctx.createRadialGradient(x, y, 1, x, y, r);
+    const dark = rnd() > 0.45;
+    g.addColorStop(0, dark ? 'rgba(60,44,36,0.35)' : 'rgba(255,235,205,0.18)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  // maria
+  if (maria) for (const m of maria){
+    const g = ctx.createRadialGradient(m.x*w, m.y*h, 2, m.x*w, m.y*h, m.r*w);
+    g.addColorStop(0, m.c); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(m.x*w, m.y*h, m.r*w, m.r*w*0.62, m.rot||0, 0, 7); ctx.fill();
+  }
+  // craters
+  if (craters) for (let i = 0; i < craters; i++){
+    const x = rnd()*w, y = rnd()*h, r = 1 + Math.pow(rnd(), 2.1) * 26;
+    ctx.strokeStyle = 'rgba(40,32,26,0.55)'; ctx.lineWidth = Math.max(1, r*0.18);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,240,220,0.30)'; ctx.lineWidth = Math.max(0.6, r*0.10);
+    ctx.beginPath(); ctx.arc(x, y, r, Math.PI*1.05, Math.PI*1.75); ctx.stroke();
+  }
+  speckle(ctx, w, h, 2600, rnd, 0.10, false);
+  speckle(ctx, w, h, 1600, rnd, 0.08, true);
+  // polar caps
+  for (const py of [0, h]){
+    const g = ctx.createLinearGradient(0, py, 0, py === 0 ? 58 : h - 58);
+    g.addColorStop(0, 'rgba(245,248,250,0.95)'); g.addColorStop(1, 'rgba(245,248,250,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, py === 0 ? 0 : h - 58, w, 58);
+  }
+  return c;
+}
+function buildEarth(){
+  const W = 2048, H = 1024, rnd = mulberry32(1337);
+  // ---- landmasses (shared by day / mask / night) ----
+  const blobs = [];
+  for (let i = 0; i < 15; i++){
+    const cx = (0.06 + 0.88 * rnd()) * W, cy = (0.20 + 0.60 * rnd()) * H;
+    const rx = 70 + rnd() * 190, ry = rx * (0.45 + rnd() * 0.6);
+    const verts = [];
+    const N = 18, ph1 = rnd()*7, ph2 = rnd()*7, k1 = 2 + (rnd()*2|0), k2 = 4 + (rnd()*3|0);
+    for (let j = 0; j <= N; j++){
+      const a = j / N * Math.PI * 2;
+      const rr = 1 + 0.34 * Math.sin(a*k1 + ph1) + 0.18 * Math.sin(a*k2 + ph2);
+      verts.push([cx + Math.cos(a)*rx*rr, cy + Math.sin(a)*ry*rr]);
+    }
+    blobs.push({ cx, cy, rx, ry, verts, tone: rnd() });
+  }
+  const pathBlobs = ctx => {
+    for (const b of blobs){
+      ctx.beginPath(); ctx.moveTo(b.verts[0][0], b.verts[0][1]);
+      for (let j = 1; j < b.verts.length; j++) ctx.lineTo(b.verts[j][0], b.verts[j][1]);
+      ctx.closePath();
+    }
+  };
+  const landFill = (ctx, fillFn) => {
+    for (const b of blobs){
+      ctx.beginPath(); ctx.moveTo(b.verts[0][0], b.verts[0][1]);
+      for (let j = 1; j < b.verts.length; j++) ctx.lineTo(b.verts[j][0], b.verts[j][1]);
+      ctx.closePath();
+      ctx.fillStyle = fillFn(b); ctx.fill();
+    }
+  };
+  // ---- day texture ----
+  const day = cnv(W, H), dctx = day.getContext('2d');
+  const ocean = dctx.createLinearGradient(0, 0, 0, H);
+  ocean.addColorStop(0, '#071f36'); ocean.addColorStop(0.28, '#0a3554');
+  ocean.addColorStop(0.5, '#0d4060'); ocean.addColorStop(0.75, '#0a3554'); ocean.addColorStop(1, '#071f36');
+  dctx.fillStyle = ocean; dctx.fillRect(0, 0, W, H);
+  speckle(dctx, W, H, 3200, rnd, 0.05, true);
+  landFill(dctx, b => b.tone > 0.62 ? '#a89468' : (b.tone > 0.3 ? '#4f7a44' : '#3c613c'));
+  // terrain shading inside continents
+  dctx.save(); pathBlobs(dctx); dctx.clip();
+  for (let i = 0; i < 260; i++){
+    const x = rnd()*W, y = rnd()*H, r = 4 + rnd()*36;
+    dctx.fillStyle = rnd() > 0.5 ? 'rgba(255,246,214,0.10)' : 'rgba(18,34,18,0.16)';
+    dctx.beginPath(); dctx.arc(x, y, r, 0, 7); dctx.fill();
+  }
+  dctx.restore();
+  // ice caps (wavy edge)
+  for (const top of [true, false]){
+    dctx.beginPath();
+    const base = top ? 0 : H, amp = 26, yb = top ? 66 : H - 66;
+    dctx.moveTo(0, base);
+    dctx.lineTo(0, yb);
+    for (let x = 0; x <= W; x += 16) dctx.lineTo(x, yb + Math.sin(x*0.011 + (top?1.7:4.2)) * amp + Math.sin(x*0.033) * 8);
+    dctx.lineTo(W, base); dctx.closePath();
+    const g = dctx.createLinearGradient(0, top ? 0 : H, 0, yb);
+    g.addColorStop(0, '#f4f8fb'); g.addColorStop(1, 'rgba(220,232,240,0.85)');
+    dctx.fillStyle = g; dctx.fill();
+  }
+  // ---- specular map (ocean = white) ----
+  const spec = cnv(512, 256), sctx = spec.getContext('2d');
+  sctx.fillStyle = '#ffffff'; sctx.fillRect(0, 0, 512, 256);
+  sctx.save(); sctx.scale(0.25, 0.25); sctx.fillStyle = '#000'; pathBlobs(sctx); sctx.fill(); sctx.restore();
+  // ---- night lights ----
+  const night = cnv(W, H), nctx = night.getContext('2d');
+  nctx.fillStyle = '#000000'; nctx.fillRect(0, 0, W, H);
+  landFill(nctx, () => '#0a0e14');
+  const dots = cnv(W, H), xctx = dots.getContext('2d');
+  for (let i = 0; i < 3400; i++){
+    const x = rnd()*W, y = H*0.12 + rnd()*H*0.76;
+    const big = rnd() > 0.93;
+    if (big){
+      const g = xctx.createRadialGradient(x, y, 0, x, y, 16 + rnd()*20);
+      g.addColorStop(0, 'rgba(255,236,180,0.95)'); g.addColorStop(1, 'rgba(255,200,120,0)');
+      xctx.fillStyle = g; xctx.beginPath(); xctx.arc(x, y, 36, 0, 7); xctx.fill();
+    } else {
+      xctx.fillStyle = 'rgba(255,222,158,' + (0.35 + rnd()*0.6).toFixed(2) + ')';
+      xctx.beginPath(); xctx.arc(x, y, 0.7 + rnd()*1.7, 0, 7); xctx.fill();
+    }
+  }
+  const mask = cnv(W, H), mctx = mask.getContext('2d');
+  mctx.fillStyle = '#000'; mctx.fillRect(0, 0, W, H);
+  mctx.fillStyle = '#fff'; pathBlobs(mctx); mctx.fill();
+  xctx.globalCompositeOperation = 'destination-in'; xctx.drawImage(mask, 0, 0); xctx.globalCompositeOperation = 'source-over';
+  nctx.drawImage(dots, 0, 0);
+  // ---- clouds ----
+  const clouds = cnv(W, H), cctx = clouds.getContext('2d');
+  for (let i = 0; i < 300; i++){
+    const x = rnd()*W, y = rnd()*H, rx = 30 + rnd()*150, ry = rx*(0.28+rnd()*0.3);
+    const g = cctx.createRadialGradient(x, y, 1, x, y, rx);
+    g.addColorStop(0, 'rgba(255,255,255,' + (0.5 + rnd()*0.45).toFixed(2) + ')');
+    g.addColorStop(0.7, 'rgba(255,255,255,0.25)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    cctx.save(); cctx.translate(x, y); cctx.scale(1, ry/rx); cctx.translate(-x, -y);
+    cctx.fillStyle = g; cctx.beginPath(); cctx.arc(x, y, rx, 0, 7); cctx.fill(); cctx.restore();
+  }
+  // cyclone swirls
+  for (let i = 0; i < 9; i++){
+    const x = rnd()*W, y = rnd()*H;
+    cctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    for (let a = 0; a < 5; a++){
+      cctx.lineWidth = 3 + rnd()*4;
+      cctx.beginPath(); cctx.arc(x, y, 14 + a*11, rnd()*7, rnd()*3 + 2.2); cctx.stroke();
+    }
+  }
+  return { day, spec, night, clouds };
+}
+function sunTexture(){
+  const w = 1024, h = 512, c = cnv(w, h), ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffdf9a'; ctx.fillRect(0, 0, w, h);
+  const rnd = mulberry32(77);
+  for (let i = 0; i < 4200; i++){
+    const x = rnd()*w, y = rnd()*h, r = 1 + Math.pow(rnd(), 1.6) * 9;
+    const p = rnd();
+    ctx.fillStyle = p > 0.6 ? 'rgba(255,252,230,0.55)' : (p > 0.25 ? 'rgba(247,197,106,0.5)' : 'rgba(224,154,63,0.45)');
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  for (let i = 0; i < 7; i++){ // sunspots
+    const x = rnd()*w, y = h*0.25 + rnd()*h*0.5, r = 4 + rnd()*9;
+    ctx.fillStyle = 'rgba(160,96,32,0.7)'; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  return c;
+}
+function ringTexture(){
+  const w = 1024, h = 32, c = cnv(w, h), ctx = c.getContext('2d');
+  const bands = [ // [u, alpha]
+    [0.00, 0.00],[0.015, 0.30],[0.10, 0.38],[0.24, 0.42],[0.265, 0.06],  // C ring → gap
+    [0.31, 0.88],[0.42, 0.92],[0.52, 0.95],[0.575, 0.85],[0.60, 0.05],    // B ring → Cassini
+    [0.665, 0.72],[0.78, 0.80],[0.885, 0.62],[0.905, 0.04],[0.945, 0.34],[0.975, 0.10],[1.0, 0.0]
+  ];
+  for (let x = 0; x < w; x++){
+    const u = x / (w - 1);
+    let a = 0;
+    for (let i = 0; i < bands.length - 1; i++){
+      if (u >= bands[i][0] && u <= bands[i+1][0]){
+        const k = (u - bands[i][0]) / (bands[i+1][0] - bands[i][0]);
+        a = lerp(bands[i][1], bands[i+1][1], k); break;
+      }
+    }
+    const shade = 200 + Math.sin(u * 90) * 26 + Math.sin(u * 34 + 2) * 18;
+    ctx.fillStyle = 'rgba(' + Math.round(shade) + ',' + Math.round(shade*0.92) + ',' + Math.round(shade*0.74) + ',' + a.toFixed(3) + ')';
+    ctx.fillRect(x, 0, 1, h);
+  }
+  return c;
+}
+function glowSpriteTexture(inner, mid){
+  const s = 256, c = cnv(s, s), ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(s/2, s/2, 2, s/2, s/2, s/2);
+  g.addColorStop(0, inner); g.addColorStop(0.22, mid); g.addColorStop(1, 'rgba(255,160,60,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+  return c;
+}
+function ringSpriteTexture(){
+  const s = 128, c = cnv(s, s), ctx = c.getContext('2d');
+  ctx.strokeStyle = 'rgba(255,207,135,0.95)'; ctx.lineWidth = 7;
+  ctx.shadowColor = 'rgba(255,207,135,0.9)'; ctx.shadowBlur = 14;
+  ctx.beginPath(); ctx.arc(s/2, s/2, s/2 - 10, 0, 7); ctx.stroke();
+  return c;
+}
+function milkyWayTexture(){
+  const w = 2048, h = 1024, c = cnv(w, h), ctx = c.getContext('2d');
+  ctx.fillStyle = '#030510'; ctx.fillRect(0, 0, w, h);
+  const rnd = mulberry32(9001);
+  ctx.save(); ctx.translate(w/2, h/2); ctx.rotate(-0.42); ctx.translate(-w/2, -h/2);
+  const band = ctx.createLinearGradient(0, h*0.28, 0, h*0.72);
+  band.addColorStop(0, 'rgba(140,160,210,0)');
+  band.addColorStop(0.42, 'rgba(150,165,205,0.16)');
+  band.addColorStop(0.5, 'rgba(215,222,238,0.30)');
+  band.addColorStop(0.58, 'rgba(150,165,205,0.16)');
+  band.addColorStop(1, 'rgba(140,160,210,0)');
+  ctx.fillStyle = band; ctx.fillRect(-w, h*0.2, w*3, h*0.6);
+  for (let i = 0; i < 1500; i++){ // star clouds
+    const x = rnd()*w*1.6 - w*0.3, y = h*0.5 + (rnd()+rnd()+rnd()-1.5) * h*0.13;
+    const r = 6 + rnd()*60;
+    ctx.fillStyle = 'rgba(' + (200+rnd()*55|0) + ',' + (205+rnd()*45|0) + ',' + (225+rnd()*30|0) + ',' + (0.03+rnd()*0.09).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  for (let i = 0; i < 26; i++){ // dark dust lanes
+    const x = rnd()*w*1.6 - w*0.3, y = h*0.5 + (rnd()-0.5) * h*0.09;
+    ctx.fillStyle = 'rgba(2,3,8,' + (0.25+rnd()*0.35).toFixed(2) + ')';
+    ctx.beginPath(); ctx.ellipse(x, y, 60+rnd()*180, 6+rnd()*16, (rnd()-0.5)*0.3, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+  return c;
+}
+
+/* ============================================================================
+   SCENE SETUP
+   ========================================================================== */
+const canvas = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.4, 22000);
+camera.position.set(74, 84, 228);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.rotateSpeed = 0.55;
+controls.minDistance = 2.5;
+controls.maxDistance = 6500;
+controls.target.set(0, 0, 0);
+
+// ---- lights ----
+const sunLight = new THREE.PointLight(0xfff1da, 2.15, 0, 0);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.camera.near = 12;
+sunLight.shadow.camera.far = 4500;
+sunLight.shadow.bias = -0.0006;
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x33415e, 0.75));
+const rimLight = new THREE.DirectionalLight(0x4a5f8a, 0.35);
+rimLight.position.set(-300, 120, -220);
+scene.add(rimLight);
+
+// ---- starfield (two point layers) ----
+function starLayer(count, size, seed){
+  const rnd = mulberry32(seed), pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
+  const palette = [[1,1,1],[0.82,0.90,1],[1,0.92,0.78],[0.72,0.82,1],[1,0.82,0.62]];
+  for (let i = 0; i < count; i++){
+    const u = rnd()*2 - 1, th = rnd() * Math.PI * 2, s = Math.sqrt(1 - u*u), r = 6900 + rnd()*500;
+    pos[i*3] = s*Math.cos(th)*r; pos[i*3+1] = u*r; pos[i*3+2] = s*Math.sin(th)*r;
+    const p = palette[(rnd()*palette.length)|0], b = 0.45 + rnd()*0.55;
+    col[i*3] = p[0]*b; col[i*3+1] = p[1]*b; col[i*3+2] = p[2]*b;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const m = new THREE.PointsMaterial({ size, vertexColors: true, sizeAttenuation: false, transparent: true, opacity: 0.95, depthWrite: false });
+  scene.add(new THREE.Points(g, m));
+}
+starLayer(5200, 1.5, 4242);
+starLayer(420, 2.8, 777);
+
+// milky way backdrop sphere
+const milkyWay = new THREE.Mesh(
+  new THREE.SphereGeometry(7900, 48, 32),
+  new THREE.MeshBasicMaterial({ map: canvasTex(milkyWayTexture()), side: THREE.BackSide, depthWrite: false })
+);
+scene.add(milkyWay);
+
+/* ---------------------------------------------------------------------------
+   SCALE MODES
+   blend = 0 → "true": true-proportion AU distances, exaggerated planet sizes
+   blend = 1 → "orrery": compressed √r distances, everything visible
+--------------------------------------------------------------------------- */
+const AU_TRUE = 80, ORR_K = 26, BASE_EARTH = 1.55;
+let blend = 1, blendTarget = 1;   // open in orrery mode so everything is on screen
+const mapDist = (rAU, b) => lerp(rAU * AU_TRUE, ORR_K * Math.sqrt(Math.max(rAU, 1e-4)), b);
+const sizeK   = b => lerp(BASE_EARTH, BASE_EARTH * 0.78, b);
+const sunRadius = b => lerp(13, 9, b);
+
+/* ---------------------------------------------------------------------------
+   SUN
+--------------------------------------------------------------------------- */
+const sunGroup = new THREE.Group(); scene.add(sunGroup);
+const sunMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 96, 64),
+  new THREE.MeshBasicMaterial({ map: canvasTex(sunTexture()) })
+);
+sunGroup.add(sunMesh);
+const glowTex = canvasTex(glowSpriteTexture('#fffdf0', '#ffc85e'));
+const coronaTex = canvasTex(glowSpriteTexture('rgba(255,240,200,0.9)', 'rgba(255,170,70,0.35)'));
+const glow1 = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.95 }));
+const glow2 = new THREE.Sprite(new THREE.SpriteMaterial({ map: coronaTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.75 }));
+sunGroup.add(glow1); sunGroup.add(glow2);
+
+/* ---------------------------------------------------------------------------
+   PLANETS
+--------------------------------------------------------------------------- */
+const texMercury = () => canvasTex(rockyTexture(11, ['#6e665e','#8a8078','#5b544d'], null, 210));
+const texVenus   = () => {
+  const c = gasGiant(23, [[0,'#d9c084'],[0.25,'#e8d5a3'],[0.5,'#c9ad72'],[0.75,'#efe0b4'],[1,'#d9c084']], 3.1, 0.8, null);
+  const ctx = c.getContext('2d');
+  ctx.globalAlpha = 0.35;
+  for (let i = 0; i < 22; i++){
+    ctx.strokeStyle = i % 2 ? '#f7ecd0' : '#b99e63';
+    ctx.lineWidth = 6 + Math.random()*16;
+    ctx.beginPath(); ctx.ellipse(Math.random()*1024, Math.random()*512, 300+Math.random()*400, 30+Math.random()*60, (Math.random()-0.5)*0.4, 0, 7); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  return canvasTex(c);
+};
+const texMars = () => canvasTex(rockyTexture(31, ['#7e3c1e','#b5522a','#93401f'], [
+  {x:0.28,y:0.42,r:0.16,c:'rgba(70,36,20,0.55)',rot:0.4},{x:0.62,y:0.55,r:0.20,c:'rgba(70,36,20,0.5)',rot:-0.3},
+  {x:0.80,y:0.35,r:0.09,c:'rgba(255,205,160,0.4)'},{x:0.15,y:0.62,r:0.12,c:'rgba(60,30,16,0.5)'}
+], 60));
+const texJupiter = () => canvasTex(gasGiant(41, [
+  [0,'#b8a17e'],[0.12,'#e5d6b3'],[0.2,'#a67c52'],[0.3,'#efe2c4'],[0.38,'#8f6b4a'],[0.47,'#e8d8b8'],
+  [0.55,'#c4a172'],[0.63,'#f2e7cd'],[0.72,'#97714e'],[0.82,'#e2cda6'],[0.9,'#b3906a'],[1,'#b8a17e']
+], 7.5, 1.15, [ {x:0.68, y:0.63, rx:0.075, ry:0.045, c0:'#c2543a', c1:'#a03c28'} ]));
+const texSaturn  = () => canvasTex(gasGiant(53, [
+  [0,'#c9b98a'],[0.15,'#e3d3a8'],[0.28,'#b3a276'],[0.4,'#eee0b8'],[0.52,'#8f8262'],[0.62,'#e0d0a0'],
+  [0.74,'#cbbd90'],[0.86,'#a89a72'],[1,'#c9b98a']
+], 6.0, 0.7, null));
+const texUranus  = () => canvasTex(gasGiant(67, [
+  [0,'#8fd0d2'],[0.3,'#bfe6e6'],[0.5,'#a5dcdc'],[0.72,'#d2eeee'],[1,'#8fd0d2']
+], 3.0, 0.35, null));
+const texNeptune = () => canvasTex(gasGiant(71, [
+  [0,'#1d3f9e'],[0.2,'#2b5bd7'],[0.38,'#173a86'],[0.5,'#3a6fe0'],[0.62,'#1d4396'],[0.8,'#2f5fd0'],[1,'#1d3f9e']
+], 4.2, 0.8, [ {x:0.4, y:0.62, rx:0.07, ry:0.035, c0:'#101f4e', c1:'#182c62'} ]));
+const texMoon    = () => canvasTex(rockyTexture(97, ['#6f6f6d','#9a9a98','#7d7d7b'], [
+  {x:0.3,y:0.4,r:0.12,c:'rgba(70,70,70,0.6)'},{x:0.6,y:0.6,r:0.09,c:'rgba(70,70,70,0.55)'},{x:0.72,y:0.3,r:0.06,c:'rgba(70,70,70,0.5)'}
+], 170));
+
+const earthMaps = buildEarth();
+
+const textureBuilders = {
+  Mercury: texMercury, Venus: texVenus, Mars: texMars, Jupiter: texJupiter,
+  Saturn: texSaturn, Uranus: texUranus, Neptune: texNeptune
+};
+
+const planets = [];
+const pickMeshes = [];
+const ZERO = new THREE.Vector3();
+
+PLANET_DEFS.forEach(def => {
+  const group = new THREE.Group();                 // positioned in scene
+  const tiltGroup = new THREE.Group();             // axial tilt
+  tiltGroup.rotation.z = def.tilt;
+  group.add(tiltGroup);
+
+  let material;
+  if (def.name === 'Earth'){
+    material = new THREE.MeshPhongMaterial({
+      map: canvasTex(earthMaps.day),
+      specularMap: canvasTex(earthMaps.spec, false),
+      specular: new THREE.Color(0x3a4a55), shininess: 22,
+      emissiveMap: canvasTex(earthMaps.night),
+      emissive: new THREE.Color(0xffffff), emissiveIntensity: 0.9
+    });
+  } else {
+    material = new THREE.MeshPhongMaterial({ map: textureBuilders[def.name](), shininess: def.name === 'Venus' ? 30 : 6, specular: new THREE.Color(0x222222) });
+  }
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), material);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.userData.planetName = def.name;
+  tiltGroup.add(mesh);
+  pickMeshes.push(mesh);
+
+  // cloud deck for Earth
+  let cloudMesh = null;
+  if (def.name === 'Earth'){
+    cloudMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(1.025, 48, 36),
+      new THREE.MeshPhongMaterial({ map: canvasTex(earthMaps.clouds), transparent: true, depthWrite: false, opacity: 0.92 })
+    );
+    tiltGroup.add(cloudMesh);
+  }
+  // Saturn rings
+  let ringMesh = null;
+  if (def.name === 'Saturn'){
+    const inner = 1.24, outer = 2.28;
+    const geo = new THREE.RingGeometry(inner, outer, 180, 1);
+    const posA = geo.attributes.position, uvA = geo.attributes.uv;
+    for (let i = 0; i < posA.count; i++){
+      const len = Math.hypot(posA.getX(i), posA.getY(i));
+      uvA.setXY(i, (len - inner) / (outer - inner), 0.5);
+    }
+    ringMesh = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({
+      map: canvasTex(ringTexture()), transparent: true, side: THREE.DoubleSide,
+      depthWrite: false, shininess: 8, specular: new THREE.Color(0x333333)
+    }));
+    ringMesh.rotation.x = -Math.PI / 2;
+    ringMesh.scale.setScalar(1 / 1);              // scaled with planet (unit radius)
+    ringMesh.receiveShadow = true;
+    tiltGroup.add(ringMesh);
+  }
+  scene.add(group);
+
+  // orbit ellipse line
+  const ORBIT_PTS = 220;
+  const orbitGeo = new THREE.BufferGeometry();
+  orbitGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((ORBIT_PTS + 1) * 3), 3));
+  const orbitLine = new THREE.Line(orbitGeo, new THREE.LineBasicMaterial({ color: new THREE.Color(def.color), transparent: true, opacity: 0.55 }));
+  scene.add(orbitLine);
+
+  planets.push({
+    def, group, tiltGroup, mesh, cloudMesh, ringMesh, orbitLine, orbitPts: ORBIT_PTS,
+    ecl: { x: 0, y: 0, z: 0, r: def.a }, displayR: 1, spinPhase: Math.random() * Math.PI * 2
+  });
+});
+const planetByName = {}; planets.forEach(p => planetByName[p.def.name] = p);
+
+// ---- Moon ----
+const moonGroup = new THREE.Group(); scene.add(moonGroup);
+const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 28),
+  new THREE.MeshPhongMaterial({ map: texMoon(), shininess: 2 }));
+moonMesh.castShadow = true; moonMesh.receiveShadow = true;
+moonGroup.add(moonMesh);
+
+/* ---------------------------------------------------------------------------
+   LABELS + SELECTION RING
+--------------------------------------------------------------------------- */
+function textSprite(text){
+  const c = cnv(320, 80), ctx = c.getContext('2d');
+  ctx.font = '600 34px "Avenir Next","Segoe UI",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 10;
+  ctx.fillStyle = 'rgba(240,244,252,0.96)';
+  ctx.fillText(text.toUpperCase().split('').join(' '), 160, 40);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTex(c), transparent: true, depthTest: false, opacity: 0.92 }));
+  sp.renderOrder = 990;
+  return sp;
+}
+const labels = [];
+planets.forEach(p => { const s = textSprite(p.def.name); scene.add(s); labels.push({ sprite: s, planet: p }); });
+const sunLabel = textSprite('Sun'); scene.add(sunLabel); labels.push({ sprite: sunLabel, planet: null });
+let labelsVisible = true;
+
+const selRing = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTex(ringSpriteTexture()), transparent: true, depthTest: false, depthWrite: false, opacity: 0.95 }));
+selRing.renderOrder = 995; selRing.visible = false;
+scene.add(selRing);
+
+/* ---------------------------------------------------------------------------
+   BINDINGS (HUD)
+--------------------------------------------------------------------------- */
+const playBtn = document.getElementById('playBtn');
+const speedLabel = document.getElementById('speedLabel');
+const dateSlider = document.getElementById('dateSlider');
+const dateISOEl = document.getElementById('dateISOEl');
+const dateDOW = document.getElementById('dateDOW');
+const scaleBtn = document.getElementById('scaleBtn');
+const labelsBtn = document.getElementById('labelsBtn');
+const recBtn = document.getElementById('recBtn');
+const card = document.getElementById('card');
+const cardName = document.getElementById('cardName');
+const cardDot = document.getElementById('cardDot');
+const cardDist = document.getElementById('cardDist');
+const cardPeriod = document.getElementById('cardPeriod');
+const cardRadius = document.getElementById('cardRadius');
+const cardEcc = document.getElementById('cardEcc');
+const toast = document.getElementById('toast');
+
+const SPEEDS = [
+  { v: 1,      l: '1 day / s' },
+  { v: 7,      l: '1 week / s' },
+  { v: 30.44,  l: '1 month / s' },
+  { v: 91.3,   l: '3 months / s' },
+  { v: 365.25, l: '1 year / s' }
+];
+let speedIdx = 2;
+let playing = true;
+let simMs = Date.now();                       // opens at today's date
+const SLIDER_MAX = Math.round((MAX_MS - MIN_MS) / DAY);
+dateSlider.max = SLIDER_MAX;
+let toastTimer = null;
+function showToast(msg){
+  toast.textContent = msg; toast.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+}
+function syncPlayBtn(){ playBtn.textContent = playing ? '❚❚' : '►'; }
+function fmtDOW(d){ return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getUTCDay()]; }
+let lastISO = '';
+function updateHUD(){
+  const d = new Date(simMs);
+  const iso = d.toISOString().slice(0, 10);
+  if (iso !== lastISO){
+    lastISO = iso;
+    dateISOEl.textContent = iso;
+    dateDOW.textContent = fmtDOW(d) + ' · UTC';
+    dateSlider.value = clamp(Math.round((simMs - MIN_MS) / DAY), 0, SLIDER_MAX);
+  }
+}
+function periodDays(def){ return Math.pow(def.a, 1.5) * 365.25; }
+
+/* ============================================================================
+   SIMULATION — place every body for absolute time simMs
+   ========================================================================== */
+const tmpEcl = { x:0, y:0, z:0, r:0 };
+function placeBodies(ms){
+  const dDays = (ms - J2000) / DAY;
+  const b = blend, k = sizeK(b);
+  for (const p of planets){
+    eclipticPosition(p.def, dDays, p.ecl);
+    const r = p.ecl.r;
+    const disp = mapDist(r, b);
+    const s = disp / r;
+    p.group.position.set(p.ecl.x * s, p.ecl.z * s, -p.ecl.y * s);
+    p.displayR = p.def.er * k;
+    p.group.scale.setScalar(p.displayR);
+    // rotation (axial spin, retrograde for Venus/Uranus)
+    p.mesh.rotation.y = p.spinPhase + (dDays / p.def.rot) * Math.PI * 2;
+    if (p.cloudMesh) p.cloudMesh.rotation.y = p.spinPhase * 1.7 + (dDays / (p.def.rot * 0.82)) * Math.PI * 2;
+    if (p.ringMesh) p.ringMesh.rotation.z = dDays * 0.35;
+  }
+  // Sun
+  const sr = sunRadius(b);
+  sunGroup.scale.setScalar(sr);
+  // deterministic slow corona breathing (function of sim time, not wall clock)
+  const pulse = 1 + 0.035 * Math.sin(ms / 900000 * Math.PI * 2 + 1.3);
+  glow1.scale.setScalar(6.4 * pulse);
+  glow2.scale.setScalar(12.5 * (2 - pulse) * 0.98);
+  sunMesh.rotation.y = ms / 50000000;
+  // Moon (simple Keplerian orbit around Earth, inclined 5.14°, node regresses 18.6 y)
+  const earth = planetByName.Earth;
+  const moonN = 360 / 27.321661, incM = 5.145 * D2R;
+  const nodeM = (125.08 - 0.05295 * dDays) * D2R;
+  const A = (218.32 + moonN * dDays) * D2R;
+  const mx = Math.cos(nodeM) * Math.cos(A) - Math.sin(nodeM) * Math.sin(A) * Math.cos(incM);
+  const my = Math.sin(nodeM) * Math.cos(A) + Math.cos(nodeM) * Math.sin(A) * Math.cos(incM);
+  const mz = Math.sin(A) * Math.sin(incM);
+  const moonDist = lerp(3.8, 5.6, b);
+  moonGroup.position.copy(earth.group.position).add(new THREE.Vector3(mx, mz, -my).multiplyScalar(moonDist));
+  moonGroup.scale.setScalar(0.273 * k * 0.95);
+  moonMesh.rotation.y = A;
+}
+const orbitTmp = { x:0, y:0, z:0, r:0 };
+function updateOrbits(){
+  const b = blend;
+  for (const p of planets){
+    const posAttr = p.orbitLine.geometry.attributes.position;
+    const def = p.def;
+    for (let i = 0; i <= p.orbitPts; i++){
+      const E = (i / p.orbitPts) * Math.PI * 2;
+      const r = def.a * (1 - def.e * Math.cos(E));
+      const nu = 2 * Math.atan2(Math.sqrt(1+def.e) * Math.sin(E/2), Math.sqrt(1-def.e) * Math.cos(E/2));
+      const u = def.w * D2R + nu;
+      const Om = def.node * D2R, ci = Math.cos(def.inc*D2R), si = Math.sin(def.inc*D2R);
+      const cosu = Math.cos(u), sinu = Math.sin(u), cosOm = Math.cos(Om), sinOm = Math.sin(Om);
+      const x = r * (cosOm*cosu - sinOm*sinu*ci), y = r * (sinOm*cosu + cosOm*sinu*ci), z = r * sinu * si;
+      const disp = mapDist(r, b), s = disp / r;
+      posAttr.setXYZ(i, x*s, z*s, -y*s);
+    }
+    posAttr.needsUpdate = true;
+    p.orbitLine.geometry.computeBoundingSphere();
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   BENCH EXPORT
+--------------------------------------------------------------------------- */
+window.__bench = { dateISO: '1970-01-01', planets: {} };
+const benchPlanets = window.__bench.planets;
+PLANET_DEFS.forEach(d => { benchPlanets[d.name] = { x: 0, y: 0, z: 0 }; });
+function updateBench(){
+  for (const p of planets){
+    const t = benchPlanets[p.def.name];
+    t.x = p.ecl.x; t.y = p.ecl.y; t.z = p.ecl.z;
+  }
+  window.__bench.dateISO = new Date(simMs).toISOString().slice(0, 10);
+}
+
+/* ============================================================================
+   CAMERA — fly-to on click, follow while selected
+   ========================================================================== */
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+let selected = null;
+let camAnim = null;
+let prevSelPos = new THREE.Vector3();
+
+function selectPlanet(p){
+  selected = p;
+  prevSelPos.copy(p.group.position);
+  cardName.textContent = p.def.name;
+  cardDot.style.background = p.def.color;
+  cardDot.style.color = p.def.color;
+  const T = periodDays(p.def);
+  cardPeriod.innerHTML = T.toFixed(2) + ' <small>days · ' + (T/365.25).toFixed(2) + ' yr</small>';
+  cardRadius.innerHTML = p.def.km.toLocaleString() + ' <small>km</small>';
+  cardEcc.textContent = p.def.e.toFixed(4);
+  card.classList.add('show');
+  selRing.visible = true;
+  const dir = camera.position.clone().sub(p.group.position);
+  if (dir.lengthSq() < 1e-6) dir.set(1, 0.4, 1);
+  dir.normalize();
+  camAnim = { t: 0, dur: 1.5, dir, dist: Math.max(p.displayR * 4.4, p.displayR + 5), startPos: camera.position.clone(), startTgt: controls.target.clone() };
+}
+function deselect(){
+  selected = null; camAnim = null;
+  card.classList.remove('show');
+  selRing.visible = false;
+}
+document.getElementById('cardClose').addEventListener('click', deselect);
+
+let downX = 0, downY = 0;
+renderer.domElement.addEventListener('pointerdown', e => { downX = e.clientX; downY = e.clientY; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;  // it was a drag
+  pointerNdc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointerNdc, camera);
+  const hits = raycaster.intersectObjects(pickMeshes, false);
+  if (hits.length){
+    const p = planetByName[hits[0].object.userData.planetName];
+    if (p) selectPlanet(p);
+  } else deselect();
+});
+
+/* ============================================================================
+   UI EVENTS
+--------------------------------------------------------------------------- */
+playBtn.addEventListener('click', () => { playing = !playing; syncPlayBtn(); });
+document.getElementById('speedDown').addEventListener('click', () => {
+  speedIdx = clamp(speedIdx - 1, 0, SPEEDS.length - 1); speedLabel.textContent = SPEEDS[speedIdx].l;
+});
+document.getElementById('speedUp').addEventListener('click', () => {
+  speedIdx = clamp(speedIdx + 1, 0, SPEEDS.length - 1); speedLabel.textContent = SPEEDS[speedIdx].l;
+});
+dateSlider.addEventListener('input', () => {
+  playing = false; syncPlayBtn();
+  simMs = MIN_MS + Number(dateSlider.value) * DAY;
+  updateHUD();
+});
+function applyScaleLabel(){ scaleBtn.textContent = blendTarget === 1 ? 'Orbits · Compressed' : 'Orbits · True Dist.'; }
+function toggleScale(){
+  blendTarget = blendTarget === 1 ? 0 : 1;
+  applyScaleLabel();
+  showToast(blendTarget === 1 ? 'Orrery scale — compressed orbits' : 'True-proportion distances');
+}
+scaleBtn.addEventListener('click', toggleScale);
+function toggleLabels(){
+  labelsVisible = !labelsVisible;
+  labelsBtn.textContent = labelsVisible ? 'Labels · On' : 'Labels · Off';
+  labels.forEach(l => l.sprite.visible = labelsVisible);
+}
+labelsBtn.addEventListener('click', toggleLabels);
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyS') toggleScale();
+  else if (e.code === 'KeyL') toggleLabels();
+  else if (e.code === 'Space'){ e.preventDefault(); playing = !playing; syncPlayBtn(); }
+});
+
+/* ============================================================================
+   LABEL / RING LAYOUT (constant screen size)
+--------------------------------------------------------------------------- */
+function updateLabels(){
+  for (const l of labels){
+    const target = l.planet ? l.planet.group.position : ZERO;
+    l.sprite.position.copy(target);
+    if (!l.planet) l.sprite.position.set(0, sunRadius(blend) * 1.28, 0);
+    const d = camera.position.distanceTo(l.sprite.position);
+    const s = d * 0.052;
+    l.sprite.scale.set(s * 3.1, s * 0.78, 1);
+    l.sprite.visible = labelsVisible;
+  }
+  if (selected){
+    selRing.position.copy(selected.group.position);
+    const d = camera.position.distanceTo(selRing.position);
+    selRing.scale.set(d * 0.085, d * 0.085, 1);
+  }
+}
+
+/* ============================================================================
+   MAIN LOOP
+   ========================================================================== */
+const clock = new THREE.Clock();
+let composer = null;
+try {
+  if (THREE.EffectComposer && THREE.RenderPass && THREE.UnrealBloomPass){
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.72, 0.75, 0.78);
+    composer.addPass(bloom);
+  }
+} catch (err) { composer = null; }
+
+function renderFrame(){
+  if (composer) composer.render(); else renderer.render(scene, camera);
+}
+function animate(){
+  requestAnimationFrame(animate);
+  if (recording) return;                       // showcase drives the canvas while recording
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (playing) simMs += dt * SPEEDS[speedIdx].v * DAY;
+  if (simMs > MAX_MS){ simMs = MAX_MS; playing = false; syncPlayBtn(); }
+  if (simMs < MIN_MS) simMs = MIN_MS;
+
+  blend += (blendTarget - blend) * Math.min(1, dt * 2.6);
+  if (Math.abs(blendTarget - blend) < 0.0015) blend = blendTarget;
+
+  placeBodies(simMs);
+  updateOrbits();
+  updateHUD();
+  updateBench();
+
+  // camera fly-to animation
+  if (camAnim && selected){
+    camAnim.t += dt / camAnim.dur;
+    const k = easeInOut(clamp(camAnim.t, 0, 1));
+    const desired = selected.group.position.clone().addScaledVector(camAnim.dir, camAnim.dist);
+    camera.position.lerpVectors(camAnim.startPos, desired, k);
+    controls.target.lerpVectors(camAnim.startTgt, selected.group.position, k);
+    if (camAnim.t >= 1){ camAnim = null; prevSelPos.copy(selected.group.position); }
+  } else if (selected){
+    // follow the planet: translate camera by the planet's orbital motion
+    const delta = selected.group.position.clone().sub(prevSelPos);
+    camera.position.add(delta);
+    controls.target.copy(selected.group.position);
+    prevSelPos.copy(selected.group.position);
+    controls.update();
+  } else {
+    controls.update();
+  }
+
+  // live card distance
+  if (selected){
+    cardDist.innerHTML = selected.ecl.r.toFixed(4) + ' <small>AU · ' + (selected.ecl.r * AU_KM / 1e6).toFixed(1) + ' M km</small>';
+  }
+
+  updateLabels();
+  renderFrame();
+}
+
+/* ============================================================================
+   SHOWCASE — window.showcase = { duration, seek(t) }
+   12 s cinematic: wide establishing → dive to Earth–Moon → cruise to Saturn →
+   pull back to the grand system. Deterministic: seek() derives everything
+   (simulation date, camera, blend, pulse) from t alone.
+   ========================================================================== */
+const SHOW_DUR = 12;
+const SHOW_START = Date.UTC(2025, 2, 20);        // March equinox 2025
+const SHOW_DAYS_PER_SEC = 22;
+
+const _ev = new THREE.Vector3(), _sv = new THREE.Vector3();
+function seekShowcase(t){
+  t = clamp(t, 0, SHOW_DUR);
+  deselect();
+  blend = 1; blendTarget = 1;
+  simMs = SHOW_START + t * SHOW_DAYS_PER_SEC * DAY;
+  placeBodies(simMs);
+  updateOrbits();
+  updateHUD();
+  updateBench();
+
+  const E = () => _ev.copy(planetByName.Earth.group.position);
+  const S = () => _sv.copy(planetByName.Saturn.group.position);
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const KEYS = [
+    { t: 0.0,  p: () => V(196, 172, 285),                               g: () => V(0, 0, 0) },
+    { t: 2.4,  p: () => V(86, 57, 120),                                 g: () => V(0, 0, 0) },
+    { t: 3.6,  p: () => E().clone().add(V(19, 7.0, 22)),                g: () => E().clone() },
+    { t: 5.0,  p: () => E().clone().add(V(9.2, 4.1, 12.3)),             g: () => E().clone() },
+    { t: 6.0,  p: () => E().clone().add(V(5.4, 2.1, 7.4)),              g: () => E().clone() },
+    { t: 7.4,  p: () => S().clone().add(V(29, 10.5, 33)),               g: () => S().clone() },
+    { t: 9.3,  p: () => S().clone().add(V(12.6, 4.8, 15.4)),            g: () => S().clone() },
+    { t: 10.3, p: () => S().clone().add(V(19, 8.5, 26)),                g: () => S().clone() },
+    { t: 12.0, p: () => V(118, 88, 208),                                g: () => V(0, 0, 0) }
+  ];
+  let i = 0;
+  while (i < KEYS.length - 2 && t > KEYS[i + 1].t) i++;
+  const A = KEYS[i], B = KEYS[i + 1];
+  const u = sstep((t - A.t) / Math.max(1e-6, B.t - A.t));
+  const pos = A.p().lerp(B.p(), u);
+  const tgt = A.g().lerp(B.g(), u);
+  camera.position.copy(pos);
+  controls.target.copy(tgt);
+  camera.lookAt(tgt);
+  updateLabels();
+  renderFrame();   // exactly one frame
+}
+window.showcase = { duration: SHOW_DUR, seek: seekShowcase };
+
+/* ---------------- Record video (canvas.captureStream → MediaRecorder) ---- */
+let recording = false;
+let savedState = null;
+function saveState(){
+  return {
+    simMs, blend, blendTarget, playing, speedIdx,
+    camPos: camera.position.clone(), tgt: controls.target.clone(),
+    selected: selected
+  };
+}
+function restoreState(s){
+  simMs = s.simMs; blend = s.blend; blendTarget = s.blendTarget;
+  playing = s.playing; speedIdx = s.speedIdx;
+  camera.position.copy(s.camPos); controls.target.copy(s.tgt);
+  applyScaleLabel(); syncPlayBtn(); updateHUD();
+}
+recBtn.addEventListener('click', () => {
+  if (recording) return;
+  let mime = '';
+  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  for (const m of candidates){ if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)){ mime = m; break; } }
+  if (!window.MediaRecorder){ showToast('MediaRecorder not supported in this browser'); return; }
+
+  recording = true;
+  savedState = saveState();
+  recBtn.classList.add('recording');
+  recBtn.innerHTML = '<span class="dot"></span>Recording… 0.0s';
+
+  const stream = renderer.domElement.captureStream(30);
+  const recorder = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 9000000 } : undefined);
+  const chunks = [];
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: mime || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'orrery-showcase.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    recording = false;
+    recBtn.classList.remove('recording');
+    recBtn.innerHTML = '<span class="dot"></span>Record video';
+    restoreState(savedState);
+    showToast('Showcase saved as orrery-showcase.webm');
+  };
+  recorder.start(100);
+  const t0 = performance.now();
+  function step(now){
+    const t = (now - t0) / 1000;
+    if (t >= SHOW_DUR){
+      seekShowcase(SHOW_DUR);
+      recBtn.innerHTML = '<span class="dot"></span>Recording… 12.0s';
+      try { recorder.stop(); } catch (e) { /* already stopped */ }
+      return;
+    }
+    seekShowcase(t);
+    recBtn.innerHTML = '<span class="dot"></span>Recording… ' + t.toFixed(1) + 's';
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+});
+
+/* ============================================================================
+   RESIZE + INIT
+   ========================================================================== */
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
+});
+
+speedLabel.textContent = SPEEDS[speedIdx].l;
+syncPlayBtn();
+applyScaleLabel();
+placeBodies(simMs);
+updateOrbits();
+updateHUD();
+updateBench();
+updateLabels();
+animate();
+</script>
+</body>
+</html>

@@ -1,0 +1,1376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Mistveil — The Bamboo Path</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#b6c8aa;
+    font-family: "Georgia", "Times New Roman", serif; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  .hud { position:fixed; z-index:10; pointer-events:none; user-select:none; }
+
+  #title {
+    top:26px; left:30px; color:#f2f6ea; text-shadow:0 2px 14px rgba(10,20,10,.75);
+    letter-spacing:.35em; font-size:20px; font-weight:normal; opacity:.95;
+  }
+  #title small { display:block; letter-spacing:.28em; font-size:10px; color:#dfe8cf; opacity:.85; margin-top:6px; }
+
+  #help {
+    bottom:24px; left:30px; color:#eef3e2; font-size:12px; letter-spacing:.08em;
+    text-shadow:0 1px 8px rgba(10,20,10,.8); opacity:.92; line-height:1.9;
+  }
+  #help b { color:#ffe9b0; font-weight:normal; border:1px solid rgba(255,233,176,.4);
+    border-radius:4px; padding:0 6px; margin-right:2px; font-size:11px; }
+
+  #windMeter {
+    bottom:24px; right:30px; width:180px; color:#eef3e2; font-size:11px;
+    letter-spacing:.25em; text-shadow:0 1px 6px rgba(10,20,10,.8); text-align:right;
+  }
+  #windBarWrap { margin-top:6px; height:5px; background:rgba(20,30,18,.55);
+    border-radius:3px; overflow:hidden; border:1px solid rgba(255,255,255,.15); }
+  #windBar { height:100%; width:15%; background:linear-gradient(90deg,#8fae6a,#d8e59a,#fff3c0);
+    transition:width .12s linear; }
+
+  #buttons { top:24px; right:28px; pointer-events:auto; display:flex; gap:10px; }
+  .btn {
+    cursor:pointer; border:1px solid rgba(255,255,255,.35); color:#f4f8ec;
+    background:rgba(24,36,20,.55); backdrop-filter:blur(6px);
+    padding:10px 18px; font-size:12px; letter-spacing:.18em; border-radius:3px;
+    transition:all .2s; font-family:inherit; text-transform:uppercase;
+  }
+  .btn:hover { background:rgba(50,70,40,.7); border-color:#ffe9b0; color:#ffe9b0; }
+  .btn.recording { background:rgba(90,30,20,.75); border-color:#ffb0a0; color:#ffd9d0; }
+
+  #cross {
+    top:50%; left:50%; transform:translate(-50%,-50%); color:#fff;
+    font-size:22px; opacity:0; transition:opacity .25s; text-shadow:0 0 6px #000;
+  }
+  body.walking #cross { opacity:.85; }
+
+  #toast {
+    top:16%; left:50%; transform:translate(-50%,-8px); color:#ffe9b0;
+    font-size:17px; letter-spacing:.4em; opacity:0; transition:all .4s;
+    text-shadow:0 2px 16px rgba(0,0,0,.7); white-space:nowrap;
+  }
+  #toast.show { opacity:1; transform:translate(-50%,0); }
+
+  .bar { position:fixed; left:0; right:0; height:7vh; background:#050806; z-index:9;
+    opacity:0; pointer-events:none; transition:opacity .8s; }
+  #barTop { top:0; } #barBottom { bottom:0; }
+  body.showcase .bar { opacity:1; }
+  body.showcase #help, body.showcase #buttons, body.showcase #windMeter { opacity:0; pointer-events:none; }
+  #help, #buttons, #windMeter { transition:opacity .5s; }
+  #showcaseTag { bottom:8.3vh; left:50%; transform:translateX(-50%); color:#e9efd8;
+    font-size:11px; letter-spacing:.6em; opacity:0; transition:opacity .8s; text-indent:.6em; }
+  body.showcase #showcaseTag { opacity:.9; }
+
+  #fallback { position:fixed; inset:0; display:none; place-items:center; color:#222;
+    background:#dfe6d0; z-index:50; font-size:16px; padding:40px; text-align:center; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="hud" id="title">MISTVEIL<small>THE BAMBOO PATH</small></div>
+<div class="hud" id="help">
+  <b>drag</b> orbit &nbsp; <b>F</b> walk the path &nbsp; <b>G</b> gust<br>
+  <b>click</b> a stalk to push it &nbsp; <b>esc</b> release mouse
+</div>
+<div class="hud" id="buttons">
+  <button class="btn" id="gustBtn">Gust · G</button>
+  <button class="btn" id="recordBtn">● Record Video</button>
+</div>
+<div class="hud" id="windMeter">WIND<div id="windBarWrap"><div id="windBar"></div></div></div>
+<div class="hud" id="cross">+</div>
+<div class="hud" id="showcaseTag">SHOWCASE</div>
+<div class="hud" id="toast"></div>
+<div class="bar" id="barTop"></div>
+<div class="bar" id="barBottom"></div>
+<div id="fallback">This experience requires WebGL.<br>Please open it in a modern browser with hardware acceleration.</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+/* ============================================================
+   MISTVEIL — The Bamboo Path
+   A misty bamboo forest with a winding flagstone path, stone
+   lantern and wooden gate. Spring-cantilever stalks, travelling
+   gust waves, god-ray shafts, drifting motes.
+   ============================================================ */
+
+// ---------- deterministic RNG (layout is reproducible) ----------
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function() {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const R = mulberry32(20240517);
+const lerp = (a,b,t) => a + (b-a)*t;
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const smoothstep = (a,b,x) => { const t = clamp((x-a)/(b-a), 0, 1); return t*t*(3-2*t); };
+
+// ---------- top-level scene / camera / renderer / controls ----------
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0xb6c8aa, 0.026);
+
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth/window.innerHeight, 0.1, 400);
+camera.position.set(12.5, 4.6, 26.5);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.18;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2.6, 11.5);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 3;
+controls.maxDistance = 48;
+controls.maxPolarAngle = Math.PI * 0.495;
+
+// ---------- sun & lights ----------
+const SUN_POS = new THREE.Vector3(26, 37, -18);
+const TO_SUN  = SUN_POS.clone().normalize();
+const SUN_WARM = 0xffe2b0;
+
+const sun = new THREE.DirectionalLight(SUN_WARM, 2.7);
+sun.position.copy(SUN_POS);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.left = -46; sun.shadow.camera.right = 46;
+sun.shadow.camera.top  =  46; sun.shadow.camera.bottom = -46;
+sun.shadow.camera.near = 4;   sun.shadow.camera.far = 120;
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.4;
+scene.add(sun);
+scene.add(sun.target);
+
+const hemi = new THREE.HemisphereLight(0xd4e6c4, 0x2c3524, 0.85);
+scene.add(hemi);
+const amb = new THREE.AmbientLight(0x9db48c, 0.35);
+scene.add(amb);
+
+// ---------- procedural canvas textures ----------
+function makeCanvas(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+const noiseOn = (ctx, w, h, n, alpha, light) => {
+  for (let i=0; i<n; i++) {
+    const v = light ? 200+R()*55 : R()*70;
+    ctx.fillStyle = `rgba(${v|0},${v|0},${(v*0.9)|0},${alpha})`;
+    ctx.fillRect(R()*w, R()*h, 1+R()*3, 1+R()*3);
+  }
+};
+
+const NODE_T = [...Array(8)].map((_,i) => (i+1)/9);
+
+const stalkTex = makeCanvas(64, 512, (ctx,w,h) => {
+  ctx.fillStyle = '#f4f4ee'; ctx.fillRect(0,0,w,h);
+  // vertical fibre streaks
+  for (let i=0; i<46; i++) {
+    ctx.strokeStyle = `rgba(120,120,110,${0.06 + R()*0.12})`;
+    ctx.lineWidth = 0.6 + R()*1.8;
+    const x = R()*w;
+    ctx.beginPath(); ctx.moveTo(x, 0);
+    ctx.bezierCurveTo(x+(R()-0.5)*6, h*0.33, x+(R()-0.5)*6, h*0.66, x+(R()-0.5)*4, h);
+    ctx.stroke();
+  }
+  // node rings (geometry bulges at NODE_T from base; uv.y=0 at base -> canvas y = (1-t)*h)
+  for (const t of NODE_T) {
+    const y = (1 - t) * h;
+    const grad = ctx.createLinearGradient(0, y-7, 0, y+7);
+    grad.addColorStop(0, 'rgba(70,72,60,0)');
+    grad.addColorStop(0.5, 'rgba(70,72,60,0.55)');
+    grad.addColorStop(1, 'rgba(70,72,60,0)');
+    ctx.fillStyle = grad; ctx.fillRect(0, y-7, w, 14);
+  }
+  const gradB = ctx.createLinearGradient(0, h, 0, h-90);
+  gradB.addColorStop(0,'rgba(80,80,66,0.4)'); gradB.addColorStop(1,'rgba(80,80,66,0)');
+  ctx.fillStyle = gradB; ctx.fillRect(0, h-90, w, 90);
+});
+
+const leafTex = makeCanvas(128, 128, (ctx,w,h) => {
+  ctx.clearRect(0,0,w,h);
+  const grad = ctx.createLinearGradient(0, 8, 0, h-4);
+  grad.addColorStop(0, '#7d9a44'); grad.addColorStop(0.55,'#55702f'); grad.addColorStop(1,'#37481f');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(w/2, 6);
+  ctx.bezierCurveTo(w*0.86, h*0.32, w*0.78, h*0.72, w/2, h-4);
+  ctx.bezierCurveTo(w*0.22, h*0.72, w*0.14, h*0.32, w/2, 6);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(220,235,170,0.75)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(w/2, 10); ctx.lineTo(w/2, h-8); ctx.stroke();
+  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(220,235,170,0.35)';
+  for (let i=1; i<7; i++) {
+    const y = 14 + i*15;
+    ctx.beginPath(); ctx.moveTo(w/2, y); ctx.lineTo(w/2-34, y+18); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w/2, y); ctx.lineTo(w/2+34, y+18); ctx.stroke();
+  }
+});
+leafTex.wrapS = leafTex.wrapT = THREE.ClampToEdgeWrapping;
+
+const stoneTex = makeCanvas(256, 256, (ctx,w,h) => {
+  ctx.fillStyle = '#8e918a'; ctx.fillRect(0,0,w,h);
+  noiseOn(ctx, w, h, 900, 0.35, false); noiseOn(ctx, w, h, 500, 0.3, true);
+  // cracks
+  ctx.strokeStyle = 'rgba(50,52,48,0.5)'; ctx.lineWidth = 1.5;
+  for (let i=0; i<5; i++) {
+    ctx.beginPath(); let x = R()*w, y = R()*h; ctx.moveTo(x,y);
+    for (let j=0; j<5; j++) { x += (R()-0.5)*70; y += (R()-0.5)*70; ctx.lineTo(x,y); }
+    ctx.stroke();
+  }
+  // moss blotches
+  for (let i=0; i<9; i++) {
+    const x = R()*w, y = R()*h, r = 14+R()*34;
+    const g = ctx.createRadialGradient(x,y,1,x,y,r);
+    g.addColorStop(0,'rgba(96,128,62,0.75)'); g.addColorStop(1,'rgba(96,128,62,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill();
+  }
+});
+
+const groundTex = makeCanvas(512, 512, (ctx,w,h) => {
+  ctx.fillStyle = '#47523a'; ctx.fillRect(0,0,w,h);
+  for (let i=0; i<260; i++) {
+    const x=R()*w, y=R()*h, r=6+R()*36;
+    const g = ctx.createRadialGradient(x,y,1,x,y,r);
+    const c = R()<0.5 ? '80,96,52' : '52,62,40';
+    g.addColorStop(0,`rgba(${c},0.5)`); g.addColorStop(1,`rgba(${c},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill();
+  }
+  noiseOn(ctx, w, h, 2500, 0.35, false); noiseOn(ctx, w, h, 1400, 0.22, true);
+});
+groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+groundTex.repeat.set(11, 11);
+
+const woodTex = makeCanvas(256, 256, (ctx,w,h) => {
+  ctx.fillStyle = '#57432f'; ctx.fillRect(0,0,w,h);
+  for (let p=0; p<4; p++) {
+    const x0 = p*64;
+    ctx.fillStyle = `rgba(${30+R()*30|0},${22+R()*20|0},${12+R()*14|0},0.55)`;
+    ctx.fillRect(x0, 0, 64, h);
+    ctx.strokeStyle = 'rgba(20,14,8,0.8)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, h); ctx.stroke();
+    for (let i=0; i<16; i++) {
+      ctx.strokeStyle = `rgba(30,22,14,${0.25+R()*0.4})`; ctx.lineWidth = 0.8+R()*1.4;
+      const x = x0 + 6 + R()*52;
+      ctx.beginPath(); ctx.moveTo(x, 0);
+      ctx.bezierCurveTo(x+(R()-0.5)*10, h*0.33, x+(R()-0.5)*10, h*0.66, x+(R()-0.5)*8, h);
+      ctx.stroke();
+    }
+  }
+});
+woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping;
+
+const plaqueTex = makeCanvas(128, 128, (ctx,w,h) => {
+  ctx.fillStyle = '#3a2c1e'; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle = '#1d150c'; ctx.lineWidth = 8; ctx.strokeRect(4,4,w-8,h-8);
+  ctx.strokeStyle = '#e8e2ce'; ctx.lineWidth = 9; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(w/2, h/2, 34, -0.4, Math.PI*1.55); ctx.stroke();
+});
+
+const mistTex = makeCanvas(256, 256, (ctx,w,h) => {
+  const g = ctx.createRadialGradient(w/2,h/2,4,w/2,h/2,w/2);
+  g.addColorStop(0,'rgba(255,255,255,0.85)');
+  g.addColorStop(0.55,'rgba(255,255,255,0.32)');
+  g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+});
+const dustTex = makeCanvas(64, 64, (ctx,w,h) => {
+  const g = ctx.createRadialGradient(32,32,1,32,32,30);
+  g.addColorStop(0,'rgba(255,250,225,1)'); g.addColorStop(0.4,'rgba(255,250,225,0.5)'); g.addColorStop(1,'rgba(255,250,225,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+});
+const glowTex = makeCanvas(128, 128, (ctx,w,h) => {
+  const g = ctx.createRadialGradient(64,64,2,64,64,62);
+  g.addColorStop(0,'rgba(255,244,205,1)'); g.addColorStop(0.35,'rgba(255,240,190,0.5)'); g.addColorStop(1,'rgba(255,240,190,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+});
+const skyTex = makeCanvas(64, 512, (ctx,w,h) => {
+  const g = ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0.0,'#cddcc0'); g.addColorStop(0.45,'#b6c8aa'); g.addColorStop(0.8,'#a3b294'); g.addColorStop(1,'#93a284');
+  ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+});
+
+// ---------- sky dome ----------
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(240, 24, 16),
+  new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false })
+);
+scene.add(sky);
+
+// ---------- ground ----------
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(90, 48),
+  new THREE.MeshStandardMaterial({ map: groundTex, color: 0xbfc8ae, roughness: 1.0, metalness: 0 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ---------- the winding path ----------
+const pathCurve = new THREE.CatmullRomCurve3([
+  new THREE.Vector3( 2.4, 0,  31),
+  new THREE.Vector3(-3.4, 0,  22),
+  new THREE.Vector3( 3.6, 0,  13),
+  new THREE.Vector3(-1.7, 0,   4),
+  new THREE.Vector3( 3.1, 0,  -6),
+  new THREE.Vector3(-2.3, 0, -16),
+  new THREE.Vector3( 1.1, 0, -28),
+], false, 'catmullrom', 0.6);
+const pathSamples = pathCurve.getSpacedPoints(260);
+function distToPath(x, z) {
+  let best = Infinity;
+  for (let i=0; i<pathSamples.length; i++) {
+    const p = pathSamples[i];
+    const dx = p.x - x, dz = p.z - z;
+    const d = dx*dx + dz*dz;
+    if (d < best) best = d;
+  }
+  return Math.sqrt(best);
+}
+
+// packed-earth ribbon under the stones
+{
+  const N = 170, hw = 1.62, pos = [], uv = [], idx = [];
+  let arc = 0, prev = pathCurve.getPointAt(0);
+  for (let i=0; i<=N; i++) {
+    const t = i/N;
+    const p = pathCurve.getPointAt(t);
+    const tan = pathCurve.getTangentAt(t);
+    const nrm = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+    arc += (i ? p.distanceTo(prev) : 0); prev = p.clone();
+    pos.push(p.x + nrm.x*hw, 0.045, p.z + nrm.z*hw,  p.x - nrm.x*hw, 0.045, p.z - nrm.z*hw);
+    uv.push(0, arc*0.35,  1, arc*0.35);
+    if (i < N) { const a = i*2; idx.push(a, a+1, a+2, a+1, a+3, a+2); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  const ribbonTex = makeCanvas(256, 256, (ctx,w,h) => {
+    ctx.fillStyle = '#57584a'; ctx.fillRect(0,0,w,h);
+    noiseOn(ctx,w,h,1200,0.4,false); noiseOn(ctx,w,h,700,0.3,true);
+    for (let i=0; i<24; i++) {
+      const x=R()*w, y=R()*h, r=8+R()*26;
+      const g2 = ctx.createRadialGradient(x,y,1,x,y,r);
+      g2.addColorStop(0,'rgba(88,110,58,0.55)'); g2.addColorStop(1,'rgba(88,110,58,0)');
+      ctx.fillStyle = g2; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill();
+    }
+  });
+  ribbonTex.wrapS = ribbonTex.wrapT = THREE.RepeatWrapping;
+  const ribbon = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+    map: ribbonTex, color: 0xb9bca4, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2
+  }));
+  ribbon.receiveShadow = true;
+  scene.add(ribbon);
+}
+
+// irregular flagstones (one deformed geometry, instanced)
+{
+  const SEG = 9;
+  const geo = new THREE.CylinderGeometry(1, 1.1, 0.24, SEG, 1, false);
+  const segScale = []; for (let i=0; i<SEG; i++) segScale.push(0.74 + R()*0.42);
+  const pa = geo.attributes.position;
+  for (let i=0; i<pa.count; i++) {
+    const x = pa.getX(i), z = pa.getZ(i);
+    const ang = Math.atan2(z, x);
+    let seg = Math.round(((ang + Math.PI) / (Math.PI*2)) * SEG) % SEG;
+    const s = segScale[seg];
+    pa.setX(i, x*s); pa.setZ(i, z*s);
+  }
+  geo.computeVertexNormals();
+  const stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.92, metalness: 0.02 });
+  const LEN = pathCurve.getLength();
+  const COUNT = Math.floor(LEN / 1.02);
+  const stones = new THREE.InstancedMesh(geo, stoneMat, COUNT);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), p = new THREE.Vector3();
+  const col = new THREE.Color();
+  for (let i=0; i<COUNT; i++) {
+    const t = (i + 0.5) / COUNT;
+    p.copy(pathCurve.getPointAt(t));
+    const tan = pathCurve.getTangentAt(t);
+    const nrm = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+    const lat = Math.sin(i*2.35)*0.55 + (R()-0.5)*0.75;
+    p.addScaledVector(nrm, lat);
+    e.set((R()-0.5)*0.06, R()*Math.PI*2, (R()-0.5)*0.06); q.setFromEuler(e);
+    const sx = 0.66 + R()*0.55, sz = 0.6 + R()*0.5;
+    s.set(sx, 0.85 + R()*0.5, sz);
+    p.y = 0.1 + R()*0.03;
+    m.compose(p, q, s);
+    stones.setMatrixAt(i, m);
+    const g = 0.72 + R()*0.35, moss = R() < 0.3;
+    col.setRGB(g*(moss?0.78:1), g*(moss?0.95:1), g*0.92);
+    stones.setColorAt(i, col);
+  }
+  stones.castShadow = true; stones.receiveShadow = true;
+  scene.add(stones);
+}
+
+// ---------- wooden gate ----------
+const gateGroup = new THREE.Group();
+{
+  const woodMat  = new THREE.MeshStandardMaterial({ map: woodTex, color: 0xa8896a, roughness: 0.85 });
+  const woodDark = new THREE.MeshStandardMaterial({ map: woodTex, color: 0x6e5238, roughness: 0.9 });
+  const stoneBase = new THREE.MeshStandardMaterial({ map: stoneTex, color: 0x9a9d94, roughness: 0.95 });
+  const add = (mesh, x, y, z) => { mesh.position.set(x,y,z); mesh.castShadow = true; mesh.receiveShadow = true; gateGroup.add(mesh); return mesh; };
+
+  for (const side of [-1, 1]) {
+    add(new THREE.CylinderGeometry(0.17, 0.22, 3.6, 10), side*1.75, 1.68, 0);
+    const foot = add(new THREE.CylinderGeometry(0.32, 0.4, 0.34, 8), side*1.75, 0.15, 0); foot.material = stoneBase;
+    // side fence wings — irregular planks
+    for (let i=0; i<5; i++) {
+      const h = 1.45 + R()*0.55;
+      const plank = add(new THREE.BoxGeometry(0.17, h, 0.09),
+        side*(2.35 + i*0.36), h/2 + 0.08, (R()-0.5)*0.22);
+      plank.rotation.z = (R()-0.5)*0.14; plank.rotation.y = (R()-0.5)*0.3;
+      plank.material = woodDark;
+    }
+    // rail across wing
+    const rail = add(new THREE.BoxGeometry(2.05, 0.12, 0.1), side*3.1, 1.32, 0.1);
+    rail.rotation.y = (R()-0.5)*0.08; rail.material = woodDark;
+  }
+  add(new THREE.BoxGeometry(4.65, 0.3, 0.36), 0, 3.32, 0);   // top lintel
+  add(new THREE.BoxGeometry(3.7, 0.2, 0.28), 0, 2.64, 0.02);  // tie beam
+  // small plaque with ink enso
+  const plaque = add(new THREE.BoxGeometry(0.72, 0.72, 0.06), 0, 2.28, 0.16);
+  plaque.material = new THREE.MeshStandardMaterial({ map: plaqueTex, roughness: 0.8 });
+
+  const gateT = 0.012;
+  const gp = pathCurve.getPointAt(gateT);
+  const tan = pathCurve.getTangentAt(gateT);
+  const nrm = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+  gateGroup.position.set(gp.x, 0, gp.z);
+  gateGroup.rotation.y = Math.atan2(-nrm.z, nrm.x);
+  scene.add(gateGroup);
+}
+
+// ---------- stone lantern ----------
+const lanternPos = new THREE.Vector3();
+const lantern = new THREE.Group();
+let lanternLight, lanternGlassMat;
+{
+  const stone = new THREE.MeshStandardMaterial({ map: stoneTex, color: 0xb0b3a8, roughness: 0.9 });
+  const add = (mesh, y) => { mesh.position.y = y; mesh.castShadow = true; mesh.receiveShadow = true; lantern.add(mesh); return mesh; };
+  add(new THREE.CylinderGeometry(0.52, 0.66, 0.3, 8), 0.15);
+  add(new THREE.CylinderGeometry(0.19, 0.26, 0.82, 8), 0.7);
+  add(new THREE.CylinderGeometry(0.46, 0.34, 0.17, 8), 1.19);
+  const box = add(new THREE.BoxGeometry(0.54, 0.46, 0.54), 1.5);
+  box.material = new THREE.MeshStandardMaterial({ map: stoneTex, color: 0x8f9288, roughness: 0.9 });
+  // fire windows — double-sided emissive planes on all four faces
+  lanternGlassMat = new THREE.MeshStandardMaterial({
+    color: 0x2b2015, emissive: 0xffb85e, emissiveIntensity: 1.7, roughness: 0.4
+  });
+  const winGeo = new THREE.PlaneGeometry(0.26, 0.24);
+  const offs = [[0,0,0.278,0],[0,0,-0.278,Math.PI],[0.278,0,0,Math.PI/2],[-0.278,0,0,-Math.PI/2]];
+  for (const [x,y,z,ry] of offs) {
+    const w = new THREE.Mesh(winGeo, lanternGlassMat);
+    w.position.set(x, 1.5 + y, z); w.rotation.y = ry; lantern.add(w);
+  }
+  const roof = add(new THREE.ConeGeometry(0.58, 0.44, 4), 1.95);
+  roof.rotation.y = Math.PI/4; roof.scale.y = 1.0;
+  add(new THREE.SphereGeometry(0.13, 10, 8), 2.26);
+
+  lanternLight = new THREE.PointLight(0xffc273, 2.4, 10, 2);
+  lanternLight.position.set(0, 1.52, 0);
+  lantern.add(lanternLight);
+
+  const t = 0.30;
+  const p = pathCurve.getPointAt(t);
+  const tan = pathCurve.getTangentAt(t);
+  const nrm = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+  lanternPos.copy(p).addScaledVector(nrm, 2.35);
+  lantern.position.set(lanternPos.x, 0, lanternPos.z);
+  lantern.rotation.y = Math.atan2(nrm.x, nrm.z) + Math.PI;
+  scene.add(lantern);
+}
+
+// ============================================================
+//  BAMBOO — 1600 instanced stalks, spring-cantilever wind
+// ============================================================
+const STALK_COUNT = 1600;
+const stalkBaseX = new Float32Array(STALK_COUNT);
+const stalkBaseZ = new Float32Array(STALK_COUNT);
+const stalkHeight = new Float32Array(STALK_COUNT);
+const stalkRadius = new Float32Array(STALK_COUNT);
+const stalkPhase  = new Float32Array(STALK_COUNT);
+const stalkRotY   = new Float32Array(STALK_COUNT);
+const stalkLeanX  = new Float32Array(STALK_COUNT);
+const stalkLeanZ  = new Float32Array(STALK_COUNT);
+const bendX = new Float32Array(STALK_COUNT);
+const bendZ = new Float32Array(STALK_COUNT);
+const velX  = new Float32Array(STALK_COUNT);
+const velZ  = new Float32Array(STALK_COUNT);
+
+// stalk geometry: unit height, radius 1, tapered + node bulges
+const stalkGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 30, false);
+stalkGeo.translate(0, 0.5, 0);
+{
+  const pa = stalkGeo.attributes.position;
+  for (let i=0; i<pa.count; i++) {
+    const t = clamp(pa.getY(i), 0, 1);
+    let r = 1.0 - 0.30 * t;                       // gentle taper
+    for (const nt of NODE_T) r += 0.15 * Math.exp(-Math.pow((t - nt)/0.017, 2));  // node rings
+    pa.setX(i, pa.getX(i) * r);
+    pa.setZ(i, pa.getZ(i) * r);
+  }
+  stalkGeo.computeVertexNormals();
+}
+const bendAttr = new THREE.InstancedBufferAttribute(new Float32Array(STALK_COUNT*2), 2);
+bendAttr.setUsage(THREE.DynamicDrawUsage);
+const radiusAttr = new THREE.InstancedBufferAttribute(stalkRadius, 1);
+stalkGeo.setAttribute('aBend', bendAttr);
+stalkGeo.setAttribute('aRadius', radiusAttr);
+
+const stalkMat = new THREE.MeshStandardMaterial({
+  map: stalkTex, roughness: 0.58, metalness: 0.02
+});
+const bendChunk = `
+  attribute vec2 aBend;
+  attribute float aRadius;
+`;
+const bendBody = [
+  'vec3 transformed = vec3( position );',
+  'float bt = clamp( position.y, 0.0, 1.0 );',
+  'float bb = bt * bt;',
+  'transformed.xz *= aRadius;',
+  'transformed.x += aBend.x * bb;',
+  'transformed.z += aBend.y * bb;'
+].join('\n');
+stalkMat.onBeforeCompile = (sh) => {
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\n' + bendChunk)
+    .replace('#include <begin_vertex>', bendBody);
+};
+const stalkDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+stalkDepth.onBeforeCompile = (sh) => {
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\n' + bendChunk)
+    .replace('#include <begin_vertex>', bendBody);
+};
+
+// place stalks (rejection-sampled, clear of path / gate / lantern)
+const gatePos = gateGroup.position;
+{
+  let placed = 0, guard = 0;
+  while (placed < STALK_COUNT && guard++ < 60000) {
+    const a = R() * Math.PI * 2;
+    const rr = Math.sqrt(R()) * 46;
+    const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+    if (distToPath(x, z) < 2.15) continue;
+    if (Math.hypot(x - gatePos.x, z - gatePos.z) < 4.3) continue;
+    if (Math.hypot(x - lanternPos.x, z - lanternPos.z) < 1.6) continue;
+    stalkBaseX[placed] = x; stalkBaseZ[placed] = z;
+    stalkHeight[placed] = 8 + Math.pow(R(), 1.15) * 7;         // 8–15 m
+    stalkRadius[placed] = 0.085 + R() * 0.05;
+    stalkPhase[placed]  = R() * Math.PI * 2;
+    stalkRotY[placed]   = R() * Math.PI * 2;
+    const leanA = R() * Math.PI * 2, leanM = R() * R() * 0.3;
+    stalkLeanX[placed]  = Math.cos(leanA) * leanM;
+    stalkLeanZ[placed]  = Math.sin(leanA) * leanM;
+    placed++;
+  }
+}
+const stalkMesh = new THREE.InstancedMesh(stalkGeo, stalkMat, STALK_COUNT);
+{
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(),
+        p = new THREE.Vector3(), s = new THREE.Vector3(), col = new THREE.Color();
+  const deep = new THREE.Color(0x4e7032), mid = new THREE.Color(0x71894a), ygreen = new THREE.Color(0xa3a95c);
+  for (let i=0; i<STALK_COUNT; i++) {
+    e.set(0, stalkRotY[i], 0); q.setFromEuler(e);
+    p.set(stalkBaseX[i], -0.25, stalkBaseZ[i]);
+    s.set(1, stalkHeight[i] + 0.25, 1);
+    m.compose(p, q, s);
+    stalkMesh.setMatrixAt(i, m);
+    const t = Math.pow(R(), 1.25);
+    if (t < 0.5) col.lerpColors(deep, mid, t*2); else col.lerpColors(mid, ygreen, (t-0.5)*2);
+    col.offsetHSL((R()-0.5)*0.02, (R()-0.5)*0.08, (R()-0.5)*0.06);
+    stalkMesh.setColorAt(i, col);
+  }
+  stalkMesh.instanceMatrix.needsUpdate = true;
+  stalkMesh.instanceColor.needsUpdate = true;
+}
+stalkMesh.castShadow = true;
+stalkMesh.receiveShadow = false;
+stalkMesh.customDepthMaterial = stalkDepth;
+scene.add(stalkMesh);
+
+// leaf blade → merged cluster
+function makeClusterGeo() {
+  const blade = new THREE.PlaneGeometry(0.17, 1.32, 1, 5);
+  {
+    const pa = blade.attributes.position;
+    for (let i=0; i<pa.count; i++) {
+      const y = pa.getY(i);
+      const t = clamp((y + 0.66) / 1.32, 0, 1);
+      const profile = Math.pow(Math.sin(Math.PI * (0.12 + t*0.88)), 1.15);
+      pa.setX(i, pa.getX(i) * profile);
+      pa.setZ(i, -0.62 * t * t - Math.abs(pa.getX(i)) * 0.4);
+    }
+    blade.translate(0, 0.66, 0);
+    blade.computeVertexNormals();
+  }
+  const blades = [];
+  const n = 7;
+  for (let j=0; j<n; j++) {
+    const g = blade.clone();
+    g.rotateX(-(0.45 + R()*0.75));
+    g.rotateY((j / n) * Math.PI * 2 + R()*0.8);
+    blades.push(g);
+  }
+  return mergeGeometries(blades);
+}
+const clusterGeo = makeClusterGeo();
+const clusterMat = new THREE.MeshStandardMaterial({
+  map: leafTex, alphaTest: 0.4, side: THREE.DoubleSide,
+  roughness: 0.72, metalness: 0.0
+});
+const leafMesh = new THREE.InstancedMesh(clusterGeo, clusterMat, STALK_COUNT);
+leafMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+leafMesh.castShadow = true;
+{
+  const col = new THREE.Color();
+  for (let i=0; i<STALK_COUNT; i++) {
+    col.setHSL(0.24 + R()*0.06, 0.42 + R()*0.2, 0.3 + R()*0.18);
+    leafMesh.setColorAt(i, col);
+  }
+  leafMesh.instanceColor.needsUpdate = true;
+}
+scene.add(leafMesh);
+
+// fallen leaves along path edges
+{
+  const g = new THREE.PlaneGeometry(0.2, 0.55, 1, 2);
+  const pa = g.attributes.position;
+  for (let i=0; i<pa.count; i++) { const t = (pa.getY(i)+0.275)/0.55; pa.setZ(i, -0.12*t*t); }
+  g.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({
+    map: leafTex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9,
+    color: 0xffffff
+  });
+  const N = 420;
+  const fallen = new THREE.InstancedMesh(g, mat, N);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(),
+        p = new THREE.Vector3(), s = new THREE.Vector3(), col = new THREE.Color();
+  const palette = [0xb9893a, 0x8f6f2d, 0x6f7a33, 0xa0742f, 0x7d5a28];
+  let i = 0, guard = 0;
+  while (i < N && guard++ < 12000) {
+    let x, z;
+    if (R() < 0.62) {
+      const t = R();
+      const pt = pathCurve.getPointAt(t);
+      const tan = pathCurve.getTangentAt(t);
+      const nrm = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+      const side = R() < 0.5 ? -1 : 1;
+      const d = 1.55 + Math.pow(R(), 1.4) * 2.6;
+      x = pt.x + nrm.x * d * side + (R()-0.5)*0.8;
+      z = pt.z + nrm.z * d * side + (R()-0.5)*0.8;
+    } else {
+      const a = R()*Math.PI*2, rr = Math.sqrt(R())*40;
+      x = Math.cos(a)*rr; z = Math.sin(a)*rr;
+      if (distToPath(x, z) < 1.5) continue;
+    }
+    p.set(x, 0.03 + R()*0.05, z);
+    e.set(-Math.PI/2 + (R()-0.5)*0.45, R()*Math.PI*2, (R()-0.5)*0.3, 'YXZ');
+    q.setFromEuler(e);
+    const sc = 0.75 + R()*0.7;
+    s.set(sc, sc, sc);
+    m.compose(p, q, s);
+    fallen.setMatrixAt(i, m);
+    col.set(palette[(R()*palette.length)|0]).offsetHSL(0, 0, (R()-0.5)*0.08);
+    fallen.setColorAt(i, col);
+    i++;
+  }
+  fallen.count = i;
+  fallen.receiveShadow = true;
+  scene.add(fallen);
+}
+
+// ---------- god-ray shafts (crossed additive planes in sun direction) ----------
+const shafts = [];   // {base, up, right, fwd, len, width}
+const shaftGroup = new THREE.Group();
+scene.add(shaftGroup);
+const shaftVert = `
+  varying vec2 vUv;
+  void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+`;
+const shaftFrag = `
+  uniform float uTime;
+  uniform float uStrength;
+  uniform vec3 uColor;
+  varying vec2 vUv;
+  void main() {
+    float edge = smoothstep(0.0, 0.34, vUv.x) * smoothstep(1.0, 0.66, vUv.x);
+    float vert = smoothstep(0.02, 0.32, vUv.y) * smoothstep(1.0, 0.52, vUv.y);
+    float streaks = 0.72
+      + 0.28 * sin(vUv.x * 23.0 + uTime * 0.24) * sin(vUv.x * 8.5 - uTime * 0.17 + 1.7)
+      + 0.12 * sin(vUv.x * 41.0 - uTime * 0.31);
+    float a = edge * vert * streaks * uStrength;
+    gl_FragColor = vec4(uColor * a, a);
+  }
+`;
+{
+  const shaftTs = [0.08, 0.2, 0.34, 0.47, 0.62, 0.78, 0.9];
+  const up0 = TO_SUN.clone(); // direction from ground toward sun
+  for (let i=0; i<shaftTs.length; i++) {
+    const t = shaftTs[i] + (R()-0.5)*0.04;
+    const pt = pathCurve.getPointAt(clamp(t, 0, 1));
+    const tan = pathCurve.getTangentAt(clamp(t, 0, 1));
+    const nrm = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+    const base = pt.clone().addScaledVector(nrm, (R()-0.5)*6.5);
+    base.x += (R()-0.5)*2; base.z += (R()-0.5)*2;
+    base.y = 0;
+    const len = 19 + R()*4;
+    const up = up0.clone();
+    const right = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0,0,1)).normalize();
+    if (right.lengthSq() < 0.01) right.set(1,0,0);
+    const fwd = new THREE.Vector3().crossVectors(right, up).normalize();
+    const width = 1.9 + R()*1.7;
+    const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd));
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: shaftVert, fragmentShader: shaftFrag,
+      uniforms: {
+        uTime: { value: 0 },
+        uStrength: { value: 0.62 + R()*0.25 },
+        uColor: { value: new THREE.Color(1.0, 0.93, 0.74) }
+      },
+      transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide
+    });
+    for (let k=0; k<2; k++) {
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, len), mat);
+      const qk = q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), k * Math.PI/2 + (R()-0.5)*0.3));
+      plane.quaternion.copy(qk);
+      plane.position.copy(base).addScaledVector(up, len*0.46);
+      plane.renderOrder = 6;
+      shaftGroup.add(plane);
+    }
+    // warm glow where shaft pierces canopy
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTex, color: 0xfff2c4, transparent: true, opacity: 0.55,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    }));
+    glow.position.copy(base).addScaledVector(up, len*0.92);
+    glow.scale.set(5.5, 5.5, 1);
+    glow.renderOrder = 6;
+    scene.add(glow);
+    shafts.push({ base, up, right, fwd, len, width, mat });
+  }
+}
+
+// ---------- dust motes drifting inside shafts ----------
+const MOTES = 520;
+const moteGeo = new THREE.BufferGeometry();
+const motePos = new Float32Array(MOTES * 3);
+const moteSeed = [];
+for (let i=0; i<MOTES; i++) {
+  moteSeed.push({
+    shaft: (R()*shafts.length)|0,
+    lx: (R()-0.5), ly: R()*19, lz: (R()-0.5)*0.5,
+    fall: 0.22 + R()*0.3, wob: 0.2 + R()*0.45, ph: R()*Math.PI*2
+  });
+}
+moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3).setUsage(THREE.DynamicDrawUsage));
+const moteMat = new THREE.PointsMaterial({
+  map: dustTex, color: 0xfff6d8, size: 0.14, sizeAttenuation: true,
+  transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending,
+  depthWrite: false
+});
+const motes = new THREE.Points(moteGeo, moteMat);
+motes.renderOrder = 7;
+scene.add(motes);
+
+// ---------- ground mist sprites ----------
+const mistSprites = [];
+{
+  for (let i=0; i<16; i++) {
+    const t = R();
+    const pt = pathCurve.getPointAt(t);
+    const a = R()*Math.PI*2, rr = 2 + R()*22;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: mistTex, color: 0xe8eee0, transparent: true,
+      opacity: 0.1 + R()*0.13, depthWrite: false
+    }));
+    sp.position.set(pt.x + Math.cos(a)*rr, 0.8 + R()*2.6, pt.z + Math.sin(a)*rr);
+    const sc = 9 + R()*14;
+    sp.scale.set(sc, sc*0.55, 1);
+    sp.renderOrder = 5;
+    scene.add(sp);
+    mistSprites.push({ sp, ph: R()*Math.PI*2, spin: (R()-0.5)*0.05, op: sp.material.opacity });
+  }
+}
+
+// ---------- dark canopy blobs high above (the "gaps" the rays fall through) ----------
+for (let i=0; i<15; i++) {
+  const a = R()*Math.PI*2, rr = 4 + R()*34;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: mistTex, color: 0x243020, transparent: true, opacity: 0.92, depthWrite: false
+  }));
+  sp.position.set(Math.cos(a)*rr, 11.5 + R()*3.2, Math.sin(a)*rr);
+  const sc = 8 + R()*9;
+  sp.scale.set(sc, sc*0.6, 1);
+  scene.add(sp);
+}
+
+// sun glow sprite (for bloom to catch)
+const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: glowTex, color: 0xfff6d8, transparent: true, opacity: 0.95,
+  blending: THREE.AdditiveBlending, depthWrite: false, fog: false
+}));
+sunGlow.position.copy(SUN_POS).normalize().multiplyScalar(150);
+sunGlow.scale.set(60, 60, 1);
+scene.add(sunGlow);
+
+// ============================================================
+//  WIND SIMULATION  (fixed time-step, deterministic)
+// ============================================================
+const DT = 1 / 60;
+const WIND = new THREE.Vector2(-0.72, 0.42).normalize();   // direction gusts travel
+const K_SPRING = 26, C_DAMP = 2.6;
+let simTime = 0;
+let gustStrength = 0.15;
+const gusts = [];
+
+function spawnGust(amp = 52, speed = 16, width = 7.5, life = 7.0) {
+  gusts.push({ t0: simTime, amp, speed, width, life });
+}
+function windForceAt(x, z, t) {
+  const s = x * WIND.x + z * WIND.y;
+  let f = 0;
+  for (let i=0; i<gusts.length; i++) {
+    const g = gusts[i];
+    const wavePos = (t - g.t0) * g.speed;
+    const d = s - wavePos;
+    f += g.amp * Math.exp(-(d*d) / (g.width*g.width));
+  }
+  return f;
+}
+function impulseStalk(i, dirX, dirZ, mag) {
+  velX[i] += dirX * mag;
+  velZ[i] += dirZ * mag;
+}
+
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
+const _axis = new THREE.Vector3(), _up = new THREE.Vector3(0,1,0);
+const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
+
+const showcaseEvents = [
+  { t: 1.15, fired: false, fn: () => spawnGust(54, 17, 7.5, 7.0) },
+  { t: 6.30, fired: false, fn: () => spawnGust(34, 15, 6.0, 6.5) },
+  { t: 7.60, fired: false, fn: () => {
+      const i = showcasePushIndex;
+      const dx = stalkBaseX[i] - camera.position.x, dz = stalkBaseZ[i] - camera.position.z;
+      const l = Math.hypot(dx, dz) || 1;
+      impulseStalk(i, dx/l, dz/l, 17);
+    } }
+];
+let showcaseEventsActive = false;
+
+function stepSim(dt) {
+  simTime += dt;
+
+  // fire scripted showcase events
+  if (showcaseEventsActive) {
+    for (const ev of showcaseEvents) {
+      if (!ev.fired && simTime >= ev.t) { ev.fired = true; ev.fn(); }
+    }
+  }
+  // prune dead gusts
+  for (let i=gusts.length-1; i>=0; i--) {
+    if ((simTime - gusts[i].t0) / gusts[i].life > 1.15) gusts.splice(i, 1);
+  }
+
+  // stalk spring-cantilever dynamics
+  for (let i=0; i<STALK_COUNT; i++) {
+    const baseSway = (Math.sin(simTime*0.82 + stalkPhase[i]) * 0.68
+                    + Math.sin(simTime*1.93 + stalkPhase[i]*1.71 + 1.3) * 0.32) * 6.2;
+    const perpSway = Math.sin(simTime*1.21 + stalkPhase[i]*2.13 + 4.0) * 2.1;
+    const gf = windForceAt(stalkBaseX[i], stalkBaseZ[i], simTime);
+    const fx = WIND.x * (baseSway + gf) - WIND.y * perpSway;
+    const fz = WIND.y * (baseSway + gf) + WIND.x * perpSway;
+    const ax = -K_SPRING * bendX[i] - C_DAMP * velX[i] + fx;
+    const az = -K_SPRING * bendZ[i] - C_DAMP * velZ[i] + fz;
+    velX[i] += ax * dt; velZ[i] += az * dt;
+    bendX[i] += velX[i] * dt; bendZ[i] += velZ[i] * dt;
+    const bl = Math.hypot(bendX[i], bendZ[i]);
+    if (bl > 3.4) { const s = 3.4 / bl; bendX[i] *= s; bendZ[i] *= s; }
+    bendAttr.setXY(i, stalkLeanX[i] + bendX[i], stalkLeanZ[i] + bendZ[i]);
+  }
+  bendAttr.needsUpdate = true;
+
+  // leaf clusters follow stalk tops (+ flutter)
+  const flutterBase = 0.1 + gustStrength * 0.28;
+  for (let i=0; i<STALK_COUNT; i++) {
+    const tx = stalkLeanX[i] + bendX[i], tz = stalkLeanZ[i] + bendZ[i];
+    const topX = stalkBaseX[i] + tx, topZ = stalkBaseZ[i] + tz;
+    const len = Math.hypot(tx, tz);
+    const tilt = Math.min(0.62, len * 0.16);
+    _axis.set(tz, 0, -tx);
+    if (_axis.lengthSq() > 1e-6) {
+      _axis.normalize();
+      _q1.setFromAxisAngle(_axis, tilt);
+    } else _q1.identity();
+    _q2.setFromAxisAngle(_up, stalkRotY[i]);
+    const spd = Math.hypot(velX[i], velZ[i]);
+    const flAmp = flutterBase + Math.min(0.38, spd * 0.05 + gustStrength * 0.12);
+    const fl = Math.sin(simTime * 3.4 + stalkPhase[i] * 3.1) * flAmp
+             + Math.sin(simTime * 5.7 + stalkPhase[i] * 5.3) * flAmp * 0.45;
+    _q3.setFromAxisAngle(new THREE.Vector3(1, 0, 0), fl);
+    _q1.multiply(_q2).multiply(_q3);
+    const sc = 0.82 + (stalkRadius[i] - 0.085) * 6.5;
+    _p.set(topX, stalkHeight[i] - 0.28, topZ);
+    _s.set(sc, sc, sc);
+    _m.compose(_p, _q1, _s);
+    leafMesh.setMatrixAt(i, _m);
+  }
+  leafMesh.instanceMatrix.needsUpdate = true;
+
+  // dust motes drift & twinkle inside shafts
+  for (let i=0; i<MOTES; i++) {
+    const sd = moteSeed[i], sh = shafts[sd.shaft];
+    const L = sh.len;
+    let ly = (sd.ly - simTime * sd.fall) % L; if (ly < 0) ly += L;
+    const lx = sd.lx * sh.width * 0.42 + Math.sin(simTime * sd.wob + sd.ph) * 0.32;
+    const lz = sd.lz + Math.cos(simTime * sd.wob * 0.8 + sd.ph * 1.7) * 0.28;
+    const wx = sh.base.x + sh.up.x*ly + sh.right.x*lx + sh.fwd.x*lz;
+    const wy = sh.base.y + sh.up.y*ly + sh.right.y*lx + sh.fwd.y*lz;
+    const wz = sh.base.z + sh.up.z*ly + sh.right.z*lx + sh.fwd.z*lz;
+    motePos[i*3] = wx; motePos[i*3+1] = wy; motePos[i*3+2] = wz;
+  }
+  moteGeo.attributes.position.needsUpdate = true;
+
+  // mist breathing / drift
+  for (const ms of mistSprites) {
+    ms.sp.material.rotation = simTime * ms.spin + ms.ph;
+    ms.sp.material.opacity = ms.op * (0.82 + 0.28 * Math.sin(simTime * 0.32 + ms.ph * 2.1));
+  }
+  // shaft shimmer
+  for (const sh of shafts) sh.mat.uniforms.uTime.value = simTime;
+  // lantern candle-flicker (deterministic)
+  const fl = Math.sin(simTime * 11.3) * 0.32 + Math.sin(simTime * 5.7 + 1.3) * 0.28 + Math.sin(simTime * 23.7 + 4.1) * 0.16;
+  lanternLight.intensity = 2.35 + fl;
+  lanternGlassMat.emissiveIntensity = 1.7 + fl * 0.55;
+
+  // gust strength 0..1 (base breeze + active gust envelopes)
+  let g = 0.15;
+  for (const gu of gusts) {
+    const tc = (simTime - gu.t0) / gu.life;
+    if (tc > 0 && tc < 1) g += (gu.amp / 55) * Math.pow(Math.sin(Math.PI * tc), 1.6);
+  }
+  gustStrength = clamp(g, 0, 1);
+}
+
+function resetSim() {
+  simTime = 0; gustStrength = 0.15;
+  gusts.length = 0;
+  bendX.fill(0); bendZ.fill(0); velX.fill(0); velZ.fill(0);
+  for (const ev of showcaseEvents) ev.fired = false;
+  for (let i=0; i<STALK_COUNT; i++) bendAttr.setXY(i, stalkLeanX[i], stalkLeanZ[i]);
+  bendAttr.needsUpdate = true;
+}
+
+// stalk nearest the showcase push point (deterministic selection)
+const showcasePushIndex = (() => {
+  const target = pathCurve.getPointAt(0.47);
+  let best = Infinity, bi = 0;
+  for (let i=0; i<STALK_COUNT; i++) {
+    const dx = stalkBaseX[i] - target.x, dz = stalkBaseZ[i] - target.z;
+    const d = dx*dx + dz*dz;
+    if (d < best) { best = d; bi = i; }
+  }
+  return bi;
+})();
+
+// ============================================================
+//  POST-PROCESSING — radial god-ray blur + vignette, bloom
+// ============================================================
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const GodRayShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uSun:     { value: new THREE.Vector2(0.5, 0.7) },
+    uStrength:{ value: 0.85 }
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform vec2 uSun;
+    uniform float uStrength;
+    varying vec2 vUv;
+    void main() {
+      vec3 col = texture2D(tDiffuse, vUv).rgb;
+      vec2 toSun = uSun - vUv;
+      vec2 stepv = toSun / 26.0;
+      vec2 coord = vUv;
+      float decay = 1.0;
+      vec3 rays = vec3(0.0);
+      for (int i = 0; i < 26; i++) {
+        coord += stepv;
+        vec3 s = texture2D(tDiffuse, coord).rgb;
+        float l = dot(s, vec3(0.299, 0.587, 0.114));
+        float w = smoothstep(0.52, 1.05, l);
+        rays += s * w * decay;
+        decay *= 0.925;
+      }
+      rays /= 26.0;
+      col += rays * uStrength * vec3(1.0, 0.95, 0.78);
+      // warm highlights, cool-shadow grade
+      float lum = dot(col, vec3(0.299, 0.587, 0.114));
+      col = mix(col * vec3(0.92, 1.03, 0.96), col * vec3(1.06, 1.02, 0.92), smoothstep(0.15, 0.75, lum));
+      // vignette
+      float d = distance(vUv, vec2(0.5));
+      col *= 1.0 - 0.36 * smoothstep(0.42, 0.94, d);
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+};
+const godRayPass = new ShaderPass(GodRayShader);
+composer.addPass(godRayPass);
+
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.55, 0.82
+);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+// sun position in screen space for the radial pass
+const _sunV = new THREE.Vector3();
+function updateSunScreen() {
+  _sunV.copy(camera.position).addScaledVector(TO_SUN, 300).project(camera);
+  const behind = _sunV.z > 1;
+  godRayPass.uniforms.uSun.value.set(_sunV.x * 0.5 + 0.5, _sunV.y * 0.5 + 0.5);
+  godRayPass.uniforms.uStrength.value = behind ? 0.0 : 0.9;
+}
+
+// ============================================================
+//  MODES — orbit / walk / showcase
+// ============================================================
+let mode = 'orbit';               // 'orbit' | 'walk' | 'showcase'
+let yaw = 0, pitch = 0;
+const keys = {};
+let bobPhase = 0;
+
+window.addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (e.code === 'KeyF') toggleWalk();
+  if (e.code === 'KeyG') { spawnGust(56, 17.5, 8.0, 7.5); showToast('G U S T'); }
+});
+window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+const toastEl = document.getElementById('toast');
+let toastTimer = 0;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1700);
+}
+
+// pointer-lock mouse look
+document.addEventListener('mousemove', (e) => {
+  if (mode !== 'walk') return;
+  if (document.pointerLockElement !== renderer.domElement) return;
+  yaw   -= e.movementX * 0.0023;
+  pitch -= e.movementY * 0.0023;
+  pitch = clamp(pitch, -1.45, 1.45);
+});
+document.addEventListener('pointerlockchange', () => {
+  if (mode === 'walk' && document.pointerLockElement !== renderer.domElement) {
+    mode = 'orbit';
+    document.body.classList.remove('walking');
+    controls.enabled = true;
+  }
+});
+
+function enterWalk() {
+  mode = 'walk';
+  document.body.classList.add('walking');
+  controls.enabled = false;
+  const t = 0.012;
+  const p = pathCurve.getPointAt(t);
+  const tan = pathCurve.getTangentAt(t);
+  camera.position.set(p.x, 1.7, p.z);
+  yaw = Math.atan2(-tan.x, -tan.z);
+  pitch = 0;
+  try { renderer.domElement.requestPointerLock(); } catch (err) { /* look will fall back to keys */ }
+  showToast('W A L K   T H E   P A T H');
+}
+function exitWalk() {
+  if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+  mode = 'orbit';
+  document.body.classList.remove('walking');
+  controls.enabled = true;
+}
+function toggleWalk() {
+  if (mode === 'showcase') return;
+  if (mode === 'walk') exitWalk(); else enterWalk();
+}
+
+function walkUpdate(dt) {
+  const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const move = new THREE.Vector3();
+  if (keys['KeyW']) move.addScaledVector(fwd, 1);
+  if (keys['KeyS']) move.addScaledVector(fwd, -1);
+  if (keys['KeyD']) move.addScaledVector(right, 1);
+  if (keys['KeyA']) move.addScaledVector(right, -1);
+  const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
+  if (move.lengthSq() > 0) {
+    move.normalize().multiplyScalar((sprint ? 7.0 : 4.4) * dt);
+    camera.position.add(move);
+    bobPhase += dt * (sprint ? 11.5 : 8.5);
+  }
+  // collide with stalks (circle vs circle, slide out)
+  const cp = camera.position;
+  for (let iter=0; iter<2; iter++) {
+    for (let i=0; i<STALK_COUNT; i++) {
+      const dx = cp.x - stalkBaseX[i], dz = cp.z - stalkBaseZ[i];
+      const d2 = dx*dx + dz*dz, minD = 0.55;
+      if (d2 < minD*minD && d2 > 1e-8) {
+        const d = Math.sqrt(d2), push = (minD - d) / d;
+        cp.x += dx * push; cp.z += dz * push;
+      }
+    }
+  }
+  const rad = Math.hypot(cp.x, cp.z);
+  if (rad > 55) { cp.x *= 55/rad; cp.z *= 55/rad; }
+  cp.y = 1.7 + Math.sin(bobPhase) * 0.045 * (move.lengthSq() > 0 ? 1 : 0);
+  camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+}
+
+// ---------- stalk pushing (click) ----------
+const raycaster = new THREE.Raycaster();
+function pushAtNDC(nx, ny) {
+  raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
+  const hits = raycaster.intersectObject(stalkMesh);
+  if (hits.length) {
+    const i = hits[0].instanceId;
+    const dir = new THREE.Vector3().subVectors(
+      new THREE.Vector3(stalkBaseX[i], 0, stalkBaseZ[i]),
+      new THREE.Vector3(camera.position.x, 0, camera.position.z)
+    ).normalize();
+    impulseStalk(i, dir.x, dir.z, 15 + Math.random() * 5);
+    return true;
+  }
+  return false;
+}
+let downX = 0, downY = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (mode === 'walk') {
+    // centered push while walking
+    pushAtNDC(0, 0);
+    return;
+  }
+  downX = e.clientX; downY = e.clientY;
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (mode !== 'orbit') return;
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;  // was a drag
+  pushAtNDC((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1));
+});
+
+document.getElementById('gustBtn').addEventListener('click', () => {
+  spawnGust(56, 17.5, 8.0, 7.5); showToast('G U S T');
+});
+
+// ============================================================
+//  SHOWCASE — deterministic 12 s cinematic, re-simulated on seek
+// ============================================================
+const LAN = lanternPos.clone();
+const PS  = new THREE.Vector3(stalkBaseX[showcasePushIndex], 4.6, stalkBaseZ[showcasePushIndex]);
+const camKeys = [
+  { t:  0.0, pos: [ 11.5, 4.8,  31.5], look: [ 0.0, 3.1,  15.0] },
+  { t:  2.4, pos: [ -4.9, 2.3,  21.2], look: [ 1.6, 6.2,  10.0] },
+  { t:  4.8, pos: [  2.6, 1.7,  13.6], look: [ LAN.x*0.55, 2.9, LAN.z - 2.0] },
+  { t:  6.6, pos: [ LAN.x + 2.2, 1.35, LAN.z + 2.7], look: [ LAN.x, 1.4, LAN.z ] },
+  { t:  8.3, pos: [ -2.5, 1.8,   9.4], look: [ PS.x, PS.y, PS.z ] },
+  { t: 10.2, pos: [  9.2, 8.8,  15.6], look: [ 0.0, 2.0,  -5.0 ] },
+  { t: 12.0, pos: [ 15.5, 5.1,  27.2], look: [-1.0, 3.1, -10.0 ] }
+];
+const _ka = new THREE.Vector3(), _kb = new THREE.Vector3(), _la = new THREE.Vector3(), _lb = new THREE.Vector3();
+function showcaseCamera(t) {
+  let i = 0;
+  while (i < camKeys.length - 2 && t > camKeys[i+1].t) i++;
+  const a = camKeys[i], b = camKeys[i+1];
+  const u = smoothstep(a.t, b.t, t);
+  _ka.fromArray(a.pos); _kb.fromArray(b.pos);
+  _la.fromArray(a.look); _lb.fromArray(b.look);
+  camera.position.lerpVectors(_ka, _kb, u);
+  _lb.lerpVectors(_la, _lb, u);
+  camera.lookAt(_lb);
+}
+
+const SHOWCASE_DURATION = 12.0;
+let lastSeekT = null;
+let simStepCount = 0;
+let showcasePlaying = false;
+let showcaseT = 0;
+let recorder = null;
+let recordChunks = [];
+
+function seek(t) {
+  t = clamp(t, 0, SHOWCASE_DURATION);
+  if (lastSeekT === null || t < lastSeekT - 1e-6) {
+    resetSim();
+    simStepCount = 0;
+    showcaseEventsActive = true;
+  }
+  const targetSteps = Math.round(t / DT);
+  let guard = 0;
+  while (simStepCount < targetSteps && guard++ < 10000) { stepSim(DT); simStepCount++; }
+  mode = 'showcase';
+  document.body.classList.add('showcase');
+  controls.enabled = false;
+  showcaseCamera(t);
+  renderFrame();
+  lastSeekT = t;
+}
+window.showcase = { duration: SHOWCASE_DURATION, seek };
+
+const recordBtn = document.getElementById('recordBtn');
+function startShowcasePlayback(withRecord) {
+  resetSim(); simStepCount = 0; lastSeekT = null;
+  showcaseEventsActive = true;
+  showcaseT = 0; showcasePlaying = true;
+  mode = 'showcase';
+  document.body.classList.add('showcase');
+  controls.enabled = false;
+}
+recordBtn.addEventListener('click', () => {
+  if (showcasePlaying) return;
+  let mime = '';
+  for (const m of ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) { mime = m; break; }
+  }
+  if (!mime) { showToast('RECORDING NOT SUPPORTED'); return; }
+  try {
+    const stream = renderer.domElement.captureStream(60);
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 14_000_000 });
+  } catch (err) { showToast('RECORDING NOT SUPPORTED'); return; }
+  recordChunks = [];
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) recordChunks.push(e.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(recordChunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'mistveil-bamboo.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    recordBtn.textContent = '● Record Video';
+    recordBtn.classList.remove('recording');
+    showToast('S A V E D   . W E B M');
+  };
+  recorder.start(250);
+  recordBtn.textContent = '● Recording…';
+  recordBtn.classList.add('recording');
+  startShowcasePlayback(true);
+});
+function finishShowcase() {
+  showcasePlaying = false;
+  showcaseEventsActive = false;
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  recorder = null;
+  mode = 'orbit';
+  document.body.classList.remove('showcase');
+  controls.enabled = true;
+  lastSeekT = null;
+}
+
+// ============================================================
+//  RENDER LOOP
+// ============================================================
+window.__bench = { stalks: STALK_COUNT, gust: 0.15, walking: false };
+
+const windBar = document.getElementById('windBar');
+const clock = new THREE.Clock();
+let acc = 0;
+
+function renderFrame() {
+  updateSunScreen();
+  composer.render();
+  window.__bench.stalks = STALK_COUNT;
+  window.__bench.gust = gustStrength;
+  window.__bench.walking = (mode === 'walk');
+  windBar.style.width = (gustStrength * 100).toFixed(1) + '%';
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const realDt = Math.min(clock.getDelta(), 0.05);
+
+  if (showcasePlaying) {
+    showcaseT += realDt;
+    if (showcaseT >= SHOWCASE_DURATION) {
+      seek(SHOWCASE_DURATION);
+      finishShowcase();
+      return;
+    }
+    seek(showcaseT);
+    return;
+  }
+
+  // advance simulation with fixed time-step
+  acc += realDt;
+  let steps = 0;
+  while (acc >= DT && steps++ < 6) { stepSim(DT); acc -= DT; }
+
+  if (mode === 'walk') walkUpdate(realDt);
+  else if (mode === 'orbit') controls.update();
+
+  renderFrame();
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// prime the simulation so frame 0 is alive, then hand over to the loop
+resetSim();
+for (let i=0; i<40; i++) stepSim(DT);   // 0.66 s of breeze history
+controls.update();
+animate();
+</script>
+</body>
+</html>
+

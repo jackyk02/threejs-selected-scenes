@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Mechanical Pianoforte — Vogler &amp; Sons, 1887</title>
+<style>
+  :root{
+    --gold:#d8b96a; --gold-dim:#a8823f; --ink:#f3e9d2; --panel:rgba(18,13,9,0.72);
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#0d0a07; }
+  body{ font-family: Georgia, 'Times New Roman', serif; color:var(--ink); }
+  #app{ position:fixed; inset:0; }
+  canvas{ display:block; }
+
+  #vignette{
+    position:fixed; inset:0; pointer-events:none; z-index:5;
+    background: radial-gradient(ellipse at 50% 42%, rgba(0,0,0,0) 46%, rgba(8,5,3,0.38) 78%, rgba(5,3,2,0.72) 100%);
+  }
+  .ui{ position:fixed; z-index:10; pointer-events:none; }
+
+  #titleCard{ top:22px; left:26px; max-width:430px; text-shadow:0 2px 14px rgba(0,0,0,0.85); }
+  #titleCard .kicker{ font-size:11px; letter-spacing:0.32em; color:var(--gold); text-transform:uppercase; margin-bottom:6px; }
+  #titleCard h1{ font-size:27px; font-weight:normal; margin:0 0 6px 0; color:var(--ink); letter-spacing:0.02em; }
+  #titleCard .sub{ font-size:12.5px; color:#cbbc9d; font-style:italic; line-height:1.45; }
+  #titleCard .rule{ width:130px; height:1px; background:linear-gradient(90deg, var(--gold), rgba(216,185,106,0)); margin:10px 0; }
+
+  #panelTR{ top:22px; right:24px; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:auto; }
+  .btn{
+    pointer-events:auto; cursor:pointer; user-select:none;
+    font-family:Georgia, serif; font-size:12px; letter-spacing:0.18em; text-transform:uppercase;
+    color:var(--gold); background:var(--panel); border:1px solid rgba(216,185,106,0.55);
+    padding:12px 20px; border-radius:2px; transition: all .25s ease; backdrop-filter: blur(6px);
+    box-shadow: 0 4px 22px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,235,190,0.12);
+  }
+  .btn:hover{ color:#ffe9b0; border-color:var(--gold); box-shadow:0 4px 28px rgba(216,185,106,0.18), inset 0 1px 0 rgba(255,235,190,0.2); }
+  .btn:active{ transform:translateY(1px); }
+  .btn.recording{ color:#ff8f6b; border-color:#ff8f6b; animation:pulse 1.1s infinite; }
+  @keyframes pulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(255,120,80,0.0);} 50%{ box-shadow:0 0 18px 2px rgba(255,120,80,0.35);} }
+
+  #transport{ bottom:24px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:16px; }
+  #playBtn{ width:58px; height:58px; border-radius:50%; padding:0; font-size:20px; display:flex; align-items:center; justify-content:center; letter-spacing:0; }
+  #tempoBox{
+    background:var(--panel); border:1px solid rgba(216,185,106,0.4); border-radius:2px;
+    padding:8px 16px; text-align:center; backdrop-filter:blur(6px);
+  }
+  #tempoBox .lab{ font-size:9.5px; letter-spacing:0.28em; color:#b39a68; text-transform:uppercase; }
+  #tempoVal{ font-size:20px; color:var(--ink); }
+  #stateVal{ font-size:10px; letter-spacing:0.22em; color:var(--gold); text-transform:uppercase; margin-top:2px; }
+
+  #hints{ bottom:24px; left:26px; font-size:11px; color:#b9a87f; line-height:1.9; text-shadow:0 1px 6px #000; }
+  #hints b{ color:#e8d9ac; font-weight:normal; border:1px solid rgba(216,185,106,0.35); border-radius:3px; padding:0 5px; font-size:10px; background:rgba(0,0,0,0.35); }
+
+  #stats{ bottom:24px; right:26px; font-size:10.5px; color:#a8946a; text-align:right; line-height:1.8; text-shadow:0 1px 6px #000; }
+  #stats span{ color:#e2cf9c; }
+
+  #showcaseBadge{
+    top:24px; left:50%; transform:translateX(-50%); display:none;
+    font-size:11px; letter-spacing:0.4em; color:#ffd9a0; text-transform:uppercase;
+    background:rgba(30,16,6,0.7); border:1px solid rgba(255,200,120,0.5); padding:8px 22px 8px 26px; border-radius:2px;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="vignette"></div>
+
+<div class="ui" id="titleCard">
+  <div class="kicker">Vogler &amp; Sons · Est. 1887</div>
+  <h1>The Mechanical Pianoforte</h1>
+  <div class="rule"></div>
+  <div class="sub">An upright pianola, front panel removed, playing <i>Ode to Joy</i> from its punched paper roll — every key, hammer, damper and string set in motion by the machine itself.</div>
+</div>
+
+<div class="ui" id="panelTR">
+  <button class="btn" id="recordBtn">⏺&nbsp;&nbsp;Record Video</button>
+</div>
+
+<div class="ui" id="showcaseBadge">Showcase · Recording</div>
+
+<div class="ui" id="transport">
+  <button class="btn" id="playBtn" title="Play / Pause (Space)">▶</button>
+  <div id="tempoBox">
+    <div class="lab">Tempo</div>
+    <div id="tempoVal">♩ = 100</div>
+    <div id="stateVal">Ready</div>
+  </div>
+</div>
+
+<div class="ui" id="hints">
+  <b>Space</b> play / pause &nbsp;·&nbsp; <b>↑</b><b>↓</b> tempo &nbsp;·&nbsp; <b>A</b>–<b>K</b> play notes &nbsp;·&nbsp; <b>Click</b> the keys &nbsp;·&nbsp; <b>Drag</b> to orbit
+</div>
+
+<div class="ui" id="stats">
+  Notes played <span id="statNotes">0</span><br>
+  Active keys <span id="statKeys">0</span><br>
+  Roll <span id="statRoll">0%</span>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/GammaCorrectionShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+'use strict';
+/* ============================================================================
+   THE MECHANICAL PIANOFORTE — a self-playing upright in a Victorian parlour.
+   All geometry, textures, music and simulation are generated in this file.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- helpers */
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const smooth= t=>t*t*(3-2*t);
+const mtof  = m=>440*Math.pow(2,(m-69)/12);
+function hash1(n){ const s=Math.sin(n*127.1+311.7)*43758.5453; return s-Math.floor(s); }
+
+/* exposed bench + showcase contract (populated fully later) */
+window.__bench = { notesPlayed:0, activeKeys:0, tempo:100, rollPosition:0 };
+
+/* =============================================================== RENDERER */
+const container = document.getElementById('app');
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x141010);
+scene.fog = new THREE.Fog(0x141010, 9.5, 16.5);
+
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth/window.innerHeight, 0.05, 60);
+camera.position.set(3.55, 2.02, 4.65);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.18;
+container.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.02, 0.12);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 0.45;
+controls.maxDistance = 9.5;
+controls.maxPolarAngle = 1.52;
+
+/* post-processing (bloom for the lamp / moon / flames) — guarded, falls back */
+let composer = null, bloomPass = null;
+try{
+  if (THREE.EffectComposer && THREE.RenderPass && THREE.UnrealBloomPass && THREE.ShaderPass && THREE.GammaCorrectionShader){
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.52, 0.62, 0.78);
+    composer.addPass(bloomPass);
+    const gamma = new THREE.ShaderPass(THREE.GammaCorrectionShader);
+    gamma.renderToScreen = true;
+    composer.addPass(gamma);
+  }
+}catch(e){ composer = null; }
+
+/* ==================================================== PROCEDURAL TEXTURES */
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+function canvasTexture(w,h,draw,opts){
+  const c=document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx=c.getContext('2d'); draw(ctx,w,h);
+  const t=new THREE.CanvasTexture(c);
+  t.anisotropy=maxAniso;
+  t.encoding=THREE.sRGBEncoding;
+  if(opts){
+    if(opts.repeat){ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(opts.repeat[0],opts.repeat[1]); }
+    if(opts.wrapT) t.wrapT=opts.wrapT;
+  }
+  return t;
+}
+function grainStreaks(ctx,w,h,rng,n,alpha){
+  for(let i=0;i<n;i++){
+    const y=rng()*h, x0=rng()*w*0.4, len=w*(0.35+rng()*0.65);
+    const dark=rng()<0.62;
+    ctx.strokeStyle = dark ? `rgba(20,10,5,${alpha*(0.5+rng())})` : `rgba(215,170,120,${alpha*0.7*rng()})`;
+    ctx.lineWidth = 0.6+rng()*2.4;
+    ctx.beginPath(); ctx.moveTo(x0,y);
+    ctx.bezierCurveTo(x0+len*0.3, y+(rng()-0.5)*9, x0+len*0.7, y+(rng()-0.5)*9, x0+len, y+(rng()-0.5)*5);
+    ctx.stroke();
+  }
+}
+const texWood = canvasTexture(512,512,(ctx,w,h)=>{
+  const rng=mulberry32(11);
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#54291a'); g.addColorStop(0.45,'#46220f'); g.addColorStop(0.55,'#5a2c1a'); g.addColorStop(1,'#3c1d0e');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  grainStreaks(ctx,w,h,rng,240,0.34);
+  const v=ctx.createLinearGradient(0,0,w,0);
+  v.addColorStop(0,'rgba(0,0,0,0.28)'); v.addColorStop(0.18,'rgba(255,220,170,0.10)'); v.addColorStop(0.5,'rgba(0,0,0,0.05)'); v.addColorStop(0.82,'rgba(255,220,170,0.08)'); v.addColorStop(1,'rgba(0,0,0,0.30)');
+  ctx.fillStyle=v; ctx.fillRect(0,0,w,h);
+},{repeat:[1,1]});
+
+const texWoodDark = canvasTexture(512,512,(ctx,w,h)=>{
+  const rng=mulberry32(23);
+  const g=ctx.createLinearGradient(0,0,w,h);
+  g.addColorStop(0,'#2e160c'); g.addColorStop(0.5,'#241108'); g.addColorStop(1,'#331a0e');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  grainStreaks(ctx,w,h,rng,180,0.4);
+});
+
+const texFloor = canvasTexture(1024,1024,(ctx,w,h)=>{
+  const rng=mulberry32(37);
+  const rows=8, ph=h/rows;
+  for(let r=0;r<rows;r++){
+    const tone=0.72+rng()*0.5;
+    const base=`rgb(${Math.floor(88*tone)},${Math.floor(56*tone)},${Math.floor(32*tone)})`;
+    ctx.fillStyle=base; ctx.fillRect(0,r*ph,w,ph);
+    grainStreaks(ctx,w,ph,rng,26,0.4);
+    ctx.save(); ctx.beginPath(); ctx.rect(0,r*ph,w,ph); ctx.clip(); ctx.translate(0,r*ph);
+    grainStreaks(ctx,w,ph,rng,30,0.35); ctx.restore();
+    ctx.fillStyle='rgba(15,8,4,0.85)'; ctx.fillRect(0,r*ph,w,4);
+    const seam=rng()*w; ctx.fillRect(seam,r*ph,4,ph);
+    if(rng()<0.7){ const kx=rng()*w, ky=r*ph+ph*(0.3+rng()*0.4);
+      for(let i=5;i>0;i--){ ctx.strokeStyle=`rgba(25,12,6,${0.16+0.1*i})`; ctx.lineWidth=1.4;
+        ctx.beginPath(); ctx.ellipse(kx,ky,i*3.4,i*2.0,0.3,0,Math.PI*2); ctx.stroke(); } }
+  }
+},{repeat:[3.2,3.2]});
+
+const texWallpaper = canvasTexture(512,512,(ctx,w,h)=>{
+  const rng=mulberry32(53);
+  ctx.fillStyle='#2c3b32'; ctx.fillRect(0,0,w,h);
+  const g=ctx.createRadialGradient(w/2,h/2,60,w/2,h/2,420);
+  g.addColorStop(0,'rgba(90,120,95,0.20)'); g.addColorStop(1,'rgba(0,0,0,0.35)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  function damask(x,y,s,col){
+    ctx.save(); ctx.translate(x,y); ctx.fillStyle=col; ctx.strokeStyle=col;
+    for(let i=0;i<4;i++){ ctx.rotate(Math.PI/2);
+      ctx.beginPath(); ctx.ellipse(0,-s*0.52,s*0.16,s*0.42,0,0,Math.PI*2); ctx.fill(); }
+    ctx.beginPath(); ctx.arc(0,0,s*0.15,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0,0,s*0.34,0,Math.PI*2); ctx.lineWidth=s*0.055; ctx.stroke();
+    ctx.restore();
+  }
+  const step=128;
+  for(let ry=0;ry<5;ry++){
+    for(let rx=0;rx<5;rx++){
+      const off=(ry%2)?step/2:0;
+      damask(rx*step+off-40, ry*step-30, 34, 'rgba(190,158,88,0.34)');
+      damask(rx*step+off+step/2-40, ry*step+step/2-30, 12, 'rgba(190,158,88,0.22)');
+    }
+  }
+  for(let i=0;i<900;i++){ ctx.fillStyle=`rgba(0,0,0,${rng()*0.14})`; ctx.fillRect(rng()*w,rng()*h,2,2); }
+},{repeat:[6,2]});
+
+const texRug = canvasTexture(1600,1024,(ctx,w,h)=>{
+  const rng=mulberry32(71);
+  ctx.fillStyle='#5e1f1c'; ctx.fillRect(0,0,w,h);
+  for(let i=0;i<5200;i++){ ctx.fillStyle=`rgba(${rng()<0.5?0:255},${rng()<0.5?0:30+rng()*40},20,${0.05+rng()*0.07})`; ctx.fillRect(rng()*w,rng()*h,3,3); }
+  // border bands
+  ctx.fillStyle='#2c1a10'; ctx.fillRect(0,0,w,86); ctx.fillRect(0,h-86,w,86); ctx.fillRect(0,0,86,h); ctx.fillRect(w-86,0,86,h);
+  ctx.strokeStyle='#c9a24b'; ctx.lineWidth=7;
+  ctx.strokeRect(44,44,w-88,h-88); ctx.strokeRect(102,102,w-204,h-204);
+  // diamond guard band
+  ctx.save(); ctx.beginPath(); ctx.rect(58,58,w-116,h-116); ctx.rect(90,90,w-180,h-180); ctx.clip('evenodd');
+  ctx.fillStyle='#401510'; ctx.fillRect(0,0,w,h);
+  for(let x=-40;x<w+40;x+=52){
+    ctx.save(); ctx.translate(x,72); ctx.rotate(Math.PI/4); ctx.fillStyle='#c9a24b'; ctx.fillRect(-9,-9,18,18); ctx.restore();
+    ctx.save(); ctx.translate(x,h-72); ctx.rotate(Math.PI/4); ctx.fillStyle='#c9a24b'; ctx.fillRect(-9,-9,18,18); ctx.restore();
+  }
+  for(let y=-40;y<h+40;y+=52){
+    ctx.save(); ctx.translate(72,y); ctx.rotate(Math.PI/4); ctx.fillStyle='#c9a24b'; ctx.fillRect(-9,-9,18,18); ctx.restore();
+    ctx.save(); ctx.translate(w-72,y); ctx.rotate(Math.PI/4); ctx.fillStyle='#c9a24b'; ctx.fillRect(-9,-9,18,18); ctx.restore();
+  }
+  ctx.restore();
+  // central medallion
+  const cx=w/2, cy=h/2;
+  function medallion(r,rot,col,lw,fill){
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(rot);
+    ctx.strokeStyle=col; ctx.lineWidth=lw;
+    ctx.beginPath(); ctx.rect(-r,-r*0.62,r*2,r*1.24); ctx.stroke();
+    if(fill){ ctx.fillStyle=fill; ctx.fill(); }
+    ctx.restore();
+  }
+  medallion(300,0,'#c9a24b',8,'rgba(70,20,16,0.85)');
+  medallion(235,Math.PI/4,'#d8b96a',6,null);
+  medallion(235,-Math.PI/4,'#8a5a28',6,null);
+  medallion(150,0,'#c9a24b',5,'rgba(48,16,12,0.9)');
+  ctx.save(); ctx.translate(cx,cy);
+  for(let i=0;i<12;i++){ ctx.rotate(Math.PI/6);
+    ctx.fillStyle = i%2 ? '#c9a24b' : '#8e3a2c';
+    ctx.beginPath(); ctx.ellipse(0,-96,26,78,0,0,Math.PI*2); ctx.fill(); }
+  ctx.beginPath(); ctx.arc(0,0,52,0,Math.PI*2); ctx.fillStyle='#d8b96a'; ctx.fill();
+  ctx.beginPath(); ctx.arc(0,0,34,0,Math.PI*2); ctx.fillStyle='#5e1f1c'; ctx.fill();
+  ctx.restore();
+  // corner fans
+  [[0,0,1,1],[w,0,-1,1],[0,h,1,-1],[w,h,-1,-1]].forEach(([x,y,sx,sy])=>{
+    ctx.save(); ctx.translate(x,y); ctx.scale(sx,sy);
+    for(let i=0;i<4;i++){ ctx.strokeStyle = i%2?'#c9a24b':'#8a5a28'; ctx.lineWidth=5;
+      ctx.beginPath(); ctx.arc(0,0,150+i*42,0,Math.PI/2); ctx.stroke(); }
+    ctx.restore();
+  });
+});
+
+const texShade = canvasTexture(256,256,(ctx,w,h)=>{
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#f6e6bd'); g.addColorStop(0.62,'#eed9a8'); g.addColorStop(0.86,'#caa25e'); g.addColorStop(1,'#8a5f2c');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  for(let x=0;x<w;x+=16){ ctx.fillStyle='rgba(120,85,40,0.28)'; ctx.fillRect(x,0,3,h); }
+  ctx.fillStyle='#7a2a22'; ctx.fillRect(0,34,w,10); ctx.fillRect(0,h-64,w,12); ctx.fillRect(0,h-18,w,10);
+  const rng=mulberry32(97);
+  for(let i=0;i<40;i++){ ctx.fillStyle='rgba(122,42,34,0.55)';
+    ctx.beginPath(); ctx.arc(20+rng()*(w-40), 130+rng()*30, 3.2, 0, Math.PI*2); ctx.fill(); }
+});
+
+const texMoon = canvasTexture(256,256,(ctx,w,h)=>{
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#202a44'); g.addColorStop(0.55,'#3d3a55'); g.addColorStop(1,'#7a5638');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  const mg=ctx.createRadialGradient(178,84,4,178,84,60);
+  mg.addColorStop(0,'#ffffff'); mg.addColorStop(0.25,'#f3ecd8'); mg.addColorStop(1,'rgba(243,236,216,0)');
+  ctx.fillStyle=mg; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#f7f2e2'; ctx.beginPath(); ctx.arc(178,84,17,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#c9c2ae'; ctx.beginPath(); ctx.arc(173,80,4.5,0,Math.PI*2); ctx.arc(184,90,3,0,Math.PI*2); ctx.fill();
+  const rng=mulberry32(131);
+  for(let i=0;i<60;i++){ ctx.fillStyle=`rgba(255,255,255,${0.3+rng()*0.7})`; ctx.fillRect(rng()*w,rng()*h*0.55,1.6,1.6); }
+  ctx.fillStyle='#11182a';
+  ctx.beginPath(); ctx.moveTo(0,205);
+  for(let x=0;x<=w;x+=16){ ctx.lineTo(x, 205 - Math.sin(x*0.045)*22 - Math.sin(x*0.013+2)*16); }
+  ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.fill();
+});
+
+const texPainting = canvasTexture(512,300,(ctx,w,h)=>{
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#1e2a45'); g.addColorStop(0.42,'#553c3f'); g.addColorStop(0.62,'#c8732e'); g.addColorStop(0.78,'#e8a653'); g.addColorStop(1,'#241812');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  const sg=ctx.createRadialGradient(w/2,h*0.66,2,w/2,h*0.66,90);
+  sg.addColorStop(0,'#fff3c8'); sg.addColorStop(1,'rgba(255,243,200,0)');
+  ctx.fillStyle=sg; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#fff6d8'; ctx.beginPath(); ctx.arc(w/2,h*0.66,15,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#141c2e';
+  ctx.beginPath(); ctx.moveTo(0,h*0.66);
+  for(let x=0;x<=w;x+=12) ctx.lineTo(x, h*0.66 - Math.sin(x*0.03+1)*14 - Math.sin(x*0.011)*10);
+  ctx.lineTo(w,h*0.78); ctx.lineTo(0,h*0.78); ctx.fill();
+  ctx.fillStyle='#0e1420'; ctx.fillRect(0,h*0.78,w,h*0.22);
+  ctx.fillStyle='rgba(232,166,83,0.55)'; ctx.fillRect(w/2-9,h*0.78,18,h*0.22);
+  const rng=mulberry32(149);
+  ctx.fillStyle='#05070d';
+  for(let i=0;i<16;i++){ const x=rng()*w, s=2+rng()*4;
+    ctx.beginPath(); ctx.moveTo(x-s,h*0.66+8); ctx.lineTo(x,h*0.66+8-s*2.4); ctx.lineTo(x+s,h*0.66+8); ctx.fill(); }
+});
+
+const texMusic = canvasTexture(256,340,(ctx,w,h)=>{
+  ctx.fillStyle='#efe4c8'; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle='#3a3025'; ctx.lineWidth=1.4;
+  const rng=mulberry32(173);
+  for(let s=0;s<4;s++){ const y0=40+s*72;
+    for(let l=0;l<5;l++){ ctx.beginPath(); ctx.moveTo(24,y0+l*9); ctx.lineTo(w-24,y0+l*9); ctx.stroke(); }
+    for(let n=0;n<9;n++){ const x=34+n*24, y=y0+rng()*46-4;
+      ctx.fillStyle='#2c241a'; ctx.beginPath(); ctx.ellipse(x,y,4.6,3.3,-0.35,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#2c241a'; ctx.lineWidth=1.6; ctx.beginPath(); ctx.moveTo(x+4,y); ctx.lineTo(x+4,y-16); ctx.stroke(); }
+  }
+  ctx.fillStyle='#2c241a'; ctx.font='italic 15px Georgia'; ctx.textAlign='center';
+  ctx.fillText('Ode to Joy', w/2, 22);
+});
+
+/* ------- wound-string spiral texture (bass) and roll paper texture are below */
+const texWound = canvasTexture(64,256,(ctx,w,h)=>{
+  const g=ctx.createLinearGradient(0,0,w,0);
+  g.addColorStop(0,'#6e4e22'); g.addColorStop(0.35,'#c8a05a'); g.addColorStop(0.55,'#8a6430'); g.addColorStop(0.8,'#d8b878'); g.addColorStop(1,'#5e421e');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle='rgba(40,24,8,0.85)'; ctx.lineWidth=2.6;
+  for(let y=-20;y<h+20;y+=7){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y+16); ctx.stroke(); }
+},{wrapT:THREE.RepeatWrapping});
+texWound.wrapS = THREE.RepeatWrapping;
+
+/* ============================================================ THE TUNE
+   "Ode to Joy" (Beethoven, public domain) — encoded as note data.
+   64 melody notes + 96 chord tones (triads on beats 1 & 3 of each bar)
+   = 160 notes. Format: [beat, midi, durationInBeats] */
+const MELODY = [
+  [0,64,1],[1,64,1],[2,65,1],[3,67,1],
+  [4,67,1],[5,65,1],[6,64,1],[7,62,1],
+  [8,60,1],[9,60,1],[10,62,1],[11,64,1],
+  [12,64,1.5],[13.5,62,0.5],[14,62,2],
+  [16,64,1],[17,64,1],[18,65,1],[19,67,1],
+  [20,67,1],[21,65,1],[22,64,1],[23,62,1],
+  [24,60,1],[25,60,1],[26,62,1],[27,64,1],
+  [28,62,1.5],[29.5,60,0.5],[30,60,2],
+  [32,62,1],[33,62,1],[34,64,1],[35,60,1],
+  [36,62,1],[37,64,0.75],[37.75,65,0.25],[38,64,1],[39,60,1],
+  [40,62,1],[41,64,0.75],[41.75,65,0.25],[42,64,1],[43,62,1],
+  [44,60,1],[45,62,1],[46,64,2],
+  [48,62,1],[49,62,1],[50,64,1],[51,60,1],
+  [52,62,1],[53,64,0.75],[53.75,65,0.25],[54,64,1],[55,60,1],
+  [56,62,1],[57,64,0.75],[57.75,65,0.25],[58,64,1],[59,62,1],
+  [60,60,1],[61,62,1],[62,60,2]
+];
+const TRIADS = { C:[48,52,55], G:[43,47,50] };
+const PROG   = ['C','C','G','G','C','G','G','C','G','C','G','G','C','G','G','C'];
+const SONG_END = 64;
+const SONG = [];
+MELODY.forEach(n=>SONG.push({ beat:n[0], midi:n[1], dur:n[2], vel:0.95 }));
+PROG.forEach((chord,bar)=>{
+  [0,2].forEach(off=>{
+    TRIADS[chord].forEach(m=>SONG.push({ beat:bar*4+off, midi:m, dur:1.7, vel:0.55 }));
+  });
+});
+SONG.sort((a,b)=>a.beat-b.beat || a.midi-b.midi);
+
+/* sustain-pedal phrases (drives the pedal lyre + damper hold) */
+const PEDAL_EVENTS = [
+  { start:0,  end:3.8  },
+  { start:12, end:16.4 },
+  { start:30, end:32.6 },
+  { start:46, end:48.6 },
+  { start:60, end:SONG_END+0.4 }
+];
+const BASE_TEMPO = 100;
+const SHOW_TEMPO = 100;
+
+/* ============================================ KEY MAP (88 keys, A0=21 … C8=108) */
+const WHITE_W = 0.0238, TOTAL_W = 52*WHITE_W;
+const BLACK_PCS = new Set([1,3,6,8,10]);
+const KEY_INFO = {};   // midi -> {x, black, whiteIndex}
+(function buildKeys(){
+  let w=0;
+  for(let m=21;m<=108;m++){
+    const pc=m%12, black=BLACK_PCS.has(pc);
+    if(!black){ KEY_INFO[m]={ x: w*WHITE_W + WHITE_W/2 - TOTAL_W/2, black:false, whiteIndex:w }; w++; }
+  }
+  let wc=0;
+  for(let m=21;m<=108;m++){
+    const pc=m%12, black=BLACK_PCS.has(pc);
+    if(!black){ wc++; continue; }
+    KEY_INFO[m]={ x: wc*WHITE_W - TOTAL_W/2, black:true, whiteIndex:-1 };
+  }
+})();
+const MIDI_LIST=[]; for(let m=21;m<=108;m++) MIDI_LIST.push(m);
+
+/* ======================================================== PIANO DIMENSIONS */
+const DIM = {
+  keybedTop:0.700, whiteH:0.022,
+  keyBackZ:0.293, keyLen:0.143,
+  hammerRailY:0.80, hammerRailZ:0.175, hammerLen:0.185,
+  restRot:0.42, strikeRot:-0.5,
+  stringY0:0.80, stringY1:1.30, stringZ:0.091,
+  damperY:1.008,
+  rollTopY:1.345, rollBotY:1.075, rollZ:0.150,
+  trackerY:1.062,
+  openTop:1.42, topPanelY:1.47, crownY:1.545,
+  cabinetFrontZ:0.29
+};
+
+const piano = new THREE.Group();
+scene.add(piano);
+
+const matWood = new THREE.MeshPhysicalMaterial({ map:texWood, color:0xffffff, roughness:0.32, metalness:0.0, clearcoat:0.65, clearcoatRoughness:0.28 });
+const matWoodDark = new THREE.MeshStandardMaterial({ map:texWoodDark, roughness:0.45, metalness:0.05 });
+const matBrass = new THREE.MeshStandardMaterial({ color:0xc9a24b, roughness:0.22, metalness:0.95, emissive:0x241803, emissiveIntensity:0.4 });
+const matBrassDark = new THREE.MeshStandardMaterial({ color:0x8a6a2f, roughness:0.35, metalness:0.9 });
+
+function box(w,h,d,mat,x,y,z,parent,castShadow){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+  m.position.set(x,y,z);
+  if(castShadow!==false){ m.castShadow=true; m.receiveShadow=true; }
+  (parent||piano).add(m); return m;
+}
+
+/* ---- cabinet shell ---- */
+const cheekW=0.155;
+box(cheekW,1.36,0.60,matWood, -(TOTAL_W/2+cheekW/2+0.008), 0.80, -0.005);  // left cheek
+box(cheekW,1.36,0.60,matWood,  (TOTAL_W/2+cheekW/2+0.008), 0.80, -0.005);  // right cheek
+box(1.46,1.34,0.045,matWood, 0,0.80,-0.268);                               // back panel
+box(1.30,0.055,0.565,matWood, 0,0.685,-0.02);                              // action floor
+box(1.24,0.55,0.56,matWood, 0,0.385,0.008);                                // modesty (doors) body
+box(1.24,0.05,0.045,matWoodDark, 0,0.662,0.283);                           // door rail
+box(1.30,0.065,0.375,matWood, 0,0.668,0.245);                              // keybed slab
+box(1.50,0.10,0.62,matWoodDark, 0,0.068,0.0);                              // plinth
+/* door fronts + knobs */
+[-0.315,0.315].forEach(x=>{
+  box(0.545,0.47,0.012,matWood, x,0.385,0.292);
+  box(0.47,0.39,0.006,matWoodDark, x,0.385,0.299);
+  box(0.40,0.32,0.004,matWood, x,0.385,0.303);
+  const knob=new THREE.Mesh(new THREE.SphereGeometry(0.014,16,12),matBrass);
+  knob.position.set(x>0? x-0.19 : x+0.19, 0.385, 0.309); knob.castShadow=true; piano.add(knob);
+});
+/* casters */
+[[-0.62,0.20],[0.62,0.20],[-0.62,-0.20],[0.62,-0.20]].forEach(([x,z])=>{
+  const c=new THREE.Mesh(new THREE.CylinderGeometry(0.032,0.032,0.03,14),matBrassDark);
+  c.rotation.z=Math.PI/2; c.position.set(x,0.028,z); piano.add(c);
+});
+/* top panel (above the removed front panel) + nameplate */
+box(1.46,0.10,0.062,matWood, 0,1.468,0.262);
+box(1.46,0.035,0.062,matWoodDark, 0,1.405,0.262);   // lower bead of top panel
+const texNameplate = canvasTexture(512,72,(ctx,w,h)=>{
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#6e5622'); g.addColorStop(0.28,'#e8cf8a'); g.addColorStop(0.5,'#f7ecc0'); g.addColorStop(0.72,'#a8843c'); g.addColorStop(1,'#54401c');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='rgba(46,32,8,0.9)'; ctx.font='small-caps 700 27px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('V O G L E R   &   S O N S', w/2, h/2+1);
+  ctx.fillStyle='#3a2c10';
+  [[14,14],[w-14,14],[14,h-14],[w-14,h-14]].forEach(([x,y])=>{ ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill(); });
+});
+const nameplate=new THREE.Mesh(new THREE.PlaneGeometry(0.60,0.075), new THREE.MeshStandardMaterial({ map:texNameplate, roughness:0.3, metalness:0.8 }));
+nameplate.position.set(0,1.468,0.294); piano.add(nameplate);
+/* crown molding */
+box(1.54,0.052,0.645,matWood, 0,1.548,0.0);
+box(1.62,0.045,0.685,matWood, 0,1.598,0.0);
+box(1.68,0.030,0.715,matWoodDark, 0,1.632,0.0);
+
+/* pinblock (angled) + cast-iron plate suggestion */
+const pinblock=box(1.18,0.17,0.045,matWoodDark, 0,1.315,0.118);
+pinblock.rotation.x=-0.30;
+const plate=box(1.18,0.60,0.02,new THREE.MeshStandardMaterial({color:0x3a2a1a,roughness:0.5,metalness:0.75}), 0,1.02,0.066);
+/* plate struts */
+[-0.40,-0.13,0.13,0.40].forEach(x=>{
+  const s=box(0.055,0.62,0.014,matBrassDark, x,1.03,0.078); s.rotation.z=x*0.28;
+});
+
+/* ---------------- strings (239 total, incl. wound bass unisons) ---------- */
+const stringMatPlain = new THREE.MeshStandardMaterial({ color:0xd7d7dd, roughness:0.24, metalness:0.95, emissive:0x0a0a0c, emissiveIntensity:0.6 });
+const stringMatWound = new THREE.MeshStandardMaterial({ map:texWound, color:0xffffff, roughness:0.34, metalness:0.88, emissive:0x140c02, emissiveIntensity:0.6 });
+const stringsByMidi = {};   // midi -> [stringObj]
+const stringObjects = [];
+(function buildStrings(){
+  const H = DIM.stringY1-DIM.stringY0;
+  const geoPlain = new THREE.PlaneGeometry(0.0023, H, 1, 18);
+  const geoWound = new THREE.PlaneGeometry(0.0040, H, 1, 18);
+  MIDI_LIST.forEach(midi=>{
+    const info=KEY_INFO[midi];
+    const wound = midi<=45;
+    const count = wound ? 2 : 3;
+    const offsets = count===2 ? [-0.0046,0.0046] : [-0.0088,0,0.0088];
+    stringsByMidi[midi]=[];
+    offsets.forEach((off,i)=>{
+      const geo = wound ? geoWound.clone() : geoPlain.clone();
+      const mat = wound ? stringMatWound : stringMatPlain;
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(info.x+off, (DIM.stringY0+DIM.stringY1)/2, DIM.stringZ + i*0.0042);
+      piano.add(mesh);
+      const s={
+        mesh, midi, amp:0, decay: 0.55 + (midi-21)/87*1.55 + hash1(midi*3+i)*0.25,
+        visFreq: 8.5 + (midi-21)*0.095 + hash1(midi*7+i*13)*2.0,
+        phase: hash1(midi*11+i*29)*Math.PI*2,
+        base: geo.attributes.position.array.slice(), wasActive:false
+      };
+      stringObjects.push(s); stringsByMidi[midi].push(s);
+    });
+  });
+})();
+/* tuning pins (top) + hitch pins (bottom) */
+(function pins(){
+  const pinGeo=new THREE.CylinderGeometry(0.0042,0.0042,0.030,8);
+  MIDI_LIST.forEach(midi=>{
+    const p=new THREE.Mesh(pinGeo,matBrass);
+    const info=KEY_INFO[midi];
+    p.position.set(info.x, 1.285, 0.128); p.rotation.x=-0.30; piano.add(p);
+    const hp=new THREE.Mesh(new THREE.CylinderGeometry(0.0032,0.0032,0.022,6),matBrassDark);
+    hp.position.set(info.x, DIM.stringY0-0.012, DIM.stringZ+0.004); hp.rotation.x=0.5; piano.add(hp);
+  });
+})();
+/* hitch rail + damper rail + hammer rail */
+box(1.18,0.045,0.045,matWoodDark, 0,DIM.stringY0-0.045,0.075);
+box(1.18,0.020,0.030,matWoodDark, 0,1.045,0.118);
+(function rails(){
+  const rail=new THREE.Mesh(new THREE.CylinderGeometry(0.011,0.011,1.18,14),matBrass);
+  rail.rotation.z=Math.PI/2; rail.position.set(0,DIM.hammerRailY,DIM.hammerRailZ); rail.castShadow=true; piano.add(rail);
+  const rail2=new THREE.Mesh(new THREE.CylinderGeometry(0.007,0.007,1.18,12),matBrassDark);
+  rail2.rotation.z=Math.PI/2; rail2.position.set(0,0.745,0.16); piano.add(rail2);
+  [-0.56,0.56].forEach(x=>{ box(0.035,0.10,0.035,matWoodDark, x,DIM.hammerRailY-0.045,DIM.hammerRailZ); });
+})();
+
+/* ------------------------------------------------------- keys (88) ------- */
+const WHITE_TOP = DIM.keybedTop + DIM.whiteH;   // 0.722
+const keyGroups = {};
+const keyMeshes = [];
+const matWhite=new THREE.MeshStandardMaterial({ color:0xf4eedd, roughness:0.27, metalness:0.0 });
+const matWhiteSide=new THREE.MeshStandardMaterial({ color:0xd9d2c0, roughness:0.4 });
+const matBlack=new THREE.MeshStandardMaterial({ color:0x17181d, roughness:0.17, metalness:0.15 });
+(function buildKeys(){
+  const whiteGeo=new THREE.BoxGeometry(WHITE_W-0.0022, DIM.whiteH, DIM.keyLen);
+  whiteGeo.translate(0,0,DIM.keyLen/2);
+  const blackGeo=new THREE.BoxGeometry(0.0138,0.016,0.092);
+  blackGeo.translate(0,0,0.046);
+  MIDI_LIST.forEach(midi=>{
+    const info=KEY_INFO[midi];
+    const g=new THREE.Group();
+    g.position.set(info.x, info.black ? WHITE_TOP : DIM.keybedTop, DIM.keyBackZ);
+    const mesh=new THREE.Mesh(info.black?blackGeo:whiteGeo, info.black?matBlack:matWhite);
+    mesh.castShadow=true; mesh.receiveShadow=true;
+    mesh.userData.midi=midi;
+    g.add(mesh); piano.add(g);
+    keyGroups[midi]=g; keyMeshes.push(mesh);
+  });
+})();
+
+/* ------------------------------ hammers (88) + dampers (88) --------------- */
+const hammerGroups={}, damperGroups={};
+const matShank=new THREE.MeshStandardMaterial({ color:0x6a4a26, roughness:0.5 });
+const matHead=new THREE.MeshStandardMaterial({ color:0xe9dec6, roughness:0.85 });
+const matHeadBass=new THREE.MeshStandardMaterial({ color:0xd6c6a2, roughness:0.9 });
+const matFeltRed=new THREE.MeshStandardMaterial({ color:0x8e2f28, roughness:0.95 });
+const matDamper=new THREE.MeshStandardMaterial({ color:0xd8c2a0, roughness:0.92 });
+const matDamperWood=new THREE.MeshStandardMaterial({ color:0x4a2c14, roughness:0.55 });
+(function buildAction(){
+  const shankGeo=new THREE.CylinderGeometry(0.0036,0.0044,DIM.hammerLen,8);
+  shankGeo.translate(0,DIM.hammerLen/2,0);
+  const headGeo=new THREE.SphereGeometry(0.0135,14,10); headGeo.scale(1.32,0.98,1.05);
+  const feltGeo=new THREE.BoxGeometry(0.020,0.006,0.015);
+  const flangeGeo=new THREE.BoxGeometry(0.013,0.020,0.008);
+  const damperHeadGeo=new THREE.BoxGeometry(0.019,0.028,0.013);
+  const damperArmGeo=new THREE.BoxGeometry(0.0055,0.0065,0.145); damperArmGeo.translate(0,0,0.0725);
+  MIDI_LIST.forEach(midi=>{
+    const x=KEY_INFO[midi].x;
+    const hg=new THREE.Group(); hg.position.set(x, DIM.hammerRailY, DIM.hammerRailZ);
+    const flange=new THREE.Mesh(flangeGeo,matDamperWood); hg.add(flange);
+    const shank=new THREE.Mesh(shankGeo,matShank); shank.castShadow=true; hg.add(shank);
+    const felt=new THREE.Mesh(feltGeo,matFeltRed); felt.position.set(0,DIM.hammerLen-0.017,0); hg.add(felt);
+    const head=new THREE.Mesh(headGeo, midi<=45?matHeadBass:matHead);
+    head.position.set(0,DIM.hammerLen,0); head.castShadow=true; hg.add(head);
+    hg.rotation.x = DIM.restRot;
+    piano.add(hg); hammerGroups[midi]=hg;
+    /* damper */
+    const dg=new THREE.Group(); dg.position.set(x, DIM.damperY, 0.080);
+    const dh=new THREE.Mesh(damperHeadGeo,matDamper); dh.castShadow=true; dg.add(dh);
+    const dw=new THREE.Mesh(new THREE.BoxGeometry(0.013,0.012,0.010),matDamperWood); dw.position.y=-0.020; dg.add(dw);
+    const arm=new THREE.Mesh(damperArmGeo,matShank); arm.position.set(0,0.014,0.004); arm.rotation.x=-0.10; dg.add(arm);
+    piano.add(dg); damperGroups[midi]=dg;
+  });
+})();
+
+/* ------------------------------------------ paper roll + tracker bar ------ */
+const sheetW=1.17, sheetBottom=DIM.rollBotY, sheetTop=DIM.rollTopY, sheetH=sheetTop-sheetBottom;
+const ROLL_VIS=0.34;
+const rollCanvas=document.createElement('canvas'); rollCanvas.width=512; rollCanvas.height=2048;
+(function paintRoll(){
+  const ctx=rollCanvas.getContext('2d'), W=512, H=2048;
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#efe2bd'); g.addColorStop(0.5,'#e9dab2'); g.addColorStop(1,'#dccf9f');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  const rng=mulberry32(211);
+  for(let i=0;i<2600;i++){ ctx.fillStyle=`rgba(120,95,50,${0.04+rng()*0.10})`; ctx.fillRect(rng()*W,rng()*H,2.2,2.2); }
+  for(let i=0;i<26;i++){ ctx.strokeStyle=`rgba(140,110,60,${0.05+rng()*0.08})`; ctx.lineWidth=1+rng()*2;
+    const x=rng()*W; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x+(rng()-0.5)*30,H); ctx.stroke(); }
+  /* margins + red rules */
+  ctx.strokeStyle='#9e3b28'; ctx.lineWidth=4;
+  [40,52,W-52,W-40].forEach(x=>{ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); });
+  /* title block */
+  ctx.fillStyle='#4a2c14'; ctx.textAlign='center';
+  ctx.font='small-caps 700 44px Georgia'; ctx.fillText('O D E   T O   J O Y', W/2, 92);
+  ctx.font='italic 21px Georgia'; ctx.fillStyle='#5e4020';
+  ctx.fillText('L. van Beethoven', W/2, 132);
+  ctx.font='16px Georgia'; ctx.fillStyle='#6e4e28';
+  ctx.fillText('—  transcribed for the Pianola  —', W/2, 164);
+  ctx.font='small-caps 700 19px Georgia'; ctx.fillStyle='#4a2c14';
+  ctx.fillText('VOGLER & SONS', W/2, H-28);
+  /* y mapping: beat 0 near the canvas BOTTOM (v=0) */
+  const yTop=H-70, yBot=215;
+  const yOf=b=> yTop - (b/SONG_END)*(yTop-yBot);
+  const xOf=midi=>{ const kx=KEY_INFO[midi].x; return (kx + TOTAL_W/2)/TOTAL_W * (W-2*70) + 70; };
+  /* beat tick holes along both edges */
+  for(let b=0;b<=SONG_END;b++){
+    const y=yOf(b);
+    [26,W-26].forEach(x=>{ ctx.fillStyle='#241a10'; ctx.beginPath(); ctx.arc(x,y,3.4,0,Math.PI*2); ctx.fill(); });
+  }
+  /* note holes — straight from the same SONG data the action plays */
+  SONG.forEach(n=>{
+    const y=yOf(n.beat), x=xOf(n.midi);
+    ctx.save(); ctx.translate(x,y);
+    ctx.fillStyle='#1d150c';
+    ctx.beginPath(); ctx.ellipse(0,0,7.6,5.1,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(90,70,40,0.9)'; ctx.lineWidth=1.1;
+    ctx.beginPath(); ctx.ellipse(0,0,7.6,5.1,0,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  });
+})();
+const rollTex=new THREE.CanvasTexture(rollCanvas);
+rollTex.encoding=THREE.sRGBEncoding; rollTex.anisotropy=maxAniso;
+rollTex.wrapT=THREE.MirroredRepeatWrapping;
+const rollMat=new THREE.MeshStandardMaterial({ map:rollTex, roughness:0.85, metalness:0.0, side:THREE.DoubleSide });
+const rollSheet=new THREE.Mesh(new THREE.PlaneGeometry(sheetW,sheetH), rollMat);
+rollSheet.position.set(0,(sheetTop+sheetBottom)/2, DIM.rollZ); rollSheet.rotation.x=-0.055;
+piano.add(rollSheet);
+/* spool group (wooden roller with brass ends) */
+const spoolGroup=new THREE.Group(); spoolGroup.position.set(0,DIM.rollTopY+0.028,DIM.rollZ-0.01);
+const spoolSpin=new THREE.Group(); spoolSpin.rotation.z=Math.PI/2; spoolGroup.add(spoolSpin);
+const spoolCore=new THREE.Mesh(new THREE.CylinderGeometry(0.047,0.047,sheetW+0.05,26),matWoodDark);
+spoolCore.castShadow=true; spoolSpin.add(spoolCore);
+[-1,1].forEach(s=>{
+  const cap=new THREE.Mesh(new THREE.CylinderGeometry(0.058,0.058,0.022,18),matBrass);
+  cap.position.y=s*(sheetW+0.05)/2; spoolSpin.add(cap);
+});
+piano.add(spoolGroup);
+/* tracker bar — brass strip with 88 holes aligned to the keys */
+const texTracker = canvasTexture(1024,72,(ctx,w,h)=>{
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#5e4a1c'); g.addColorStop(0.3,'#e8d189'); g.addColorStop(0.52,'#f8ecc0'); g.addColorStop(0.75,'#8a6a2f'); g.addColorStop(1,'#453410');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  MIDI_LIST.forEach(midi=>{
+    const x=((KEY_INFO[midi].x + TOTAL_W/2)/TOTAL_W)*w;
+    ctx.fillStyle='#191008'; ctx.beginPath(); ctx.arc(x,h/2,6.4,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(255,240,190,0.6)'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.arc(x,h/2,6.4,Math.PI*1.1,Math.PI*1.9); ctx.stroke();
+  });
+});
+const trackerBar=new THREE.Mesh(new THREE.BoxGeometry(sheetW+0.10,0.052,0.035),
+  new THREE.MeshStandardMaterial({ color:0xc9a24b, roughness:0.25, metalness:0.9 }));
+trackerBar.position.set(0,DIM.trackerY,DIM.rollZ+0.008); trackerBar.castShadow=true; piano.add(trackerBar);
+const trackerFace=new THREE.Mesh(new THREE.PlaneGeometry(sheetW+0.10,0.048),
+  new THREE.MeshStandardMaterial({ map:texTracker, roughness:0.3, metalness:0.8 }));
+trackerFace.position.set(0,DIM.trackerY,DIM.rollZ+0.0265); piano.add(trackerFace);
+
+/* ------------------------------------------------- pedal lyre + 3 pedals -- */
+const lyre=new THREE.Group(); lyre.position.set(0,0,0.02); piano.add(lyre);
+box(0.20,0.42,0.05,matWood, 0,0.335,0.045, lyre);
+box(0.30,0.045,0.09,matWoodDark, 0,0.135,0.055, lyre);
+const pedalPivotY=0.30, pedalPivotZ=0.06;
+const sustainPedal=new THREE.Group();
+sustainPedal.position.set(0.085,pedalPivotY,pedalPivotZ); lyre.add(sustainPedal);
+(function buildPedals(){
+  [['left',-0.085],['middle',0],['right',0.085]].forEach(([name,x])=>{
+    const pivot=(name==='right')?sustainPedal:new THREE.Group();
+    if(name!=='right'){ pivot.position.set(x,pedalPivotY,pedalPivotZ); lyre.add(pivot); }
+    const arm=new THREE.Mesh(new THREE.BoxGeometry(0.016,0.016,0.30),matBrassDark);
+    arm.position.set(0,-0.115,0.135); arm.rotation.x=0.42; pivot.add(arm);
+    const pad=new THREE.Mesh(new THREE.CylinderGeometry(0.021,0.024,0.010,14),matBrass);
+    pad.position.set(0,-0.235,0.262); pivot.add(pad);
+    pivot.rotation.x=0.02;
+    if(name==='right') sustainPedal.userData.built=true;
+  });
+})();
+
+/* ==================================================== PARLOUR DRESSING ==== */
+const room=new THREE.Group(); scene.add(room);
+/* floor + rug */
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(13,10), new THREE.MeshStandardMaterial({ map:texFloor, roughness:0.42, metalness:0.05 }));
+floor.rotation.x=-Math.PI/2; floor.position.y=0; floor.receiveShadow=true; room.add(floor);
+const rug=new THREE.Mesh(new THREE.PlaneGeometry(5.4,3.35), new THREE.MeshStandardMaterial({ map:texRug, roughness:0.96 }));
+rug.rotation.x=-Math.PI/2; rug.position.set(0,0.006,1.05); rug.receiveShadow=true; room.add(rug);
+/* rug fringe (instanced) */
+(function fringe(){
+  const geo=new THREE.BoxGeometry(0.016,0.004,0.085);
+  const mat=new THREE.MeshStandardMaterial({ color:0xd8cba4, roughness:0.95 });
+  const inst=new THREE.InstancedMesh(geo,mat,96);
+  const m=new THREE.Matrix4();
+  for(let i=0;i<48;i++){
+    const x=-2.6+ (i+0.5)*(5.2/48);
+    m.setPosition(x,0.006,1.05-1.755); inst.setMatrixAt(i,m);
+    m.setPosition(x,0.006,1.05+1.755); inst.setMatrixAt(48+i,m);
+  }
+  room.add(inst);
+})();
+/* walls */
+const matWall=new THREE.MeshStandardMaterial({ map:texWallpaper, roughness:0.92 });
+const backWall=new THREE.Mesh(new THREE.PlaneGeometry(13,3.6),matWall);
+backWall.position.set(0,1.8,-1.35); backWall.receiveShadow=true; room.add(backWall);
+const leftWall=new THREE.Mesh(new THREE.PlaneGeometry(10,3.6),matWall);
+leftWall.rotation.y=Math.PI/2; leftWall.position.set(-4.6,1.8,2.0); leftWall.receiveShadow=true; room.add(leftWall);
+const rightWall=new THREE.Mesh(new THREE.PlaneGeometry(10,3.6),matWall);
+rightWall.rotation.y=-Math.PI/2; rightWall.position.set(4.6,1.8,2.0); rightWall.receiveShadow=true; room.add(rightWall);
+const ceil=new THREE.Mesh(new THREE.PlaneGeometry(13,10), new THREE.MeshStandardMaterial({ color:0x241c15, roughness:0.95 }));
+ceil.rotation.x=Math.PI/2; ceil.position.y=3.35; room.add(ceil);
+/* wainscot + baseboards */
+const wainsMat=new THREE.MeshStandardMaterial({ map:texWoodDark, roughness:0.5 });
+[[0,0.5,-1.345, 13,1.0,0.06],[-4.595,0.5,2.0, 0.06,1.0,10],[4.595,0.5,2.0, 0.06,1.0,10]].forEach(([x,y,z,w,h,d])=>{
+  const p=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),wainsMat); p.position.set(x,y,z); p.receiveShadow=true; room.add(p);
+});
+[[0,0.045,-1.31, 13,0.09,0.05],[-4.56,0.045,2.0, 0.05,0.09,10],[4.56,0.045,2.0, 0.05,0.09,10]].forEach(([x,y,z,w,h,d])=>{
+  const p=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), wainsMat); p.position.set(x,y,z); room.add(p);
+});
+/* cornice */
+[[0,3.28,-1.33, 13,0.16,0.10],[-4.58,3.28,2.0, 0.10,0.16,10],[4.58,3.28,2.0, 0.10,0.16,10]].forEach(([x,y,z,w,h,d])=>{
+  const p=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), wainsMat); room.add(p);
+});
+
+/* window with moonlit panes (left wall) + velvet curtains */
+const winGroup=new THREE.Group(); winGroup.position.set(-4.55,1.85,0.55); winGroup.rotation.y=Math.PI/2; room.add(winGroup);
+(function buildWindow(){
+  const frameMat=new THREE.MeshStandardMaterial({ map:texWoodDark, roughness:0.5 });
+  const fw=1.5, fh=2.0;
+  const pane=new THREE.Mesh(new THREE.PlaneGeometry(fw-0.16,fh-0.16),
+    new THREE.MeshStandardMaterial({ map:texMoon, emissive:0xcfe0ff, emissiveMap:texMoon, emissiveIntensity:1.35, color:0x223044 }));
+  pane.position.z=0.012; winGroup.add(pane);
+  const bar=0.075, dep=0.09;
+  [[0,fh/2-bar/2,fw,bar],[0,-fh/2+bar/2,fw,bar],[-fw/2+bar/2,0,bar,fh],[fw/2-bar/2,0,bar,fh],
+   [0,0,fw-0.1,0.05],[0,0,0.05,fh-0.1]].forEach(([x,y,w,h])=>{
+    const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,dep),frameMat); b.position.set(x,y,0.03); b.castShadow=true; winGroup.add(b);
+  });
+  const sill=new THREE.Mesh(new THREE.BoxGeometry(fw+0.24,0.07,0.16),frameMat); sill.position.set(0,-fh/2-0.035,0.06); winGroup.add(sill);
+})();
+const curtainMat=new THREE.MeshStandardMaterial({ color:0x6e2430, roughness:0.85, side:THREE.DoubleSide });
+[[-0.95],[0.95]].forEach(([off])=>{
+  const geo=new THREE.PlaneGeometry(0.62,2.35,18,1);
+  const pos=geo.attributes.position;
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i);
+    pos.setZ(i, Math.sin((x/0.62+0.5)*Math.PI*4.2)*0.075);
+  }
+  geo.computeVertexNormals();
+  const cur=new THREE.Mesh(geo,curtainMat);
+  cur.position.set(-4.48,1.78,0.55+off); cur.rotation.y=Math.PI/2; cur.castShadow=true; room.add(cur);
+  const tie=new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.055,0.65,10), curtainMat);
+  tie.rotation.x=Math.PI/2; tie.position.set(-4.44,1.15,0.55+off); room.add(tie);
+});
+
+/* painting above the piano + gilded frame */
+(function painting(){
+  const frame=new THREE.Mesh(new THREE.BoxGeometry(1.74,1.02,0.055),
+    new THREE.MeshStandardMaterial({ color:0xb98c3e, roughness:0.3, metalness:0.85, emissive:0x1c1204, emissiveIntensity:0.5 }));
+  frame.position.set(0,2.42,-1.315); room.add(frame);
+  const art=new THREE.Mesh(new THREE.PlaneGeometry(1.56,0.86),
+    new THREE.MeshStandardMaterial({ map:texPainting, roughness:0.7 }));
+  art.position.set(0,2.42,-1.283); room.add(art);
+})();
+/* candle sconces flanking the painting */
+const flameMeshes=[];
+[[-1.42],[1.42]].forEach(([x])=>{
+  const g=new THREE.Group(); g.position.set(x,2.42,-1.29); room.add(g);
+  const arm=new THREE.Mesh(new THREE.TorusGeometry(0.075,0.012,8,16,Math.PI*0.9),matBrass);
+  arm.rotation.z=Math.PI*0.55; arm.position.set(0,-0.06,0.06); g.add(arm);
+  const cup=new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.018,0.03,12),matBrass); cup.position.set(0,0.015,0.135); g.add(cup);
+  const candle=new THREE.Mesh(new THREE.CylinderGeometry(0.017,0.017,0.10,12), new THREE.MeshStandardMaterial({ color:0xeee4cc, roughness:0.6 }));
+  candle.position.set(0,0.075,0.135); g.add(candle);
+  const flame=new THREE.Mesh(new THREE.ConeGeometry(0.011,0.038,8),
+    new THREE.MeshStandardMaterial({ color:0xffc46a, emissive:0xffa03c, emissiveIntensity:2.6 }));
+  flame.position.set(0,0.145,0.135); g.add(flame); flameMeshes.push(flame);
+});
+
+/* side table + fringed lamp (right of the piano) */
+const tableGroup=new THREE.Group(); tableGroup.position.set(2.42,0,1.05); scene.add(tableGroup);
+(function table(){
+  const top=new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.045,28),matWood);
+  top.position.y=0.755; top.castShadow=true; top.receiveShadow=true; tableGroup.add(top);
+  const rim=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.018,10,32),matWoodDark);
+  rim.rotation.x=Math.PI/2; rim.position.y=0.755; tableGroup.add(rim);
+  const pts=[]; [[0.055,0],[0.075,0.03],[0.038,0.10],[0.030,0.30],[0.055,0.44],[0.075,0.56],[0.045,0.66],[0.10,0.71],[0.0,0.715]].forEach(([r,y])=>pts.push(new THREE.Vector2(r,y)));
+  const ped=new THREE.Mesh(new THREE.LatheGeometry(pts,20),matWood);
+  ped.position.y=0.02; ped.castShadow=true; tableGroup.add(ped);
+  /* stacked books + spare rolls on the table */
+  const b1=new THREE.Mesh(new THREE.BoxGeometry(0.20,0.035,0.15), new THREE.MeshStandardMaterial({ color:0x40252a, roughness:0.6 }));
+  b1.position.set(-0.17,0.795,0.10); b1.rotation.y=0.4; b1.castShadow=true; tableGroup.add(b1);
+  const b2=new THREE.Mesh(new THREE.BoxGeometry(0.17,0.03,0.125), new THREE.MeshStandardMaterial({ color:0x27343a, roughness:0.6 }));
+  b2.position.set(-0.17,0.828,0.10); b2.rotation.y=0.15; tableGroup.add(b2);
+  [[0.10,0.10,0.5],[0.16,0.06,1.1]].forEach(([x,z,r])=>{
+    const roll=new THREE.Mesh(new THREE.CylinderGeometry(0.021,0.021,0.30,12), new THREE.MeshStandardMaterial({ color:0xe6d6a8, roughness:0.85 }));
+    roll.rotation.z=Math.PI/2; roll.rotation.y=r; roll.position.set(x,0.800,z); roll.castShadow=true; tableGroup.add(roll);
+  });
+})();
+/* the fringed lamp */
+const lampGroup=new THREE.Group(); lampGroup.position.set(0.05,0.778,-0.06); tableGroup.add(lampGroup);
+let lampLight, shadeMat, bulbMat;
+(function lamp(){
+  const pts=[]; [[0.001,0],[0.085,0],[0.095,0.012],[0.045,0.03],[0.028,0.06],[0.020,0.22],[0.030,0.26],[0.016,0.30]].forEach(([r,y])=>pts.push(new THREE.Vector2(r,y)));
+  const base=new THREE.Mesh(new THREE.LatheGeometry(pts,22),matBrass);
+  base.castShadow=true; lampGroup.add(base);
+  const stem=new THREE.Mesh(new THREE.CylinderGeometry(0.011,0.011,0.17,10),matBrass);
+  stem.position.y=0.37; lampGroup.add(stem);
+  const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.036,16,12),
+    new THREE.MeshStandardMaterial({ color:0xfff2d0, emissive:0xffd98a, emissiveIntensity:2.4 }));
+  bulb.position.y=0.475; lampGroup.add(bulb); bulbMat=bulb.material;
+  shadeMat=new THREE.MeshStandardMaterial({ map:texShade, emissive:0xffc87a, emissiveMap:texShade, emissiveIntensity:0.85,
+    roughness:0.9, side:THREE.DoubleSide, transparent:true, opacity:0.98 });
+  const shade=new THREE.Mesh(new THREE.CylinderGeometry(0.135,0.205,0.21,26,1,true),shadeMat);
+  shade.position.y=0.50; lampGroup.add(shade);
+  const shadeTop=new THREE.Mesh(new THREE.CircleGeometry(0.135,26), new THREE.MeshStandardMaterial({ color:0xcaa25e, roughness:0.9 }));
+  shadeTop.rotation.x=-Math.PI/2; shadeTop.position.y=0.605; lampGroup.add(shadeTop);
+  /* fringe — 44 hanging strands with bead tips */
+  const strandGeo=new THREE.CylinderGeometry(0.0022,0.0022,0.055,5);
+  const beadGeo=new THREE.SphereGeometry(0.0042,6,5);
+  const strandMat=new THREE.MeshStandardMaterial({ color:0xd8b96a, emissive:0x5e4310, emissiveIntensity:0.8, roughness:0.6 });
+  for(let i=0;i<44;i++){
+    const a=i/44*Math.PI*2, r=0.205;
+    const s=new THREE.Mesh(strandGeo,strandMat);
+    s.position.set(Math.cos(a)*r, 0.365, Math.sin(a)*r); lampGroup.add(s);
+    const b=new THREE.Mesh(beadGeo,strandMat);
+    b.position.set(Math.cos(a)*r, 0.333, Math.sin(a)*r); lampGroup.add(b);
+  }
+  lampLight=new THREE.PointLight(0xffb868, 1.55, 7.5, 2);
+  lampLight.position.y=0.46; lampLight.castShadow=true;
+  lampLight.shadow.mapSize.set(1024,1024); lampLight.shadow.bias=-0.004;
+  lampGroup.add(lampLight);
+  const cone=new THREE.SpotLight(0xffc37a, 0.85, 3.2, 0.62, 0.75, 1.6);
+  cone.position.y=0.44; cone.target.position.set(0,-0.78,0);
+  lampGroup.add(cone); lampGroup.add(cone.target);
+})();
+
+/* piano bench (the parlour bench, with sheet music & spare rolls) */
+const bench=new THREE.Group(); bench.position.set(0,0,1.62); scene.add(bench);
+(function buildBench(){
+  const cushion=new THREE.Mesh(new THREE.BoxGeometry(1.02,0.085,0.36),
+    new THREE.MeshStandardMaterial({ color:0x71242e, roughness:0.75 }));
+  cushion.position.y=0.485; cushion.castShadow=true; cushion.receiveShadow=true; bench.add(cushion);
+  for(let i=-2;i<=2;i++){
+    const btn=new THREE.Mesh(new THREE.SphereGeometry(0.011,8,6), new THREE.MeshStandardMaterial({ color:0x4a1219, roughness:0.6 }));
+    btn.position.set(i*0.21,0.529,0); btn.scale.y=0.45; bench.add(btn);
+  }
+  const frame=new THREE.Mesh(new THREE.BoxGeometry(1.06,0.055,0.40),matWood); frame.position.y=0.415; bench.add(frame);
+  [[-0.46,-0.15],[0.46,-0.15],[-0.46,0.15],[0.46,0.15]].forEach(([x,z])=>{
+    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.036,0.40,10),matWoodDark);
+    leg.position.set(x,0.195,z); leg.castShadow=true; bench.add(leg);
+  });
+  /* open sheet-music book */
+  const bookG=new THREE.Group(); bookG.position.set(0.16,0.535,-0.02); bookG.rotation.y=-0.3; bench.add(bookG);
+  const pageMat=new THREE.MeshStandardMaterial({ map:texMusic, roughness:0.9, side:THREE.DoubleSide });
+  [-1,1].forEach(s=>{
+    const p=new THREE.Mesh(new THREE.PlaneGeometry(0.155,0.21),pageMat);
+    p.position.set(s*0.077,0.012,0); p.rotation.x=-Math.PI/2+0.10; p.rotation.z=s*0.045; bookG.add(p);
+  });
+  const spine=new THREE.Mesh(new THREE.BoxGeometry(0.024,0.012,0.20),matWoodDark); spine.position.y=0.004; bookG.add(spine);
+})();
+
+/* metronome on top of the piano — swings with the beat */
+const metronome=new THREE.Group(); metronome.position.set(0.52,1.648,0.02); metronome.rotation.y=-0.35; piano.add(metronome);
+const metPendulum=new THREE.Group();
+(function buildMetronome(){
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.021,0.052,0.20,4,1),
+    new THREE.MeshStandardMaterial({ map:texWoodDark, roughness:0.35 }));
+  body.rotation.y=Math.PI/4; body.scale.z=0.78; body.position.y=0.10; body.castShadow=true; metronome.add(body);
+  const face=new THREE.Mesh(new THREE.PlaneGeometry(0.052,0.155),
+    new THREE.MeshStandardMaterial({ color:0xd8cba4, roughness:0.8 }));
+  face.position.set(0,0.10,0.0375); face.rotation.x=-0.10; metronome.add(face);
+  metPendulum.position.set(0,0.185,0.043);
+  const rod=new THREE.Mesh(new THREE.BoxGeometry(0.005,0.135,0.003),matBrass);
+  rod.position.y=-0.062; metPendulum.add(rod);
+  const weight=new THREE.Mesh(new THREE.BoxGeometry(0.020,0.024,0.005),matBrass);
+  weight.position.y=-0.045; metPendulum.add(weight);
+  metronome.add(metPendulum);
+})();
+/* small vase with dried flowers, left side of the top */
+(function vase(){
+  const pts=[]; [[0.001,0],[0.045,0.005],[0.058,0.035],[0.030,0.075],[0.022,0.11],[0.034,0.135],[0.030,0.145]].forEach(([r,y])=>pts.push(new THREE.Vector2(r,y)));
+  const v=new THREE.Mesh(new THREE.LatheGeometry(pts,18), new THREE.MeshStandardMaterial({ color:0x39505a, roughness:0.25, metalness:0.2 }));
+  v.position.set(-0.52,1.648,0.03); v.castShadow=true; piano.add(v);
+  const stemMat=new THREE.MeshStandardMaterial({ color:0x5a4a22, roughness:0.9 });
+  [[-0.02,0.16,0.02,0.35],[0.025,0.15,-0.01,-0.3],[0.0,0.17,0.03,0.1]].forEach(([x,h,z,tilt],i)=>{
+    const st=new THREE.Mesh(new THREE.CylinderGeometry(0.0022,0.0022,h,5),stemMat);
+    st.position.set(-0.52+x,1.648+0.13+h/2,0.03+z); st.rotation.z=tilt; piano.add(st);
+    const bud=new THREE.Mesh(new THREE.ConeGeometry(0.012,0.035,7),
+      new THREE.MeshStandardMaterial({ color:[0xa8552e,0xb8943a,0x7a3a3a][i], roughness:0.8 }));
+    bud.position.set(-0.52+x+Math.sin(tilt)*h*0.9, 1.648+0.13+h, 0.03+z); piano.add(bud);
+  });
+})();
+
+/* ============================================================ LIGHTING ==== */
+scene.add(new THREE.HemisphereLight(0xffe3c0, 0x191310, 0.42));
+scene.add(new THREE.AmbientLight(0x2c211a, 0.55));
+const moonLight=new THREE.DirectionalLight(0xa9c2e8, 0.72);
+moonLight.position.set(-3.4, 2.6, 0.9);
+moonLight.target.position.set(0.4, 0.8, 0.1);
+moonLight.castShadow=true;
+moonLight.shadow.mapSize.set(4096,4096);
+moonLight.shadow.camera.left=-2.6; moonLight.shadow.camera.right=2.6;
+moonLight.shadow.camera.top=2.8;   moonLight.shadow.camera.bottom=-0.6;
+moonLight.shadow.camera.near=0.5;  moonLight.shadow.camera.far=9;
+moonLight.shadow.bias=-0.0006; moonLight.shadow.radius=5;
+scene.add(moonLight); scene.add(moonLight.target);
+const fillWarm=new THREE.DirectionalLight(0xffd2a0, 0.30);
+fillWarm.position.set(2.8, 3.4, 3.6); scene.add(fillWarm);
+const sconceLightL=new THREE.PointLight(0xffb35c, 0.62, 2.6, 2); sconceLightL.position.set(-1.42,2.44,-1.12); scene.add(sconceLightL);
+const sconceLightR=new THREE.PointLight(0xffb35c, 0.62, 2.6, 2); sconceLightR.position.set(1.42,2.44,-1.12); scene.add(sconceLightR);
+
+/* dust motes drifting in the lamplight (deterministic, time-driven) */
+const DUST_N=70;
+const dustGeo=new THREE.BufferGeometry();
+const dustBase=new Float32Array(DUST_N*3), dustPhase=new Float32Array(DUST_N);
+(function initDust(){
+  const rng=mulberry32(307);
+  for(let i=0;i<DUST_N;i++){
+    dustBase[i*3]=2.0+rng()*0.9; dustBase[i*3+1]=0.6+rng()*1.3; dustBase[i*3+2]=0.6+rng()*0.9;
+    dustPhase[i]=rng()*Math.PI*2;
+  }
+  dustGeo.setAttribute('position', new THREE.BufferAttribute(dustBase.slice(),3));
+})();
+const dust=new THREE.Points(dustGeo, new THREE.PointsMaterial({ color:0xffd9a0, size:0.011, transparent:true, opacity:0.55,
+  blending:THREE.AdditiveBlending, depthWrite:false }));
+scene.add(dust);
+
+/* ============================================================ AUDIO ======= */
+let audioCtx=null, masterGain=null, reverbSend=null, noiseBuffer=null;
+let audioMuted=false;
+function ensureAudio(){
+  if(audioCtx) return;
+  const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
+  audioCtx=new AC();
+  masterGain=audioCtx.createGain(); masterGain.gain.value=0.62;
+  const comp=audioCtx.createDynamicsCompressor();
+  comp.threshold.value=-18; comp.knee.value=22; comp.ratio.value=8;
+  masterGain.connect(comp); comp.connect(audioCtx.destination);
+  /* generated room impulse — a small Victorian drawing room */
+  const irLen=1.7, sr=audioCtx.sampleRate, ir=audioCtx.createBuffer(2, irLen*sr, sr);
+  for(let ch=0;ch<2;ch++){ const d=ir.getChannelData(ch);
+    for(let i=0;i<d.length;i++){ d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,3.1)*0.85; } }
+  const conv=audioCtx.createConvolver(); conv.buffer=ir;
+  const wet=audioCtx.createGain(); wet.gain.value=0.24;
+  masterGain.connect(conv); conv.connect(wet); wet.connect(comp);
+  /* hammer-noise buffer */
+  noiseBuffer=audioCtx.createBuffer(1, 0.09*sr, sr);
+  const nd=noiseBuffer.getChannelData(0);
+  for(let i=0;i<nd.length;i++) nd[i]=(Math.random()*2-1)*Math.pow(1-i/nd.length,2.6);
+}
+function playTone(midi, durBeats, vel){
+  if(!audioCtx || audioMuted) return;
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  const f=mtof(midi), t0=audioCtx.currentTime+0.004;
+  const ringDur=clamp(durBeats*(60/BASE_TEMPO)*2.6, 1.1, 9);
+  const inharm=0.00028;
+  const partials=[[1,1.0,1.0],[2,0.55,0.66],[3,0.34,0.47],[4,0.20,0.34],[5,0.13,0.25],[6,0.085,0.18],[7,0.05,0.13],[8,0.03,0.095]];
+  partials.forEach(([ratio,gain,decayMul])=>{
+    const osc=audioCtx.createOscillator();
+    osc.type='sine';
+    osc.frequency.value=f*ratio*Math.sqrt(1+inharm*ratio*ratio);
+    const g=audioCtx.createGain();
+    const peak=gain*vel*0.42/(1+ratio*0.22);
+    g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(peak,0.0002), t0+0.007+ratio*0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+ringDur*decayMul+0.05);
+    osc.connect(g); g.connect(masterGain);
+    osc.start(t0); osc.stop(t0+ringDur*decayMul+0.1);
+  });
+  /* hammer thump */
+  const src=audioCtx.createBufferSource(); src.buffer=noiseBuffer;
+  const bp=audioCtx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=clamp(f*2.2,300,5200); bp.Q.value=1.1;
+  const ng=audioCtx.createGain();
+  ng.gain.setValueAtTime(vel*0.5,t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001,t0+0.085);
+  src.connect(bp); bp.connect(ng); ng.connect(masterGain);
+  src.start(t0);
+}
+
+/* ======================================================= SIMULATION ======= */
+const TICK=1/120;
+const sim={
+  time:0, beat:0, leadIn:0, pedal:0,
+  kp:new Float32Array(128),   // key press 0..1
+  dl:new Float32Array(128),   // damper lift 0..1
+  ha:new Float32Array(128).fill(-1), // hammer anim seconds since strike
+  roll:0
+};
+const keyHold=new Uint8Array(128);
+const manualUntil=new Float32Array(128);
+const activeNotes=[];
+let noteIdx=0, notesPlayed=0;
+
+window.__bench = { notesPlayed:0, activeKeys:0, tempo:BASE_TEMPO, rollPosition:0 };
+
+let tempo=BASE_TEMPO;
+let playing=false;
+
+function resetSim(leadIn){
+  sim.time=0; sim.beat=0; sim.leadIn=leadIn||0; sim.pedal=0; sim.roll=0;
+  sim.kp.fill(0); sim.dl.fill(0); sim.ha.fill(-1);
+  keyHold.fill(0); manualUntil.fill(0);
+  activeNotes.length=0;
+  noteIdx=0; notesPlayed=0;
+  stringObjects.forEach(s=>{ s.amp=0; s.wasActive=false; });
+  applySimToScene();
+}
+function strikeNote(midi, vel){
+  notesPlayed++;
+  sim.ha[midi]=0;
+  const list=stringsByMidi[midi];
+  if(list) list.forEach((s,i)=>{ s.amp=vel*(0.72+0.38*hash1(midi*17.3+i*5.1+sim.beat*3.7)); s.wasActive=true; });
+  playTone(midi, 1.5, vel);
+}
+function fireNote(n){
+  keyHold[n.midi]++;
+  activeNotes.push({ midi:n.midi, endBeat:n.beat+n.dur });
+  strikeNote(n.midi, n.vel);
+}
+function releaseNote(an){
+  keyHold[an.midi]=Math.max(0,keyHold[an.midi]-1);
+  if(sim.pedal<0.45){ /* damper chokes the string */
+    const list=stringsByMidi[an.midi];
+    if(list) list.forEach(s=>{ s.amp*=0.10; });
+  }
+}
+function strikeCurve(a){
+  if(a<0) return 0;
+  if(a<0.085){ const x=a/0.085; return 1-Math.pow(1-x,3); }
+  if(a<0.170){ const x=(a-0.085)/0.085; return 1-x*1.22; }
+  if(a<0.310){ const x=(a-0.170)/0.140; const u=1-x; return -0.22*u*u; }
+  return 0;
+}
+function advance(dt, bpm){
+  sim.time+=dt;
+  if(sim.time>sim.leadIn) sim.beat += dt*bpm/60;
+  const b=sim.beat;
+  while(noteIdx<SONG.length && SONG[noteIdx].beat<=b){ fireNote(SONG[noteIdx]); noteIdx++; }
+  for(let i=activeNotes.length-1;i>=0;i--){
+    if(b>=activeNotes[i].endBeat){ const an=activeNotes[i]; activeNotes.splice(i,1); releaseNote(an); }
+  }
+  /* sustain pedal target from authored events */
+  let pt=0;
+  for(let i=0;i<PEDAL_EVENTS.length;i++){ const e=PEDAL_EVENTS[i]; if(b>=e.start && b<=e.end){ pt=1; break; } }
+  sim.pedal += (pt-sim.pedal)*Math.min(1,dt*5.5);
+  /* keys + dampers + hammers */
+  for(let m=21;m<=108;m++){
+    const target=(keyHold[m]>0 || manualUntil[m]>sim.time) ? 1 : 0;
+    sim.kp[m]+= (target-sim.kp[m])*Math.min(1,dt*17);
+    const dTarget=(sim.kp[m]>0.10 || sim.pedal>0.45) ? 1 : 0;
+    sim.dl[m]+= (dTarget-sim.dl[m])*Math.min(1,dt*10.5);
+    if(sim.ha[m]>=0){ sim.ha[m]+=dt; if(sim.ha[m]>0.6) sim.ha[m]=-1; }
+  }
+  /* string decay */
+  for(let i=0;i<stringObjects.length;i++){
+    const s=stringObjects[i];
+    if(s.amp>0){ s.amp*=Math.exp(-s.decay*dt); if(s.amp<0.0035) s.amp=0; }
+  }
+  sim.roll=clamp(b/SONG_END, 0, 1);
+}
+function manualStrike(midi){
+  ensureAudio();
+  manualUntil[midi]=sim.time+0.62;
+  strikeNote(midi, 0.9);
+}
+
+/* ================================================= VISUAL SYNC ============ */
+const tmpColorVals={};
+function applySimToScene(){
+  for(let m=21;m<=108;m++){
+    const info=KEY_INFO[m];
+    keyGroups[m].rotation.x = sim.kp[m]*(info.black?0.046:0.054);
+    damperGroups[m].position.y = DIM.damperY + sim.dl[m]*0.034;
+    damperGroups[m].rotation.x = -sim.dl[m]*0.16;
+    hammerGroups[m].rotation.x = DIM.restRot + (DIM.strikeRot-DIM.restRot)*strikeCurve(sim.ha[m]);
+  }
+  /* strings — vertex displacement only while sounding */
+  for(let i=0;i<stringObjects.length;i++){
+    const s=stringObjects[i], pos=s.mesh.geometry.attributes.position;
+    if(s.amp>0.0035){
+      const arr=pos.array, base=s.base;
+      for(let v=0;v<pos.count;v++){
+        const iy=v; // plane is 1 wide x 18 high segments => 2 cols x 19 rows
+        const row=Math.floor(iy/2), u=row/18;
+        const env=Math.sin(Math.PI*u);
+        arr[v*3+2] = env*s.amp*0.0062*Math.sin(sim.time*s.visFreq*Math.PI*2 + s.phase + u*1.7)
+                   + env*s.amp*0.0026*Math.sin(sim.time*s.visFreq*2.13*Math.PI*2 + s.phase*1.7);
+        arr[v*3]   = base[v*3] + env*s.amp*0.0012*Math.sin(sim.time*s.visFreq*1.31*Math.PI*2 + s.phase*2.3);
+      }
+      pos.needsUpdate=true;
+      s.wasActive=true;
+    } else if(s.wasActive){
+      const arr=pos.array, base=s.base;
+      for(let v=0;v<arr.length;v++) arr[v]=base[v];
+      pos.needsUpdate=true; s.wasActive=false;
+    }
+  }
+  /* roll + spool */
+  rollTex.offset.y = sim.roll*(1-ROLL_VIS);
+  spoolSpin.rotation.y = sim.roll*Math.PI*2*3.1;
+  /* sustain pedal */
+  sustainPedal.rotation.x = 0.02 + sim.pedal*0.155;
+  /* metronome follows the beat */
+  metPendulum.rotation.z = Math.sin(sim.beat*Math.PI)*0.30;
+  /* lamp + flame flicker (time-driven → deterministic) */
+  const fl = 1 + 0.055*Math.sin(sim.time*11.3) + 0.035*Math.sin(sim.time*23.7+1.7) + 0.02*Math.sin(sim.time*5.1+0.6);
+  if(lampLight) lampLight.intensity = 1.55*fl;
+  if(shadeMat) shadeMat.emissiveIntensity = 0.85*fl;
+  if(bulbMat)  bulbMat.emissiveIntensity  = 2.4*fl;
+  sconceLightL.intensity = 0.62*(1+0.12*Math.sin(sim.time*13.1+0.4));
+  sconceLightR.intensity = 0.62*(1+0.12*Math.sin(sim.time*12.3+2.1));
+  flameMeshes[0].scale.y = 1+0.18*Math.sin(sim.time*15.7);
+  flameMeshes[1].scale.y = 1+0.18*Math.sin(sim.time*14.2+1.3);
+  /* dust drift */
+  const dp=dustGeo.attributes.position;
+  for(let i=0;i<DUST_N;i++){
+    dp.array[i*3+1] = dustBase[i*3+1] + Math.sin(sim.time*0.35 + dustPhase[i])*0.09;
+    dp.array[i*3]   = dustBase[i*3]   + Math.sin(sim.time*0.22 + dustPhase[i]*1.7)*0.07;
+    dp.array[i*3+2] = dustBase[i*3+2] + Math.cos(sim.time*0.28 + dustPhase[i]*2.3)*0.07;
+  }
+  dp.needsUpdate=true;
+}
+function renderFrame(){
+  if(composer) composer.render(); else renderer.render(scene,camera);
+}
+function updateBench(effTempo){
+  let active=0; for(let m=21;m<=108;m++) if(sim.kp[m]>0.5) active++;
+  window.__bench.notesPlayed = notesPlayed;
+  window.__bench.activeKeys  = active;
+  window.__bench.tempo       = Math.round(effTempo);
+  window.__bench.rollPosition= sim.roll;
+  document.getElementById('statNotes').textContent = notesPlayed;
+  document.getElementById('statKeys').textContent  = active;
+  document.getElementById('statRoll').textContent  = Math.round(sim.roll*100)+'%';
+  document.getElementById('tempoVal').textContent  = '♩ = '+Math.round(effTempo);
+}
+
+/* ====================================================== SHOWCASE ========= */
+const SHOW = { duration:12.0, leadIn:0.9 };
+const camPath=[
+  { t:0.00, pos:[4.15,2.15,5.35], tgt:[0,1.05,0.0]  },
+  { t:2.30, pos:[1.75,1.55,3.15], tgt:[0,1.00,0.12] },
+  { t:4.15, pos:[0.62,1.10,1.42], tgt:[0,0.90,0.10] },
+  { t:6.15, pos:[-0.42,1.18,1.06],tgt:[-0.30,1.05,0.09] },
+  { t:7.95, pos:[0.02,1.16,0.72], tgt:[0,1.13,0.15] },
+  { t:9.55, pos:[1.28,1.02,1.80], tgt:[0,0.72,0.18] },
+  { t:12.0, pos:[2.65,1.62,3.45], tgt:[0,1.00,0.05] }
+];
+function camAt(t){
+  let i=0;
+  while(i<camPath.length-2 && t>camPath[i+1].t) i++;
+  const a=camPath[i], b=camPath[i+1];
+  const u=smooth(clamp((t-a.t)/(b.t-a.t),0,1));
+  camera.position.set(lerp(a.pos[0],b.pos[0],u), lerp(a.pos[1],b.pos[1],u), lerp(a.pos[2],b.pos[2],u));
+  const tgt=new THREE.Vector3(lerp(a.tgt[0],b.tgt[0],u), lerp(a.tgt[1],b.tgt[1],u), lerp(a.tgt[2],b.tgt[2],u));
+  camera.lookAt(tgt);
+  controls.target.copy(tgt);
+}
+let showcaseActive=false;
+function seek(t){
+  t=clamp(t,0,SHOW.duration);
+  const wasMuted=audioMuted; audioMuted=true;
+  if(audioCtx && audioCtx.state==='running') audioCtx.suspend();
+  resetSim(SHOW.leadIn);
+  const steps=Math.floor(t/TICK + 1e-6);
+  for(let i=0;i<steps;i++) advance(TICK, SHOW_TEMPO);
+  applySimToScene();
+  camAt(t);
+  renderFrame();
+  updateBench(SHOW_TEMPO);
+  if(!wasMuted && !showcaseActive){ audioMuted=false; if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }
+}
+window.showcase={ duration:SHOW.duration, seek:seek };
+
+/* ====================================================== MAIN LOOP ========= */
+let last=performance.now(), acc=0;
+let recording=false, recordStart=0, mediaRecorder=null, recordedChunks=[];
+const recordBtn=document.getElementById('recordBtn');
+const playBtn=document.getElementById('playBtn');
+const stateVal=document.getElementById('stateVal');
+const showcaseBadge=document.getElementById('showcaseBadge');
+
+function setPlaying(p){
+  playing=p;
+  playBtn.textContent = playing ? '❚❚' : '▶';
+  stateVal.textContent = playing ? 'Playing' : 'Paused';
+}
+function togglePlay(){
+  ensureAudio(); if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+  if(sim.beat>=SONG_END+2 && activeNotes.length===0){ resetSim(0); }
+  setPlaying(!playing);
+}
+playBtn.addEventListener('click', togglePlay);
+
+recordBtn.addEventListener('click', ()=>{
+  if(recording) return;
+  ensureAudio();
+  recording=true; showcaseActive=true; audioMuted=true;
+  if(audioCtx && audioCtx.state==='running') audioCtx.suspend();
+  recordBtn.classList.add('recording'); recordBtn.innerHTML='⏺&nbsp;&nbsp;Recording…';
+  showcaseBadge.style.display='block';
+  setPlaying(false);
+  recordedChunks=[];
+  const stream=renderer.domElement.captureStream(60);
+  let mime='video/webm;codecs=vp9';
+  if(!MediaRecorder.isTypeSupported(mime)) mime='video/webm';
+  try{ mediaRecorder=new MediaRecorder(stream,{ mimeType:mime, videoBitsPerSecond:14000000 }); }
+  catch(e){ mediaRecorder=new MediaRecorder(stream); }
+  mediaRecorder.ondataavailable=e=>{ if(e.data && e.data.size) recordedChunks.push(e.data); };
+  mediaRecorder.onstop=()=>{
+    const blob=new Blob(recordedChunks,{ type:'video/webm' });
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='mechanical-pianoforte-showcase.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    recording=false; showcaseActive=false; audioMuted=false;
+    if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+    recordBtn.classList.remove('recording'); recordBtn.innerHTML='⏺&nbsp;&nbsp;Record Video';
+    showcaseBadge.style.display='none';
+    stateVal.textContent='Ready';
+  };
+  mediaRecorder.start(250);
+  recordStart=performance.now();
+});
+
+function animate(){
+  requestAnimationFrame(animate);
+  const now=performance.now();
+  let dt=(now-last)/1000; last=now;
+  dt=Math.min(dt,0.05);
+
+  if(recording){
+    const t=(now-recordStart)/1000;
+    if(t>=SHOW.duration){
+      seek(SHOW.duration);
+      if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop();
+      return;
+    }
+    seek(t);
+    return;
+  }
+
+  controls.update();
+  if(playing){
+    acc+=dt;
+    let guard=0;
+    while(acc>=TICK && guard++<40){ advance(TICK, tempo); acc-=TICK; }
+    if(sim.beat>=SONG_END+2 && activeNotes.length===0) setPlaying(false), stateVal.textContent='Finished';
+  }
+  applySimToScene();
+  renderFrame();
+  updateBench(tempo);
+}
+
+/* ====================================================== INPUT ============= */
+window.addEventListener('keydown', e=>{
+  if(e.code==='Space'){ e.preventDefault(); if(!recording) togglePlay(); return; }
+  if(e.code==='ArrowUp'){ e.preventDefault(); tempo=clamp(tempo+6,40,208); updateBench(tempo); return; }
+  if(e.code==='ArrowDown'){ e.preventDefault(); tempo=clamp(tempo-6,40,208); updateBench(tempo); return; }
+  const map={ KeyA:60, KeyW:61, KeyS:62, KeyE:63, KeyD:64, KeyF:65, KeyT:66, KeyG:67, KeyY:68, KeyH:69, KeyU:70, KeyJ:71, KeyK:72 };
+  const midi=map[e.code];
+  if(midi!==undefined && !e.repeat && !recording){ manualStrike(midi); }
+});
+
+const raycaster=new THREE.Raycaster();
+const pointer=new THREE.Vector2();
+let downX=0, downY=0;
+renderer.domElement.addEventListener('pointerdown', e=>{ downX=e.clientX; downY=e.clientY; });
+renderer.domElement.addEventListener('pointerup', e=>{
+  if(recording) return;
+  if(Math.hypot(e.clientX-downX, e.clientY-downY) > 6) return;  // it was a drag
+  pointer.x=(e.clientX/window.innerWidth)*2-1;
+  pointer.y=-(e.clientY/window.innerHeight)*2+1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits=raycaster.intersectObjects(keyMeshes,false);
+  if(hits.length){ const midi=hits[0].object.userData.midi; if(midi) manualStrike(midi); }
+});
+
+window.addEventListener('resize', ()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if(composer) composer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ====================================================== START ============= */
+resetSim(0);
+setPlaying(false);
+stateVal.textContent='Ready';
+updateBench(tempo);
+animate();
+</script>
+</body>
+</html>
